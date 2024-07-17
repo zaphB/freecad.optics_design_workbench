@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 # DO NOT CHANGE'
-version = '0.1.1'
+version = '0.1.1+hec1362e'
 
 # read the contents of readme
 import os
@@ -10,7 +10,7 @@ with open(os.path.join(os.path.dirname(__file__), 'README.md'),
   description = f.read()
 
 setup(
-  name='freecad.exp_optics_workbench',
+  name='freecad.optics_design_workbench',
   version=version,
   url='https://github.com/zaphB/optics_design_workbench',
   long_description=description,
