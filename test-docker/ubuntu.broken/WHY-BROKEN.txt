@@ -1,0 +1,1 @@
+There is currently no standard FreeCAD package for Ubuntu. Snapd, appimage etc. do not work well in docker.

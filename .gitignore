@@ -1,0 +1,17 @@
+fcstd
+build
+*.FCBak
+__pycache__
+*.ipynb_checkpoints*
+*.pkl
+*.pdf
+*.png
+*.jpg
+*.tar.gz
+*.egg-info
+*.nbconvert*
+*.opticalSimulationResults
+*.md5
+test-docker/**/container-home
+*.AppImage
+

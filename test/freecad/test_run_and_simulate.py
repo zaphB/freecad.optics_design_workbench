@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+
+from numpy import *
+from matplotlib.pyplot import *
+import scipy.optimize
+
+import unittest
+import subprocess
+import time
+import os
+import pickle
+import shutil
+
+FREECAD_BINARY = os.environ.get('TEST_FREECAD_BINARY', '/usr/bin/FreeCAD')
+
+
+class TestRunNotebooks(unittest.TestCase):
+  def _cleanResults(self, filename):
+    baseDir = os.path.abspath(os.path.dirname(__file__))
+    # remove results folder
+    try:
+      shutil.rmtree(baseDir+'/'+filename+'.opticalSimulationResults')
+    except:
+      pass
+
+  def _runFile(self, filename, cleanup=True, cancelAfter=None, timeout=300):
+    baseDir = os.path.abspath(os.path.dirname(__file__))
+
+    # remove results folder
+    if cleanup:
+      try:
+        shutil.rmtree(baseDir+'/'+filename+'.opticalSimulationResults')
+      except:
+        pass
+
+    # run true simulation
+    p = subprocess.Popen([FREECAD_BINARY, filename+'.FCStd', '-c'],
+                          cwd=baseDir, 
+                          #stdout=subprocess.DEVNULL,
+                          #stderr=subprocess.DEVNULL,
+                          stdin=subprocess.PIPE)
+
+    try:
+      # assemble python code to run
+      pythonLines = []
+      pythonLines.append('from freecad.exp_optics_workbench import simulation')
+      if cancelAfter is not None:
+        pythonLines.append(f'import threading')
+        pythonLines.append(f'import time')
+        pythonLines.append(f'def delayedCancel():')
+        pythonLines.append(f'  time.sleep({cancelAfter})')
+        pythonLines.append(f'  simulation.runAction("stop")')
+        pythonLines.append(f'')
+        pythonLines.append(f'thr = threading.Thread(target=delayedCancel)')
+        pythonLines.append(f'thr.start()')
+
+      pythonLines.append('simulation.runAction("true")')
+
+      p.stdin.write((
+        '\r\n'.join(pythonLines)+'\r\nexit()\r\n'
+      ).encode('utf8'))
+      p.stdin.flush()
+
+      # wait until process finishes
+      t0 = time.time()
+      while p.poll() is None:
+        if time.time()-t0 > timeout:
+          raise RuntimeError('freecad test process did not exit on time')
+        time.sleep(.5)
+    finally:
+      p.stdin.close()
+      time.sleep(1)
+      if p.poll is None:
+        p.kill()
+        time.sleep(2)
+        if p.poll is None:
+          raise RuntimeError('failed killing freecad test process')
+
+    # return paths
+    return baseDir, filename
+
+
+  def test_runPlaygroundExample(self):
+    # make sure FCStd file runs and yields expected number of hits (> 100 rays * 10 iterations)
+    baseDir, filename = self._runFile('playground')
+    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/lightsource-PointSource/hitObject-OpticalAbsorberGroup'
+    results = []
+    for f in os.listdir(resultsPath):
+      with open(resultsPath+'/'+f, 'rb') as _f:
+        results.append(pickle.load(_f))
+    totalHits = sum([len(r['points']) for r in results])
+    self.assertGreater(totalHits, 999)
+    self._cleanResults(filename)
+
+
+  def test_runWithoutSettingsObject(self):
+    # make sure FCStd file without any settings can also run
+    _, filename = self._runFile('nosettings')
+    self._cleanResults(filename)
+
+  def test_runAndCancelGaussianExample(self):
+    t0 = time.time()
+    baseDir, filename = self._runFile('gaussian', cancelAfter=5)
+
+
+
+  def test_runGaussianExample(self):
+    baseDir, filename = self._runFile('gaussian')
+
+    # make sure results exist
+    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/lightsource-PointSource/hitObject-OpticalAbsorberGroup'
+    results = []
+    for f in os.listdir(resultsPath):
+      with open(resultsPath+'/'+f, 'rb') as _f:
+        results.append(pickle.load(_f))
+    totalHits = sum([len(r['points']) for r in results])
+    self.assertGreater(totalHits, 1e6)
+
+    # make sure result is perfect gaussian
+    points = concatenate([r['points'] for r in results])[:,:2]
+    figure()
+    Hs, Xs, Ys, _ = hist2d(points[:,0], points[:,1], bins=30)
+    savefig(baseDir+'/'+filename+'-histogram.png')
+    close()
+
+    gaussian = lambda X, A, s, x0: A*exp(-(X-x0)**2/s**2)
+    distance = 100
+    thetaSigma = sqrt(1e-4)
+
+    for i, (X, Y) in enumerate(
+                [ ( (Xs[1:]+Xs[:-1])/2, Hs[argmin(abs(Ys)),:] ),
+                  ( (Ys[1:]+Ys[:-1])/2, Hs[:,argmin(abs(Xs))] ) ]):
+      figure()
+      plot(X, Y, 'x')
+      popt, _ = scipy.optimize.curve_fit(gaussian, X, Y, p0=(max(Y), 10, 0))
+      Xlin = linspace(min(X), max(X), 300)
+      Ylin = gaussian(Xlin, *popt)
+      plot(Xlin, Ylin)
+      plot(Xlin, gaussian(Xlin, max(Y), distance*thetaSigma, 0))
+      savefig(baseDir+'/'+filename+f'-crosssection-fit-{"xy"[i]}.pdf')
+      close()
+      #print(f'found sigma: {abs(popt[1]):.3f}, theoretical sigma: {distance*thetaSigma:.3f}')
+      foundSigma = abs(popt[1])
+      theoreticalSigma = distance*thetaSigma
+      self.assertLess(abs(foundSigma-theoreticalSigma)/foundSigma, 5e-2)
+
+    # cleanup
+    self._cleanResults(filename)
+
+    
+  def test_runThreeTimes(self):
+    # make sure working dir is clean
+    baseDir, filename = self._runFile('playground')
+    self._cleanResults(filename)
+
+    # run simulation three times without cleaning
+    for _ in range(3):
+      baseDir, filename = self._runFile('playground', cleanup=False)
+    
+    # expect three result folders
+    results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
+    self.assertEqual(len(results), 3)
+
+    # cleanup
+    self._cleanResults(filename)
+
+
+  def test_runAndCancelThreeTimes(self):
+    # make sure working dir is clean
+    baseDir, filename = self._runFile('gaussian', cancelAfter=3)
+    self._cleanResults(filename)
+
+    # run simulation three times without cleaning and cancel after a few seconds
+    for _ in range(3):
+      baseDir, filename = self._runFile('playground', cleanup=False, cancelAfter=3)
+    
+    # expect three result folders
+    results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
+    self.assertEqual(len(results), 3)
+
+    # cleanup
+    self._cleanResults(filename)
+
+
+
+if __name__ == '__main__':
+  unittest.main()

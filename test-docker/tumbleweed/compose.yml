@@ -1,0 +1,17 @@
+services:
+  freecad:
+    build: .
+    container_name: freecad-tumbleweed
+    network_mode: host
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - DISPLAY=$DISPLAY
+    volumes:
+      - $HOME/.Xauthority:/home/testuser/.Xauthority:ro
+      - ./container-home:/home/testuser
+
+    # bash command with tty=true ensures that container does not exit immediately
+    tty: true
+    command: bash
+    restart: unless-stopped
