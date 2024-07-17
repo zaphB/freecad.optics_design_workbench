@@ -34,7 +34,7 @@ fi
 
 # check if repo is clean or need commit
 git update-index --refresh >/dev/null 2>&1
-if ! git diff-index --quiet HEAD --; then
+if "$(git diff-index HEAD | grep -v version.py)" != ""; then
   echo "uncommitted changes exist in repo, commit your changes before building a release"
   exit 1
 fi
