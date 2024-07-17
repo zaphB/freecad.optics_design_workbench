@@ -1,5 +1,6 @@
 fcstd
 build
+dist
 *.FCBak
 __pycache__
 *.ipynb_checkpoints*
@@ -14,4 +15,5 @@ __pycache__
 *.md5
 test-docker/**/container-home
 *.AppImage
+
 
