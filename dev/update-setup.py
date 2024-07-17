@@ -85,9 +85,20 @@ for line in open(path.join(cwd, 'setup.py')):
     replaceNextLine = True
 open(path.join(cwd, 'setup.py'), 'w').write(''.join(result))
 
-# update version.py
-with open(path.join(cwd, 'freecad/optics_design_workbench/version.py'), 'w') as f:
-  f.write(f"__version__ = '{version}'\n")
+# replace in __init__.py
+result = []
+replaceNextLine = False
+for line in open(path.join(cwd, 'freecad/exp_optics_workbench/__init__.py')):
+  if replaceNextLine:
+    result.append(f"__version__ = '{version}'\n")
+    replaceNextLine = False
+  else:
+    result.append(line)
+
+  if line.strip().startswith('# DO NOT CHANGE'):
+    replaceNextLine = True
+open(path.join(cwd, 'freecad/exp_optics_workbench/__init__.py'), 'w').write(''.join(result))
 
 # print version to stdout
 print(version)
+

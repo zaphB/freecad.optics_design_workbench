@@ -1,13 +1,13 @@
 # Optics Design Workbench
 
-This workbench was inspired by the (OpticsWorkbench)[https://github.com/chbergmann/OpticsWorkbench] by Christian Bergmann.
+This workbench was inspired by the [OpticsWorkbench](https://github.com/chbergmann/OpticsWorkbench).
 
 
 ## Installation
 
+To use the workbench as a python module run: `pip3 install freecad.optics_design_workbench`. Because running `import freecad.something` causes a Segfault in many python interpreters, the workbench installs both the `freecad.optics_design_workbench` module and an identical `freecad_.optics_design_workbench` module. The latter can always be safely imported to use the parts of the module that are not related to FreeCAD.
 
-
-Because running `import freecad.something` causes a Segfault in many python interpreters, the workbench installs both the `freecad.optics_design_workbench` module and an identical `freecad_.optics_design_workbench` module. The latter can always be safely imported to use the parts of the module that are not related to FreeCAD.
+To make the workbench available in FreeCAD use the workbench 
 
 
 ## Parallel computing
