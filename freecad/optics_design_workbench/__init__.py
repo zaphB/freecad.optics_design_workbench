@@ -1,7 +1,6 @@
 import functools
 from .version import __version__
 
-
 def _ensureSystemPackagesCanBeImported():
   '''
   make sure system packages are importable (this is important if e.g. AppImage versions are used)
