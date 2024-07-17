@@ -19,6 +19,11 @@ To do simulations with actual performance gain, background processes running hea
 
 ## Module structure
 
+### `distributions`
+
+Classes and functions for (random) point generation following given distributions.
+
+
 ### `freecad_elements` 
 
 Contains all definitions for behavior/objects/commands living in the FreeCAD projects. The ray-tracing code is in here, because it is inherently connected to the FreeCAD geometry engine.
