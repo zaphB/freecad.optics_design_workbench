@@ -1,11 +1,9 @@
 from setuptools import setup, find_packages
-
-# DO NOT CHANGE: this line will be replaced by dev-update-setup.py
-version = '0.0.8'
+from . import version
 
 setup(
   name='freecad.exp_optics_workbench',
-  version=version,
+  version=version.__version__,
   url='https://github.com/zaphB/...',
   author='Philipp Bredol',
   author_email='philipp.bredol@rwth-aachen.de',

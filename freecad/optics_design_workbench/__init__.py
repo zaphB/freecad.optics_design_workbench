@@ -1,7 +1,6 @@
 import functools
+from .version import __version__
 
-# DO NOT CHANGE: this line will be replaced by dev-update-setup.py
-__version__ = '0.0.8'
 
 def _ensureSystemPackagesCanBeImported():
   '''
@@ -46,7 +45,8 @@ def versionInfo():
   except ImportError:
     pass
   from . import detect_pyside
-  print(f'executable path:  {os.path.realpath(sys.executable)}')
-  print(f'python version:   {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')
-  print(f'freecad version:  {".".join(FreeCAD.Version()[:3]) if FreeCAD else "?"}')
-  print(f'Qt major version: {detect_pyside._detectQtMajorVersion() or "?"}')
+  print(f'executable path:   {os.path.realpath(sys.executable)}')
+  print(f'python version:    {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')
+  print(f'freecad version:   {".".join(FreeCAD.Version()[:3]) if FreeCAD else "?"}')
+  print(f'Qt major version:  {detect_pyside._detectQtMajorVersion() or "?"}')
+  print(f'workbench version: {__version__}')
