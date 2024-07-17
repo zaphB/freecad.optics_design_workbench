@@ -1,9 +1,12 @@
 from setuptools import setup, find_packages
-import version
+
+import os
+with open(os.path.dirname(__file__)+'/freecad/optics_design_workbench/version.py') as f:
+  version = f.read().split('=')[-1].split('+')[0].strip(' \'"')
 
 setup(
   name='freecad.exp_optics_workbench',
-  version=version.__version__,
+  version=version,
   url='https://github.com/zaphB/...',
   author='Philipp Bredol',
   author_email='philipp.bredol@rwth-aachen.de',
