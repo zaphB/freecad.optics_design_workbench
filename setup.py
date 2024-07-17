@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 import os
 with open(os.path.dirname(__file__)+'/freecad/optics_design_workbench/version.py') as f:
-  version = f.read().split('=')[-1].split('+')[0].strip(' \'"')
+  version = f.read().split('=')[-1].strip().strip('\'"')
 
 setup(
   name='freecad.exp_optics_workbench',

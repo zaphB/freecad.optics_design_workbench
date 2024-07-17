@@ -20,8 +20,7 @@ newVer="$major.$minor.$(expr $micro + 1)"
 
 # replace version number in setup.py
 echo && echo "-> version was $major.$minor.$micro, setting new version $newVer..." \
-  && perl -pe 's/version\s*=\s*'\''\d+\.\d+\.\d+'\''/version = '"'$newVer'"'/g' setup.py >/tmp/setup.py \
-  && mv /tmp/setup.py setup.py \
+  && echo "__version__ = '$newVer'" > freecad/optics_design_workbench/version.py \
   && echo "done." \
   && pip install . \
   && pip install -e . \
