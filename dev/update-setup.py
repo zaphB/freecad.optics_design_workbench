@@ -87,7 +87,7 @@ open(path.join(cwd, 'setup.py'), 'w').write(''.join(result))
 
 # update version.py
 with open(path.join(cwd, 'freecad/optics_design_workbench/version.py'), 'w') as f:
-  f.write{f"__version__ = '{version}'\n")
+  f.write(f"__version__ = '{version}'\n")
 
 # print version to stdout
 print(version)

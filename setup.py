@@ -1,5 +1,5 @@
 from setuptools import setup, find_packages
-from . import version
+import version
 
 setup(
   name='freecad.exp_optics_workbench',
