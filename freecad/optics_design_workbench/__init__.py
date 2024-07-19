@@ -48,6 +48,7 @@ def versionInfo():
   '''
   import sys
   import os
+  FreeCAD = None
   try:
     import FreeCAD
   except ImportError:

@@ -4,6 +4,8 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 __doc__ = '''
 
+Each submodule here corresponds to an external window.
+
 '''.strip()
 
 

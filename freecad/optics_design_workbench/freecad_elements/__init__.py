@@ -4,6 +4,8 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 __doc__ = '''
 
+Definitions for behavior/objects/commands living in the FreeCAD projects. The ray-tracing code is in here, because it is inherently connected to the FreeCAD geometry engine.
+
 '''.strip()
 
 
@@ -15,6 +17,9 @@ from .common import *
 from . import find
 
 def loadAll():
+  '''
+  Load all FreeCAD components defined in the submodules and add them to the interface.
+  '''
   loadPointSource()
   loadGroups()
   loadSimulationSettings()

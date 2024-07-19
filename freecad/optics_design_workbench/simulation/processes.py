@@ -4,6 +4,12 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 __doc__ = '''
 
+Classes/functions handling the simulation process(es).
+
+The GUI simulations all take place in the GUI main thread using the "QApplication.processEvents"-hack to keep the GUI responsive. The extra implementation work for a proper QRunnable/QThreadpool solution is not worth it (yet), because it would only improve the responsiveness, not the actual simulation performance because of python's GIL.
+
+To do simulations with actual performance gain, background processes running headless FreeCADCmd are launched in the background.
+
 '''.strip()
 
 

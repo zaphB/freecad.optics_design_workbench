@@ -4,9 +4,9 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 __doc__ = '''
 
+Classes and functions for (random) point generation following given distributions.
+
 '''.strip()
-
-
 
 
 from .points_by_density import *
