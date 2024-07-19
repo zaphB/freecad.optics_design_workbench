@@ -3,6 +3,11 @@
 This workbench was inspired by the [OpticsWorkbench](https://github.com/chbergmann/OpticsWorkbench) and aims to extend its functionality towards design and optimization of optical assemblies.
 
 
+## Prerequisites
+
+FreeCAD version >=0.21, python packages numpy, scipy, matplotlib, atomicwrites. A jupyter notebook installation is recommended.
+
+
 ## Installation
 
 To make the Optics Design Workbench available in FreeCAD, install it using FreeCAD's built in add-on manager.

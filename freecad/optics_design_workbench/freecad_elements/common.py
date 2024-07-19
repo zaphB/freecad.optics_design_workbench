@@ -32,7 +32,7 @@ def processGuiEvents():
     QApplication.processEvents()
     _LAST_PROCESS_EVENTS_CALL = time.time()
 
-    # check wether simulation was canceled and raise SimulationCanceled if so
+    # check whether simulation was canceled and raise SimulationCanceled if so
     if simulation.isCanceled():
       raise SimulationCanceled()
 

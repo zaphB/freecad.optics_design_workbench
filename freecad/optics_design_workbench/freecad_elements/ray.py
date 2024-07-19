@@ -85,7 +85,7 @@ class Ray():
       # add yield latest segment
       yield (prevPoint, currentPoint), prevPower, prevMedium
 
-      # calculate normal and wether ray is facing the object from the outside or the inside
+      # calculate normal and whether ray is facing the object from the outside or the inside
       normal, isEntering = self.getNormal(face, prevPoint, currentPoint)
 
       # run onHit handler of object that caused intersection
@@ -123,7 +123,7 @@ class Ray():
                                       currentDirection/currentDirection.Length,
                                       n1, n2, normal)
 
-        # if ray traveled in exit direction and not total reflection occured,
+        # if ray traveled in exit direction and not total reflection occurred,
         # set current medium to vacuum
         if not isEntering and not isTotalReflection:
           currentMedium = None

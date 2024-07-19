@@ -113,4 +113,3 @@ for replaceStart, replaceLine in [('<version>', f'  <version>{version}</version>
 
 # print version to stdout
 print(version)
-

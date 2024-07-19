@@ -3,7 +3,7 @@
 # change dir to parent dir of this script's location
 cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-# download appimage if not existsing or old
+# download appimage if not existing or old
 N_DAYS_AGO=/tmp/n-days-ago.$$
 touch -d "5 days ago" $N_DAYS_AGO
 if [[ ! -e freecad-weekly-appimage.AppImage ]] || [[ "freecad-weekly-appimage.AppImage" -ot "$N_DAYS_AGO" ]]; then

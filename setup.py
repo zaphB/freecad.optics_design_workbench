@@ -1,6 +1,6 @@
 from setuptools import setup, find_packages
 
-# DO NOT CHANGE'
+# DO NOT CHANGE
 version = '0.1.3'
 
 # read the contents of readme

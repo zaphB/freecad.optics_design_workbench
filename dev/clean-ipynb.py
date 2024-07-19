@@ -42,9 +42,9 @@ Notes
 =====
 
 This script is inspired by http://stackoverflow.com/a/20844506/827862, but
-lets the user specify whether the ouptut of a notebook should be suppressed
+lets the user specify whether the output of a notebook should be suppressed
 in the notebook's metadata, only works for python 3 and allows to specify
-a filename as arguement, to clean a notbook file in place.
+a filename as argument, to clean a notebook file in place.
 """
 
 import sys
