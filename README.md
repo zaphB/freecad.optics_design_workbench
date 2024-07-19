@@ -14,7 +14,7 @@ pip3 install freecad.optics_design_workbench
 ```
 
 
-## Manual/Offline installation without add-on manager
+## Manual/offline installation without add-on manager
 
 Head to the releases section and download the zipped source or your version of choice. Extract this zip to the Mod folder of your FreeCAD installation. The folder structure should be such that folder containing the `init_gui.py` is the third order subfolder below the Mod directory:
 
