@@ -2,6 +2,8 @@
 
 This workbench was inspired by the [OpticsWorkbench](https://github.com/chbergmann/OpticsWorkbench) and aims to extend its functionality towards design and optimization of optical assemblies.
 
+Feel free to ask any question in the [forum thread](https://forum.freecad.org/viewtopic.php?t=89264).
+
 
 ## Prerequisites
 
