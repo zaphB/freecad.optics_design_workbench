@@ -36,7 +36,7 @@ class OpticsDesignWorkbench(Gui.Workbench):
         # place settings node
         'Insert settings',
 
-        # place/start/stop simulation in the varous modes
+        # place/start/stop simulation in the various modes
         'Clear all rays',
         'Place ray fans',
         'Single pseudo random',

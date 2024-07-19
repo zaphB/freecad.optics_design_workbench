@@ -5,6 +5,10 @@
   <version>0.1.3</version>
   <date>2024-07-19</date>
   <maintainer email="philipp.bredol@rwth-aachen.de">Philipp Bredol</maintainer>
+  <depend>numpy</depend>
+  <depend>scipy</depend>
+  <depend>matplotlib</depend>
+  <depend>atomicwrites</depend>
   <license file="LICENSE">LGPL-3.0-or-later</license>
   <url type="repository" branch="master">https://github.com/zaphB/freecad.optics_design_workbench</url>
   <url type="readme">https://github.com/zaphB/freecad.optics_design_workbench/blob/master/README.md</url>

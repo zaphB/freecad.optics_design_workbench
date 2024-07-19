@@ -28,7 +28,7 @@ def _generatePointsCandidate(density, scale, N, initialize, refineIters, startFr
   # by density with distances scaled by scale
   X, Y = density
   
-  # extend X and Y for easier interploation
+  # extend X and Y for easier interpolation
   dX1, dX2 = X[1]-X[0], X[-1]-X[-2]
   Xs = max(X)-min(X)
   lPad = arange(X[0]-dX1, X[0]-10*Xs, -dX1)[::-1]
