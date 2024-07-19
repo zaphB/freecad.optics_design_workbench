@@ -12,7 +12,7 @@ with open(os.path.join(os.path.dirname(__file__), 'README.md'),
 setup(
   name='freecad.optics_design_workbench',
   version=version,
-  url='https://github.com/zaphB/optics_design_workbench',
+  url='https://github.com/zaphB/freecad.optics_design_workbench',
   long_description=description,
   long_description_content_type='text/markdown',
   author='Philipp Bredol',
