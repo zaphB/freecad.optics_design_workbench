@@ -52,12 +52,11 @@ in your regular python shell of choice.
 If any of the displayed versions and paths do not look as you would expected, first find out what's going wrong there. Due to the different discovery methods of a regular python shell and FreeCAD's python shell, it can easily happen that the two find completely different, possibly outdated, installations of the workbench.
 
 
-
 ## How to get started in FreeCAD
 
 Select the Optics Design Workbench, place light sources, turn your existing objects into mirrors, lenses, absorbers and detectors and run Monte-Carlo simulations.
 
-The workbench is still in an early stage, examples will appear here as soon as standard workflows for data analysis are established. 
+The workbench is still in an early stage, examples will appear here as soon as standard workflows for simulations and data analysis are implemented. The current idea is to have FreeCAD and a jupyter notebook open side-by-side. Simulations are configured and run in FreeCAD; the data analysis is done in the jupyter notebook.
 
 
 ## How to get started in python
@@ -70,4 +69,4 @@ import freecad_.optics_design_workbench
 
 and try to find your way along usings python's help(...) and dir(...). The underscore in `freecad_` is important only as long as freecad segfaults when being imported from a regular python shell. If you can `import freecad` without a segfault on your system feel free to skip the underscore. 
 
-The workbench is still in an early stage, examples will appear here as soon as standard workflows for data analysis are established. 
+The workbench is still in an early stage, examples will appear here as soon as standard workflows for simulations and data analysis are implemented. The current idea is to have FreeCAD and a jupyter notebook open side-by-side. Simulations are configured and run in FreeCAD; the data analysis is done in the jupyter notebook.

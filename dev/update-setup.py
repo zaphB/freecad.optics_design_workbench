@@ -88,7 +88,7 @@ open(path.join(cwd, 'setup.py'), 'w').write(''.join(result))
 # replace in __init__.py
 result = []
 replaceNextLine = False
-for line in open(path.join(cwd, 'freecad/exp_optics_workbench/__init__.py')):
+for line in open(path.join(cwd, 'freecad/optics_design_workbench/__init__.py')):
   if replaceNextLine:
     result.append(f"__version__ = '{version}'\n")
     replaceNextLine = False
@@ -97,7 +97,19 @@ for line in open(path.join(cwd, 'freecad/exp_optics_workbench/__init__.py')):
 
   if line.strip().startswith('# DO NOT CHANGE'):
     replaceNextLine = True
-open(path.join(cwd, 'freecad/exp_optics_workbench/__init__.py'), 'w').write(''.join(result))
+open(path.join(cwd, 'freecad/optics_design_workbench/__init__.py'), 'w').write(''.join(result))
+
+# replace date and version in package.xml
+import time
+for replaceStart, replaceLine in [('<version>', f'  <version>{version}</version>'),
+                                  ('<date>', time.strftime('  <date>%Y-%m-%d</date>'))]:
+  result = []
+  for line in open(path.join(cwd, 'package.xml')):
+    if line.strip().startswith(replaceStart):
+      result.append(replaceLine+'\n')
+    else:
+      result.append(line)
+  open(path.join(cwd, 'package.xml'), 'w').write(''.join(result))
 
 # print version to stdout
 print(version)

@@ -12,9 +12,9 @@ import FreeCAD as App
 
 from . import freecad_elements
 
-class ExpOpticsWorkbench(Gui.Workbench):
-  MenuText = 'Exp Optics'
-  ToolTip = 'Ray Tracing Simulation'
+class OpticsDesignWorkbench(Gui.Workbench):
+  MenuText = 'Optics Design Workbench'
+  ToolTip = 'ray tracing Monte-Carlo simulation'
   Icon = freecad_elements.find.iconpath('workbench')
   toolbox = []
 
@@ -65,5 +65,5 @@ class ExpOpticsWorkbench(Gui.Workbench):
       # this function is mandatory if this is a full python workbench
       return 'Gui::PythonWorkbench'
 
-Gui.addWorkbench(ExpOpticsWorkbench())
+Gui.addWorkbench(OpticsDesignWorkbench())
 freecad_elements.loadAll()

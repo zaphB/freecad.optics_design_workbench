@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 # DO NOT CHANGE'
-version = '0.1.1'
+version = '0.1.2+h24fcecb'
 
 # read the contents of readme
 import os
