@@ -2,9 +2,6 @@ __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
-
-'''.strip()
 
 
 import functools
@@ -19,7 +16,7 @@ def _ensureSystemPackagesCanBeImported():
   ma, mi = sys.version_info.major, sys.version_info.minor
   found = False
 
-  # look for site-packages folder matching current python version, or one of the three previous 
+  # look for site-packages folder matching current python version, or one of the three previous
   # minor python versions or the next minor python version
   for d in (0, -1, -2, -3, 1):
 
@@ -30,7 +27,8 @@ def _ensureSystemPackagesCanBeImported():
       candidate = os.path.realpath(f'/usr/lib{w}/python{ma}.{mi+d}/site-packages')
       if os.path.exists(candidate):
         if candidate not in sys.path:
-          print(f'freecad.optics_design_workbench: python package path {candidate} exists on filesystem but not in sys.path, appending to sys.path...')
+          print(f'freecad.optics_design_workbench: python package path {candidate} exists on '
+                f'filesystem but not in sys.path, appending to sys.path...')
           sys.path.append(candidate)
 
         # stop looking after the first candidate existed on disk
@@ -57,5 +55,5 @@ def versionInfo():
   print(f'executable path:   {os.path.realpath(sys.executable)}')
   print(f'python version:    {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')
   print(f'freecad version:   {".".join(FreeCAD.Version()[:3]) if FreeCAD else "?"}')
-  print(f'Qt major version:  {detect_pyside._detectQtMajorVersion() or "?"}')
+  print(f'Qt major version:  {detect_pyside.detectQtMajorVersion() or "?"}')
   print(f'workbench version: {__version__}')

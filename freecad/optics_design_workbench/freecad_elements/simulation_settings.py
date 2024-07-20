@@ -2,9 +2,6 @@ __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
-
-'''.strip()
 
 
 try:
@@ -146,18 +143,7 @@ class MakeSimulationSettings:
               'continuous simulation modes to speed up the calculation.'),
         ('WorkerProcessCount', 'num_cpus', 'String', 'Number of worker processes to spawn for continuous '
               f'simulation modes. Should be an integer or "num_cpus" ( = {simulation.cpuCount()} ).'),
-      ]),
-      ('OpticalSimulationPreviewSettings', [
-        ('MaxIntersectionsPreviewRays', 10, 'Float', 'Limit maximum intersections for preview rays. '
-             'Preview rays are the rays automatically placed while editing the geometry. These limits '
-             'do not apply when using the "Recalculate fans" command.'),
-        ('MaxFanCountPreviewRays', 2, 'Float', 'Limit maximum fan count for preview rays.'
-             'Preview rays are the rays automatically placed while editing the geometry. These limits '
-             'do not apply when using the "Recalculate fans" command.'),
-        ('MaxRaysPerFanPreviewRays', 10, 'Float', 'Limit maximum number of rays per fan for preview.'
-             'Preview rays are the rays automatically placed while editing the geometry. These limits '
-             'do not apply when using the "Recalculate fans" command.'),
-      ]),
+      ])
     ]:
       for name, default, kind, tooltip in entries:
         obj.addProperty('App::Property'+kind, name, section, tooltip)

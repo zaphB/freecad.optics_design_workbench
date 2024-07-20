@@ -2,9 +2,6 @@ __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
-
-'''.strip()
 
 
 import FreeCADGui as Gui
@@ -13,8 +10,8 @@ import FreeCAD as App
 from . import freecad_elements
 
 class OpticsDesignWorkbench(Gui.Workbench):
-  MenuText = 'Optics Design Workbench'
-  ToolTip = 'ray tracing Monte-Carlo simulation'
+  MenuText = 'Optics Design'
+  ToolTip = 'Ray tracing Monte-Carlo simulation for optics design and optimization'
   Icon = freecad_elements.find.iconpath('workbench')
   toolbox = []
 

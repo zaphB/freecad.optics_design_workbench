@@ -1,12 +1,11 @@
+'''
+Classes/functions handling the simulation loop, saving of results, progress tracking, background workers, etc. Submodules in here use the FreeCAD.App and Gui objects in a few places but only to fetch paths or similar metadata, not for direct interaction with FreeCAD. For direct interaction prefer to use submodules of freecad_elements.
+'''
+
 __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
-
-Classes/functions handling the simulation loop, saving of results, progress tracking, background workers, etc. Submodules in here use the FreeCAD.App and Gui objects in a few places but only to fetch paths or similar metadata, not for direct interaction with FreeCAD. For direct interaction prefer to use submodules of freecad_elements.
-
-'''.strip()
 
 
 from .processes import *

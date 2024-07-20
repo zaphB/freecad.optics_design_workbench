@@ -2,9 +2,6 @@ __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
-
-'''.strip()
 
 
 try:
@@ -26,8 +23,6 @@ from .common import *
 from .. import simulation
 from .. import distributions
 
-_REDRAW_RECURSION_LEVEL = 0
-
 
 #####################################################################################################
 class PointSourceProxy():
@@ -38,7 +33,6 @@ class PointSourceProxy():
     '''Do something when doing a recomputation, this method is mandatory'''
     # allow redrawing to allow previews during continuous simulation
     #simulation.cancelSimulation()
-    self.redrawPreview(obj)
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
@@ -46,34 +40,10 @@ class PointSourceProxy():
     #simulation.cancelSimulation()
 
   def clear(self, obj):
-    obj.Shape = Part.makeSphere(1e-2)
-
-  def redrawPreview(self, obj):
-    # hacky recursion detection (recursion here may cause FreeCAD segfaults...)
-    global _REDRAW_RECURSION_LEVEL
-    if _REDRAW_RECURSION_LEVEL > 0:
-      return
-
-    _REDRAW_RECURSION_LEVEL += 1
-    try:
-
-      # set default preview settings
-      maxIntersections = 10
-      maxFanCount = 2
-      maxRaysPerFan = 10
-
-      # if active simulation settings exists, adjust defaults
-      if settings := find.activeSimulationSettings():
-        maxIntersections = settings.MaxIntersectionsPreviewRays
-        maxFanCount = settings.MaxFanCountPreviewRays
-        maxRaysPerFan = settings.MaxRaysPerFanPreviewRays
-
-      if maxIntersections > 0 and maxFanCount > 0 and maxRaysPerFan > 0:
-        self.redraw(obj, mode='fans', maxIntersections=maxIntersections,
-                    maxFanCount=maxFanCount, maxRaysPerFan=maxRaysPerFan)
-
-    finally:
-      _REDRAW_RECURSION_LEVEL -= 1
+    # remove shape but make sure placement stays alive
+    placement = obj.Placement
+    obj.Shape = Part.Shape()
+    obj.Placement = placement
   
   def redraw(self, *args, **kwargs):
     self.runIteration(*args, draw=True, store=False, **kwargs)

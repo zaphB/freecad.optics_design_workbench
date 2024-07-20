@@ -2,14 +2,14 @@
 
 import os
 
-HEADER = """
+HEADER = """'''
+
+'''
+
 __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
-
-'''.strip()
 """.strip()
 
 FILENAME_BLACKLIST = ('setup.py',)
@@ -36,7 +36,7 @@ def conf(msg, default=None):
     elif i.strip().lower() in ('n', 'no'):
       res = False
     if res is None:
-      info('invalid input, expecting (y)es or (n)o\n')
+      print('invalid input, expecting (y)es or (n)o\n')
   return res
 
 def main():
