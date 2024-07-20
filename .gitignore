@@ -16,4 +16,6 @@ __pycache__
 test-docker/**/container-home
 *.AppImage
 
+# include screenshots in examples
+!examples/**/*.png
 

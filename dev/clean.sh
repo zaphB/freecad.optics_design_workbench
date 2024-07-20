@@ -13,5 +13,5 @@ rm -rf ./test/**/*.opticalSimulationResults
 rm -rf ./test/**/*.FCBak
 rm -rf ./fcstd/*.opticalSimulationResults
 rm -rf ./fcstd/*.FCBak
-
-
+rm -rf ./examples/*.opticalSimulationResults
+rm -rf ./examples/*.FCBak
