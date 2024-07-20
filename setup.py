@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 # DO NOT CHANGE
 version = '0.1.3'
@@ -18,7 +18,7 @@ setup(
   author='Philipp Bredol',
   author_email='philipp.bredol@rwth-aachen.de',
   description='Physically accurate forward ray tracing for optics simulation and optimization with FreeCAD workbench frontend',
-  packages=find_packages(),    
+  packages=find_namespace_packages(include=['freecad*']),
   install_requires=[
     'numpy',
     'scipy',
