@@ -76,7 +76,7 @@ class ProgressWindow(QWidget):
   def __init__(self):
     # setup window contents
     super().__init__()
-    self.setWindowTitle('FreeCAD ExpOptics simulation')
+    self.setWindowTitle('FreeCAD Optics Design Workbench simulation progress')
     layout = QVBoxLayout()
     self.label = QLabel()
     layout.addWidget(self.label)
