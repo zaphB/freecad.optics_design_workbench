@@ -62,7 +62,7 @@ In the Monte-Carlo simulation mode, rays are placed randomly in the full solid a
 
 [examples/2-lens-and-mirror](./examples/2-lens-and-mirror)
 
-Any geometric body in FreeCAD can become member of one of the `OpticalGroup`s to turn them into reflective, refractive, absorbing or ray-detecting media. This example contains spherical lenses and slotted parabolic mirrors, transparent and absorbing detectors. When running the continuous simulation, folders for all objects that have set `Store Hits` to true will be generated.
+Any geometric body in FreeCAD can become member of one of the `OpticalGroup`s to turn them into reflective, refractive, absorbing or ray-detecting objects. This example contains spherical lenses and slotted parabolic mirrors, transparent and absorbing detectors. When running the continuous simulation, folders for all objects that have set `Store Hits` to true will be generated.
 
 ![lens and mirror screenshot](./examples/2-lens-and-mirror/screenshot.png)
 
