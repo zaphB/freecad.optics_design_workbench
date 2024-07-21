@@ -35,7 +35,7 @@ Head to the releases section and download the zipped source of your version of c
 Clone this repository, install the python module in development mode using `pip install -e .`. Create a symlink in your FreeCAD's Mod folder pointing to the directory of the cloned directory. With this setup, changes in the cloned repository folder will be effective immediately when restarting FreeCAD. Avoid using regular PyPi or addon manager installations in parallel with the development installation.
 
 
-## Examples
+## Getting started with examples
 
 To get started, FCStd files and corresponding jupyter notebooks can be found the examples folder of this repository.
 
@@ -87,23 +87,3 @@ freecad_.optics_design_workbench.versionInfo()
 in your regular python shell of choice.
 
 Make sure that the workbench versions seen by FreeCAD and by python match and that all the displayed versions and paths match your expectations.
-
-
-## How to get started in FreeCAD
-
-Select the Optics Design Workbench, place light sources, turn your existing objects into mirrors, lenses, absorbers and detectors and run Monte-Carlo simulations.
-
-The workbench is still in an early stage, examples will appear here as soon as standard workflows for simulations and data analysis are implemented. The current idea is to have FreeCAD and a jupyter notebook open side-by-side. Simulations are configured and run in FreeCAD; the data analysis is done in the jupyter notebook.
-
-
-## How to get started in python
-
-After installation via pip import the module using
-
-```python
-import freecad_.optics_design_workbench
-```
-
-So far the only documentation are a few docstrings here and there, which can be explored using python's help(...) and dir(...). The underscore in `freecad_` is important only as long as freecad segfaults when being imported from a regular python shell. If you can `import freecad` without a segfault on your system feel free to skip the underscore. 
-
-The workbench is still in an early stage, examples will appear here as soon as standard workflows for simulations and data analysis are implemented. The current idea is to have FreeCAD and a jupyter notebook open side-by-side. Simulations are configured and run in FreeCAD; the data analysis is done in the jupyter notebook.
