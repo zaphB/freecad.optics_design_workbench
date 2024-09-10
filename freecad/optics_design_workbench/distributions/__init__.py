@@ -9,3 +9,4 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 
 from .points_by_density import *
+from .random_number_generator import *

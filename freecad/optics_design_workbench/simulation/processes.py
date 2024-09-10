@@ -18,13 +18,6 @@ try:
 except ImportError:
   pass
 
-try:
-  from PySide6.QtWidgets import QApplication
-  from PySide6.QtCore import QProcess, QTimer
-except:
-  from PySide2.QtWidgets import QApplication
-  from PySide2.QtCore import QProcess, QTimer
-
 from numpy import *
 import time
 import datetime
@@ -35,6 +28,7 @@ import sys
 import threading
 import signal
 
+from ..detect_pyside import *
 from .. import freecad_elements
 from .. import gui_windows
 from . import results_store
@@ -148,10 +142,11 @@ def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=Fals
     if _isMaster:
       if draw:
         backgroundWorkers = workers-1
+        logMsg(f'doing simulation work with {backgroundWorkers} background workers + 1 worker running in gui process')
       else:
         backgroundWorkers = workers
+        logMsg(f'doing simulation work with {backgroundWorkers} background workers and lazy gui process')
       for workerNo in range(backgroundWorkers):
-        #logMsg('launching background worker...')
         _BACKGROUND_PROCESSES.append(WorkerProcess(simulationType=mode, simulationRunFolder=simulationRunFolder))
         for _ in range(50):
           freecad_elements.updateGui()
@@ -196,6 +191,12 @@ def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=Fals
     # this block does the simulation in the FreeCAD process with GUI updating etc
     # this shall only be called if draw is actually true
     if draw or not _isMaster:
+      
+      if not _isMaster:
+        logMsg(f'background worker entering simulation loop...')
+      else:
+        logMsg(f'gui worker is entering simulation loop...')
+      
       # wrap simulation in try-finally to make absolutely sure that 
       # dataset is flushed and ended finally
       try:
@@ -273,6 +274,7 @@ def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=Fals
     
     # if draw is false but we are in a Qt application, start a QTimer that updates the progress:
     elif QApplication.instance():
+      logMsg(f'lazy gui worker is just tracking progress...')
       t0 = time.time()
       def updateProgress():
         if store and _isMaster:
