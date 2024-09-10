@@ -9,17 +9,18 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 from numpy import *
 import sympy as sy
+import warnings
 
 
 class VectorRandomVariable:
   '''
   Vector valued random variable. 
   '''
-  def __init__(self, probabilityDensity, variables, numericalResolutions, variableDomains):
+  def __init__(self, probabilityDensity, variables, variableDomains, numericalResolutions=None):
     self._probabilityDensity = probabilityDensity
     self._variables = variables
-    self._numericalResolutions = numericalResolutions
     self._variableDomains = variableDomains
+    self._numericalResolutions = numericalResolutions
     self._mode = 'not yet compiled'
 
 
@@ -61,11 +62,28 @@ class VectorRandomVariable:
     # substitute constants
     for name, val in kwargs.items():
       expr = expr.subs(name, val)
-    
+
+    # set variables attribute if not set
+    if self._variables is None:
+      self._variables = list(expr.free_symbols)
+
+    # substitute remaining free symbols with symbols that 
+    # have 'real' assumption
+    _newVariables = []
+    for i, sym in enumerate(self._variables):
+      l1, l2 = -inf, inf
+      if i < len(self._variableDomains):
+        l1, l2 = self._variableDomains[i]
+      realSym = sy.Symbol(str(sym), real=True, 
+                          **(dict(nonnegative=True) if l1>=0
+                        else dict(nonpositive=True) if l2<=0
+                        else {}))
+      expr = expr.subs(sym, realSym)
+      _newVariables.append(realSym)
+    self._variables = _newVariables
+
     # save resulting expr in attribute
     self._probabilityDensityExpr = expr
-    if self._variables is None:
-      self._variables = expr.free_symbols
 
 
   def _generateAnalyticScalarLambda(self, varI):
@@ -75,6 +93,15 @@ class VectorRandomVariable:
     '''
     # prepare symbols and domains
     expr = self._probabilityDensityExpr
+
+    # test wether expression looks positive
+    try:
+      if bool(sy.solve(expr < 0)):
+        raise ValueError('oops')
+    except Exception:
+      warnings.warn(f'not sure whether expression for probability density '
+                    f'"{expr}" will always yield '
+                    f'positve values, which will break the RNG')
 
     # integrate along domain for i<varI
     for i in range(varI):
@@ -123,12 +150,14 @@ class VectorRandomVariable:
       valid = argwhere(logical_and(l1 <= vals, vals <= l2))
 
       # make sure each of the N rolls had exactly one valid result
-      if any(valid[:,1] != arange(valid.shape[0])):
+      if any(valid[:,-1] != arange(valid.shape[0])):
         raise ValueError('no/more than one valid value found in domain')
 
-      # append result vector to list
-      print(vals, valid)
-      result.append(take(vals, valid))
+      # append valid results to list
+      if N is not None:
+        result.append(vals[tuple(valid.T)])
+      else:
+        result.append(vals[tuple(valid.T)][0])
     return array(result[::-1])
 
 
