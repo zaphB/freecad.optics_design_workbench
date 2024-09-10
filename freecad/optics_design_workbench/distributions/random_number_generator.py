@@ -10,26 +10,52 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 from numpy import *
 import sympy as sy
 import warnings
+import time
+import signal
+
+
+def _setAlarm(deadline):
+    timeout = deadline-time.time()
+    if timeout < 0:
+      raise RuntimeError('time is up')
+    def handler(sig, n):
+      raise RuntimeError('time is up')
+    signal.signal(signal.SIGALRM, handler)
+    signal.alarm(int(timeout)+1)
+
+
+def _clearAlarm():
+  signal.alarm(0)
 
 
 class VectorRandomVariable:
   '''
   Vector valued random variable. 
   '''
-  def __init__(self, probabilityDensity, variables, variableDomains, numericalResolutions=None):
+  def __init__(self, probabilityDensity, variableDomains=None, numericalResolutions=None):
     self._probabilityDensity = probabilityDensity
-    self._variables = variables
+    self._probabilityDensityBaseExpr = None
+    self._variables = None
     self._variableDomains = variableDomains
     self._numericalResolutions = numericalResolutions
     self._mode = 'not yet compiled'
 
 
-  def compile(self, timeout=30, **kwargs):
+  def compile(self, timeout=5, disableAnalytical=False, **kwargs):
+    self._deadline = time.time()+timeout
     self._setConstants(**kwargs)
+
     try:
+      # immediately go to numerical fallback if analytical is disabled
+      if disableAnalytical:
+        raise ValueError('stop')
+
+      # try to analytical treatment first
       self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
       self._mode = 'analytic'
-    except ValueError:
+
+    except Exception:
+      # fallback to numerical treatment and analytical mode did not succeed
       self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
       self._mode = 'numeric'
 
@@ -43,7 +69,7 @@ class VectorRandomVariable:
     for i, var in enumerate(self._variables):
       print(f'variable "{var}" '+('conditional' if i<len(self._variables)-1 else '')+f' probability density: ')
       probDens, integral, invertedSols = self._transformLambdas[i][0]._origExpressions
-      if simplify:
+      if simplify and str not in [type(x) for x in (probDens, integral, invertedSols)]:
         probDens = probDens.simplify()
         integral = integral.simplify()
         invertedSols = [sol.simplify() for sol in invertedSols]
@@ -58,22 +84,22 @@ class VectorRandomVariable:
 
 
   def _setConstants(self, **kwargs):
-    expr = sy.sympify(self._probabilityDensity)
+    if self._probabilityDensityBaseExpr is None:
+      self._probabilityDensityBaseExpr = sy.sympify(self._probabilityDensity)
+    expr = self._probabilityDensityBaseExpr    
+    
     # substitute constants
     for name, val in kwargs.items():
       expr = expr.subs(name, val)
-
+    
     # set variables attribute if not set
-    if self._variables is None:
-      self._variables = list(expr.free_symbols)
+    self._variables = list(expr.free_symbols)
 
     # substitute remaining free symbols with symbols that 
     # have 'real' assumption
     _newVariables = []
     for i, sym in enumerate(self._variables):
-      l1, l2 = -inf, inf
-      if i < len(self._variableDomains):
-        l1, l2 = self._variableDomains[i]
+      l1, l2 = self._variableDomains.get(str(sym), (-inf, inf))
       realSym = sy.Symbol(str(sym), real=True, 
                           **(dict(nonnegative=True) if l1>=0
                         else dict(nonpositive=True) if l2<=0
@@ -81,6 +107,12 @@ class VectorRandomVariable:
       expr = expr.subs(sym, realSym)
       _newVariables.append(realSym)
     self._variables = _newVariables
+
+    # append variables that appear in domains but not in expression
+    varNames = [str(v) for v in self._variables]
+    for symName in self._variableDomains.keys():
+      if symName not in varNames:
+        self._variables.append(sy.Symbol(symName, real=True))
 
     # save resulting expr in attribute
     self._probabilityDensityExpr = expr
@@ -94,52 +126,129 @@ class VectorRandomVariable:
     # prepare symbols and domains
     expr = self._probabilityDensityExpr
 
-    # test wether expression looks positive
     try:
-      if bool(sy.solve(expr < 0)):
-        raise ValueError('oops')
-    except Exception:
-      warnings.warn(f'not sure whether expression for probability density '
-                    f'"{expr}" will always yield '
-                    f'positve values, which will break the RNG')
+      # start alarm that raises exception in this thread after timeout
+      _setAlarm(self._deadline)
 
-    # integrate along domain for i<varI
-    for i in range(varI):
-      var = self._variables[i]
-      l1, l2 = self._variableDomains[i]
-      expr = sy.Integral(expr, (var,l1,l2)).doit()
+      # test wether expression looks positive
+      try:
+        if bool(sy.solve(expr < 0)):
+          raise ValueError('oops')
+      except Exception:
+        warnings.warn(f'not sure whether expression for probability density '
+                      f'"{expr}" will always yield '
+                      f'positve values, which will break the RNG')
 
-    # integrate and invert for requested var
-    var = self._variables[varI]
-    l1, l2 = self._variableDomains[varI]
-    varX = sy.Symbol('x', real=True, **(dict(positive=True) if l1>=0
-                                   else dict(negative=True) if l2<=0
-                                   else {}))
-    varY = sy.Symbol('y', real=True, nonnegative=True)
+      # integrate along domain for i<varI
+      for i in range(varI):
+        var = self._variables[i]
+        l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
+        expr = sy.Integral(expr, (var,l1,l2)).doit()
 
-    # find total and 
-    totalIntegral = sy.Integral(expr, (var,l1,l2)).doit()
-    partialIntegral = sy.Integral(expr, (var,l1,varX)).doit()
-    
-    exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX)
-    lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY)
-                                              for exprY in exprYs]
+      # integrate and invert for requested var
+      var = self._variables[varI]
+      l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
 
-    # attach expressions to lambda for convenience
-    for lam in lambYs:
-      lam._origExpressions = (expr/totalIntegral, partialIntegral/totalIntegral, exprYs)
+      varX = sy.Symbol('x', real=True, **(dict(positive=True) if l1>=0
+                                    else dict(negative=True) if l2<=0
+                                    else {}))
+      varY = sy.Symbol('y', real=True, nonnegative=True)
+
+      # find total and 
+      totalIntegral = sy.Integral(expr, (var,l1,l2)).doit()
+      partialIntegral = sy.Integral(expr, (var,l1,varX)).doit()
+      
+      exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX)
+      lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY)
+                                                for exprY in exprYs]
+
+      # attach expressions to lambda for convenience
+      for lam in lambYs:
+        lam._origExpressions = (expr/totalIntegral, partialIntegral/totalIntegral, exprYs)
+
+    finally:
+      # disable alarm again
+      _clearAlarm()
 
     return lambYs
 
 
   def _generateNumericScalarLambda(self, varI):
-    raise ValueError('not implemented')
+    # prepare symbols and domains
+    expr = self._probabilityDensityExpr
+
+    # make sure free symbols exactly match variable list
+    for s in expr.free_symbols:
+      if s not in self._variables:
+        raise ValueError(f'probabilty density expression {expr} has free '
+                         f'symbol {s} which is not in list of '
+                         f'variables {self._variables}')
+
+    # make sure resolution is list of right length
+    if self._numericalResolutions is None:
+      self._numericalResolutions = 5+int(1e4**(1/len(self._variables)))
+    if not hasattr(self._numericalResolutions, '__iter__'):
+      self._numericalResolutions = [self._numericalResolutions for _ in self._variables]
+
+    # prepare param grid for probability density evaluation
+    variableRanges = []
+    #print(f'making grid with {self._numericalResolutions}')
+    for i, var in enumerate(self._variables):
+      l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
+      if not isfinite(l1) or not isfinite(l2):
+        raise ValueError(f'failed to find analytical solution, numerical '
+                         f'solution requires finite limits, but found limits '
+                         f'[{l1}, {l2}] for variable {var}')
+      variableRanges.append(linspace(l1, l2, self._numericalResolutions[i]))
+    variableGrids = meshgrid(*variableRanges)
+
+    # evaluate expression
+    exprLam = sy.lambdify(self._variables, expr)
+    gridProbs = exprLam(*variableGrids)
+
+    # make sure no negative entries exist
+    if (gridProbs < 0).any():
+      raise ValueError(f'found negative probability density, '
+                       f'expression: {expr}, variable: {self._variables[varI]}')
+
+    # numerically integrate (actually just sum because normalization 
+    # happens later anyways) along domain for i<varI
+    for _ in range(varI):
+      gridProbs = gridProbs.sum(axis=0)
+
+    # integrate (again actually sum)
+    gridProbs = cumsum(gridProbs, axis=0)
+    #print('-=--', varI)
+    #print(gridProbs, variableRanges[varI])
+
+    # make interpolator function that implements numerical inversion of the integral
+    def interpolateResult(x, *params,
+                          variableRanges=variableRanges,
+                          gridProbs=gridProbs, varI=varI):
+      # select columns according to conditional variable values
+      index = []
+      for i, param in enumerate(params):
+        index.append(argmin(abs(variableRanges[varI+i+1]-param)))
+      gridProbs = gridProbs[:,*index]
+
+      # normalize to maximum entry
+      gridProbs /= gridProbs[-1]
+
+      return interp(x, gridProbs, variableRanges[varI])      
+
+    # numerically invert using interpolator
+    lambYs = [interpolateResult]
+    # attach placeholders instead of expressions to lambda
+    for lam in lambYs:
+      lam._origExpressions = ('n.a.', 'n.a.', ['n.a.'])
+
+    return lambYs
 
 
   def draw(self, N=None):
     result = []
     for i, transforms in reversed(list(enumerate(self._transformLambdas))):
-      l1, l2 = self._variableDomains[i]
+      l1, l2 = self._variableDomains.get(str(self._variables[i]), (-inf, inf))
 
       # roll standard uniform [0,1) rng and transform result, use numpy broadcasting
       # for improved performance
@@ -161,16 +270,14 @@ class VectorRandomVariable:
     return array(result[::-1])
 
 
-
 class ScalarRandomVariable(VectorRandomVariable):
   '''
   Scalar valued random variable. 
   '''
-  def __init__(self, probabilityDensity, numericalResolution, variableDomain, **kwargs):
+  def __init__(self, probabilityDensity, variableDomain, numericalResolution=None, **kwargs):
     super().__init__(probabilityDensity, 
-                     variables=None, 
-                     numericalResolutions=[numericalResolution], 
                      variableDomains=[variableDomain],
+                     numericalResolutions=None if numericalResolution is None else [numericalResolution], 
                      **kwargs)
 
   def draw(self, **kwargs):
