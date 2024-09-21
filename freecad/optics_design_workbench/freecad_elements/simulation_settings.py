@@ -78,7 +78,7 @@ class SimulationSettingsProxy():
       val = getattr(obj, prop)
       if val != 'inf':
         try:
-          val = int(val)
+          val = int(round(float(val)))
         except ValueError:
           setattr(obj, prop, 'inf')
         else:
@@ -128,7 +128,7 @@ class MakeSimulationSettings:
       ]),
       ('OpticalSimulationPerformanceSettings', [
         ('EndAfterIterations', 'inf', 'String', 'Number of iterations after which simulation should stop'),
-        ('EndAfterRays', 'inf', 'String', 'Number of traced rays after which simulation should stop'),
+        ('EndAfterRays', '1e4', 'String', 'Number of traced rays after which simulation should stop'),
         ('EndAfterHits', 'inf', 'String', 'Number of recorded hits after which simulation should stop'),
         ('RaysPerIteration', 100, 'Float', 'Number of rays to place per simulation iteration for random '
               'and pseudo random modes.'),

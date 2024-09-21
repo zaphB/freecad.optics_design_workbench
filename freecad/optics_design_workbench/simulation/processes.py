@@ -18,13 +18,6 @@ try:
 except ImportError:
   pass
 
-try:
-  from PySide6.QtWidgets import QApplication
-  from PySide6.QtCore import QProcess, QTimer
-except:
-  from PySide2.QtWidgets import QApplication
-  from PySide2.QtCore import QProcess, QTimer
-
 from numpy import *
 import time
 import datetime
@@ -35,14 +28,20 @@ import sys
 import threading
 import signal
 
+from ..detect_pyside import *
 from .. import freecad_elements
 from .. import gui_windows
+from .. import io
 from . import results_store
 
+_IS_MASTER_PROCESS = False
 _SIMULATION_RUNNING = False
 _SIMULATION_CANCELED = False
 _WORKER_INDEX = 0
 _BACKGROUND_PROCESSES = []
+
+def isMasterProcess():
+  return _IS_MASTER_PROCESS
 
 def isWorkerRunning():
   #print(isCanceled(), [w.isRunning() for w in _BACKGROUND_PROCESSES])
@@ -61,10 +60,11 @@ def cancelSimulation():
     _SIMULATION_CANCELED = True
 
 def logMsg(msg):
-  print(datetime.datetime.now().strftime('[%H:%M:%S.%f] ')+msg)
+  io.info(msg)
 
 def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=False):
-  global _SIMULATION_RUNNING, _SIMULATION_CANCELED
+  global _SIMULATION_RUNNING, _SIMULATION_CANCELED, _IS_MASTER_PROCESS
+  _IS_MASTER_PROCESS = _isMaster
   t0 = time.time()
 
   # all commands that start some sort of simulation:
@@ -125,7 +125,7 @@ def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=Fals
     maxRays = inf
     maxHits = inf
     if settings := freecad_elements.find.activeSimulationSettings():
-      _parse = lambda x: int(x) if x!='inf' else inf
+      _parse = lambda x: int(round(float(x))) if x!='inf' else inf
       maxIterations = _parse(settings.EndAfterIterations)
       maxRays = _parse(settings.EndAfterRays)
       maxHits = _parse(settings.EndAfterHits)
@@ -148,10 +148,11 @@ def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=Fals
     if _isMaster:
       if draw:
         backgroundWorkers = workers-1
+        logMsg(f'doing simulation work with {backgroundWorkers} background workers + 1 worker running in gui process')
       else:
         backgroundWorkers = workers
+        logMsg(f'doing simulation work with {backgroundWorkers} background workers and lazy gui process')
       for workerNo in range(backgroundWorkers):
-        #logMsg('launching background worker...')
         _BACKGROUND_PROCESSES.append(WorkerProcess(simulationType=mode, simulationRunFolder=simulationRunFolder))
         for _ in range(50):
           freecad_elements.updateGui()
@@ -196,6 +197,12 @@ def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=Fals
     # this block does the simulation in the FreeCAD process with GUI updating etc
     # this shall only be called if draw is actually true
     if draw or not _isMaster:
+      
+      if not _isMaster:
+        logMsg(f'background worker entering simulation loop...')
+      else:
+        logMsg(f'gui worker is entering simulation loop...')
+      
       # wrap simulation in try-finally to make absolutely sure that 
       # dataset is flushed and ended finally
       try:
@@ -273,6 +280,7 @@ def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=Fals
     
     # if draw is false but we are in a Qt application, start a QTimer that updates the progress:
     elif QApplication.instance():
+      logMsg(f'lazy gui worker is just tracking progress...')
       t0 = time.time()
       def updateProgress():
         if store and _isMaster:
@@ -308,10 +316,16 @@ class WorkerProcess:
     self.simulationRunFolder = simulationRunFolder
     self._isRunning = True
 
-    # try to extract freecad executable path, by default let shell decide
-    freecadPath = 'freecad'
-    if 'freecad' in sys.executable.lower():
+    # try to extract freecad executable path: first check APPIMAGE evironment variable,
+    # to find out if running appimage, then try executable found in sys.executable,
+    # if that does not look like a freecad executable let shell decide
+    if freecadPath := os.environ.get('APPIMAGE', None):
+      pass
+    elif 'freecad' in sys.executable.lower():
       freecadPath = sys.executable
+    else:
+      freecadPath = 'freecad'
+    io.verb(f'detected freecad executable "{freecadPath}"')
 
     # launch child process
     self._p = subprocess.Popen([freecadPath, '-c', self.simulationFilePath],
@@ -323,7 +337,7 @@ class WorkerProcess:
     # write python snippet to start desired simulation mode
     self.say('entering simulation loop...')
     self.write(f'\r\n'
-               f'import freecad.optics_design_workbench\r\n'
+               f'import freecad.optics_design_workbench.simulation\r\n'
                f'freecad.optics_design_workbench.simulation.runAction('
                       f'action="{self.simulationType}", '
                       f'simulationRunFolder="{self.simulationRunFolder}", '

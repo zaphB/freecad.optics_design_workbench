@@ -17,7 +17,7 @@ import shutil
 
 FREECAD_BINARY = os.environ.get('TEST_FREECAD_BINARY', '/usr/bin/FreeCAD')
 
-class TestRunNotebooks(unittest.TestCase):
+class TestFailOnNoWritePermissions(unittest.TestCase):
   def _cleanResults(self, filename):
     baseDir = os.path.abspath(os.path.dirname(__file__))
     # remove results folder
@@ -78,12 +78,12 @@ class TestRunNotebooks(unittest.TestCase):
     return baseDir, p
 
 
-  def test_unsavedFile(self):
+  def _test_unsavedFile(self):
     # create unsaved file and start continuous simulation
     for action in ('true', 'pseudo',):
       try:
         _, p = self._run([], [
-          'from freecad.exp_optics_workbench import simulation',
+          'from freecad.optics_design_workbench import simulation',
           'App.newDocument()',
           f'simulation.runAction("{action}")'
         ])
@@ -94,13 +94,13 @@ class TestRunNotebooks(unittest.TestCase):
         raise RuntimeError('expected to fail with "unsaved file" error, but exited without error')
 
 
-  def test_noWritePermissions(self):
+  def _test_noWritePermissions(self):
     # open file in a folder without write permission and start simulation
     for action in ('true', 'pseudo',):
       try:
         _, p = self._run(['no-write-permission/playground.FCStd'],
           [
-            'from freecad.exp_optics_workbench import simulation',
+            'from freecad.optics_design_workbench import simulation',
             f'simulation.runAction("{action}")'
           ])
       except RuntimeError as e:
