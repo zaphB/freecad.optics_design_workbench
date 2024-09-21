@@ -2,11 +2,13 @@ import logging
 import logging.handlers as handlers
 import os
 import datetime
+import random
 
 from .simulation import results_store
+from .simulation import processes
 
 _LOG_DIR             = None
-_LOGFILE_NAME        = 'optics_design_workbench.log'
+_LOGFILE_NAME        = f'optics_design_workbench.log'
 _ROTATE_DIR          = 'oldlogs'
 _IS_INIT             = False
 _IS_VERBOSE          = True
@@ -21,13 +23,19 @@ def _logger():
 def _getLogDir():
   try:
     return results_store.getResultsFolderPath()
-  except RuntimeError:
+  # runtime error is raised if no FCStd file is opened, AttributeError is
+  # raised if module is not fully initialized yet. In both cases no logging
+  # is yet desired.
+  except (RuntimeError, AttributeError):
     return None
 
 def _init():
   global _IS_INIT, _LOG_DIR
   if _LOG_DIR != _getLogDir():
-    setLogfile(_getLogDir()+'/'+_LOGFILE_NAME)
+    if processes.isMasterProcess():
+      setLogfile(_getLogDir()+'/'+_LOGFILE_NAME)
+    else:
+      setLogfile(_getLogDir()+'/'+_LOGFILE_NAME[:-4]+f'.pid{os.getpid()}')
 
   if _LOG_DIR is None:
     return
@@ -49,7 +57,11 @@ def _init():
     _logger().setLevel(logging.INFO)
     _IS_INIT = True
 
+
 def setLogfile(name):
+  '''
+  change name (and path) of active logfile
+  '''
   global _IS_INIT, _LOGFILE_NAME, _LOG_DIR
   # close old logfile if logger already existed
   if _IS_INIT:
@@ -67,6 +79,41 @@ def setLogfile(name):
   if baseDir is not None:
     _LOG_DIR = baseDir
   _init()
+
+def _gatherSlaveFiles():
+  '''
+  collect all log files of slaves and merge with master log, only runs if this
+  process is the master process
+  '''
+  if not _IS_INIT or not processes.isMasterProcess():
+    return
+
+  for f in os.listdir(_LOG_DIR):
+    # check if file looks like a slave's log
+    if f.startswith('optics_design_workbench.pid') and f.endswith('.log'):
+      pid = None
+      try:
+        pid = int(f[27:-4])
+      except ValueError:
+        pass
+      if pid:
+
+        # rename file to prevent new lines being written while we parse it
+        # the slave process will recreate its own logfile if new messages appear
+        while True:
+          tmpName = f'{_LOG_DIR}/{int(random.random()*1e12)}.log'
+          if not os.path.exists(tmpName):
+            break
+        os.rename(_LOG_DIR+'/'+f, tmpName)
+
+        # append file to main log
+        with open(tmpName, 'r') as inFile:
+          with open(_LOG_DIR+'/'+_LOGFILE_NAME, 'a') as outFile:
+            for line in inFile:
+              outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}')
+        
+        # remove tempfile
+        os.remove(tmpName) 
 
 def _indentMsg(msg):
   ls = [l for l in '\n'.join([str(l) for l in msg]).split('\n') if l.strip()]
@@ -87,6 +134,7 @@ def _prefix(kind=''):
 
 def err(*msg, logOnly=False):
   _init()
+  _gatherSlaveFiles()
   msg = _indentMsg(msg)
   if _logger():
     _logger().error(msg)
@@ -100,6 +148,7 @@ def formatErr(*msg):
 
 def warn(*msg, logOnly=False):
   _init()
+  _gatherSlaveFiles()
   msg = _indentMsg(msg)
   if _logger():
     _logger().warning(msg)
@@ -110,6 +159,7 @@ def warn(*msg, logOnly=False):
 
 def info(*msg, logOnly=False, noNewLine=False):
   _init()
+  _gatherSlaveFiles()
   msg = _indentMsg(msg)
   if _logger():
     _logger().info(msg)
@@ -122,3 +172,4 @@ def verb(*args, **kwargs):
   if not _IS_VERBOSE:
     return
   info(*args, **kwargs)
+

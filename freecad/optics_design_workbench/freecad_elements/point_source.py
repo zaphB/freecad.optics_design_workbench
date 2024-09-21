@@ -16,13 +16,14 @@ from numpy import *
 import numpy
 import time
 import functools
+import sympy as sy
 
 from . import ray
 from . import find
 from .common import *
 from .. import simulation
 from .. import distributions
-
+from .. import io
 
 #####################################################################################################
 class PointSourceProxy():
@@ -38,6 +39,42 @@ class PointSourceProxy():
     '''Do something when a property has changed'''
     # dont cancel here because the constant redrawing triggers this
     #simulation.cancelSimulation()
+    
+    # make sure domains are valid
+    if prop in ('PhiDomain', 'ThetaDomain'):
+      raw = getattr(obj, prop)
+      parsed, _ = self._parsedDomain(raw, {'PhiDomain': '0, 2*pi', 'ThetaDomain': '0, pi'}[prop])
+      if raw != parsed:
+        setattr(obj, prop, parsed)
+
+    # make sure resolutions are valid
+    if prop in ('ThetaResolutionNumericMode', 'PhiResolutionNumericMode'):
+      if getattr(obj, prop) < 3:
+        setattr(obj, prop, 3)
+  
+  def _parsedDomain(self, domain, default=None):
+    # try to parse
+    try:
+      _domain = [float(sy.sympify(d).evalf()) for d in domain.split(',')]
+    except Exception as e:
+      io.err(f'invalid domain {domain}, {e.__class__.__name__}: {e}')
+      return default, self._parsedDomain(default, None)[1]
+
+    # make sure length is exactly two
+    if _domain is not None and len(_domain) != 2:
+      io.err(f'invalid domain {domain}, expect two numbers or inf separated by a ","')
+      return default, self._parsedDomain(default, None)[1]
+
+    # return original string and parsed domain
+    return domain, _domain
+
+  def parsedThetaDomain(self, obj):
+    _, parsed = self._parsedDomain(obj.ThetaDomain)
+    return parsed
+
+  def parsedPhiDomain(self, obj):
+    _, parsed = self._parsedDomain(obj.PhiDomain)
+    return parsed
 
   def clear(self, obj):
     # remove shape but make sure placement stays alive
@@ -92,8 +129,8 @@ class PointSourceProxy():
     if mode == 'fans':
       raysPerIteration = min([obj.RaysPerFan, maxRaysPerFan])
 
-      # prepare array of theta angles according to specified expression
-      theta = eval(obj.ThetaRange.replace('^', '**'))
+      # prepare expression
+      densityExpr = sy.sympify(obj.PowerDensity)
 
       # create obj.Fans ray fans oriented in phi0
       for phi in linspace(0, pi, int(min([obj.Fans, maxFanCount])+1))[:-1]:
@@ -102,18 +139,13 @@ class PointSourceProxy():
         processGuiEvents()
 
         # calculate desired beam power density
-        density = eval(obj.PowerDensity.replace('^', '**'))
-        if not hasattr(density, '__len__') or len(density) != len(theta):
-          density = [density]*len(theta)
-        density = array(density, dtype=float)
-
-        # we are generating a fan of Rays, therefore each Ray represents an
-        # entire ring of optical power and  we have to correct the density
-        #density *= theta/max(abs(theta))
+        densityLambda = sy.lambdify('theta', densityExpr.subs('phi', phi))
+        thetas = linspace(*self.parsedThetaDomain(obj), obj.ThetaResolutionNumericMode)
+        density = densityLambda(thetas)
 
         # generate the required thetas to place beams at and create beams
-        for theta0 in distributions.generatePointsWithGivenDensity1D(
-                                              density=(theta, density),
+        for theta in distributions.generatePointsWithGivenDensity1D(
+                                              density=(thetas, density),
                                               N=raysPerIteration,
                                               startFrom=0):
 
@@ -121,7 +153,7 @@ class PointSourceProxy():
           processGuiEvents()
 
           # add lines corresponding to this ray to total ray list
-          rays.append(self.makeRay(obj=obj, theta=theta0, phi=phi))
+          rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
 
     # pseudo-random mode: place rays by drawing theta and phi from pseudo random distribution
     elif mode == 'pseudo':
@@ -135,8 +167,6 @@ class PointSourceProxy():
 
     # true random mode: place rays by drawing theta and phi from true random distribution
     elif mode == 'true':
-      # max acceptable diff of final power density on two neighboring theta/phi grid points
-      maxDensityRelStepsize = 0.1
 
       # determine number of rays to place
       raysPerIteration = 100
@@ -144,74 +174,24 @@ class PointSourceProxy():
         raysPerIteration = settings.RaysPerIteration
       raysPerIteration *= obj.RaysPerIterationScale
 
-      # prepare discrete theta and phi axes by using linspace plus randomized
-      # shifts in the order of a step size
-      resolutionPerAngle = max([10, sqrt(2*raysPerIteration)])
+      # create random variable for theta and phi
+      vrv = distributions.VectorRandomVariable(
+                obj.PowerDensity, 
+                variableOrder=('theta', 'phi'),
+                variableDomains=dict(
+                    theta=self.parsedThetaDomain(obj), 
+                    phi=self.parsedPhiDomain(obj)),
+                numericalResolutions=dict(
+                    theta=obj.ThetaResolutionNumericMode,
+                    phi=obj.PhiResolutionNumericMode))
+      vrv.compile()
 
-      # loop until a proper resolutionPerAngle was found
-      while True:
-        thetaRange = eval(obj.ThetaRange.replace('^', '**'))
-        thetas = linspace(min(thetaRange), max(thetaRange), int(resolutionPerAngle))
-        thetas += (thetas[1]-thetas[0])*(random.random(size=len(thetas))-.5)
-
-        phiRange = eval(obj.PhiRange.replace('^', '**'))
-        phis = linspace(min(phiRange), max(phiRange), int(resolutionPerAngle))
-        # remove duplicated phi value
-        if isclose(phis[-1]%(2*pi), phis[0]):
-          phis = phis[:-1]
-
-        # add jitter to avoid grid burning into results
-        phis += (phis[1]-phis[0])*(random.random(size=len(phis))-.5)
-
-        # make sure GUI does not freeze
-        processGuiEvents()
-
-        # create meshgrid and calculate desired power density at each angle pair
-        theta, phi = meshgrid(thetas, phis)
-        density = eval(obj.PowerDensity.replace('^', '**'))
-        if not hasattr(density, '__len__') or len(density) != len(theta):
-          density = [density]*len(theta)
-        density = array(density, dtype=float)
-
-        # correct for spherical coordinate element size
-        density *= abs(theta)
-
-        # if density is smooth enough, proceed with placing rays, else
-        # increase resolutionPerAngle and repeat
-        if len(density.shape) == 1:
-          diff = (density[1:]-density[:-1])/abs(_density).max()
-          if abs(diff).max() < maxDensityRelStepsize:
-            break
-
-        elif len(density.shape) == 2:
-          good = True
-          for _density in (density, density.T):
-            diff = (_density[1:,:]-_density[:-1,:])/abs(_density).max()
-            #print(f'found max rel diff of neighbors to be {abs(diff).max():.3f}')
-            if abs(diff).max() > maxDensityRelStepsize:
-              good = False
-          if good:
-            break
-
-        # increase resolution per angle and repeat
-        resolutionPerAngle *= 1.3
-
-      # rearrange angles and desired densities to one numpy array 
-      # to draw random samples from and place rays
-      thetaPhiDensities = stack([theta, phi, density], -1).reshape(-1, 3)
-      if (_total:=abs(thetaPhiDensities[:,-1]).sum()) == 0:
-        probabilities = (ones(thetaPhiDensities.shape[0])
-                                  /thetaPhiDensities.shape[0])
-      else:
-        probabilities = abs(thetaPhiDensities[:,-1])/_total
-
-      for choiceI in numpy.random.choice(thetaPhiDensities.shape[0], 
-                                         size=max([3,int(round(raysPerIteration))]), 
-                                         p=probabilities):
+      thetas, phis = vrv.draw(raysPerIteration)
+      for theta, phi in zip(thetas, phis):
         # this loop may run for quite some time, keep GUI responsive by handling events
         processGuiEvents()
 
-        theta, phi = thetaPhiDensities[choiceI,:2]
+        # create and trace ray
         rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
 
     else:
@@ -292,7 +272,7 @@ class AddPointSource():
   '''
   def Activated(self):
     # create new feature python object
-    obj = App.activeDocument().addObject('Part::FeaturePython', 'PointSource')
+    obj = App.activeDocument().addObject('Part::FeaturePython', 'OpticalPointSource')
 
     # create properties of object
     for section, entries in [
@@ -307,12 +287,10 @@ class AddPointSource():
       ]),
       ('OpticalSimulationSettings', [
         ('RecordRays', False, 'Bool', ''),
-        ('ThetaRange', 'linspace(-pi/2, pi/2, 500)', 'String', 'Expression that generates the array '
-                  'of polar angles "theta" to consider for the emission power density. This range '
-                  'decides how fine the power density expression is sampled.'),
-        ('PhiRange', 'linspace(0, 2*pi, 500)', 'String', 'Expression that generates the array of '
-                  'azimuthal angles "phi" to consider for the emission power density. This range '
-                  'decides how fine the power density expression is sampled.'),
+        ('ThetaDomain', '-0.1, 0.1', 'String', ''),
+        ('PhiDomain', '0, 2*pi', 'String', ''),
+        ('ThetaResolutionNumericMode', 100, 'Integer', ''),
+        ('PhiResolutionNumericMode', 100, 'Integer', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
         ('IgnoredOpticalElements', [], 'LinkList', 'Rays of this source ignore the optical freecad_elements given'
@@ -341,7 +319,7 @@ class AddPointSource():
     return obj
 
   def IsActive(self):
-    return True # bool(App.activeDocument())
+    return bool(App.activeDocument())
 
   def GetResources(self):
     return dict(Pixmap=find.iconpath('add-pointsource'),

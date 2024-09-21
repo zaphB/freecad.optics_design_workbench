@@ -4,6 +4,9 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 
+import os
+import types
+import importlib
 import functools
 from .version import __version__
 
@@ -27,7 +30,7 @@ def _ensureSystemPackagesCanBeImported():
       candidate = os.path.realpath(f'/usr/lib{w}/python{ma}.{mi+d}/site-packages')
       if os.path.exists(candidate):
         if candidate not in sys.path:
-          print(f'freecad.optics_design_workbench: python package path {candidate} exists on '
+          print(f'[freecad.optics_design_workbench] python package path {candidate} exists on '
                 f'filesystem but not in sys.path, appending to sys.path...')
           sys.path.append(candidate)
 
