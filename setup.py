@@ -1,7 +1,7 @@
 from setuptools import setup, find_namespace_packages
 
 # DO NOT CHANGE
-version = '0.1.3'
+version = '0.1.4'
 
 # read the contents of readme
 import os
