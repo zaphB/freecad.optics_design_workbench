@@ -7,6 +7,8 @@ import functools
 import subprocess
 import sys
 
+from . import io
+
 @functools.cache
 def detectQtMajorVersion():
   if 'freecad' in sys.executable.lower():
@@ -18,25 +20,38 @@ def detectQtMajorVersion():
       return 6
   return None
 
-# first detect Qt version then decide which pyside to import
-if detectQtMajorVersion() == 5:
-  from PySide2.QtCore import *
-  from PySide2.QtWidgets import *
 
-elif detectQtMajorVersion() == 6:
-  from PySide6.QtCore import *
-  from PySide6.QtWidgets import *
+# first try to import pyside without version, this is FreeCAD
+# specific and is equivalent to the correct version of pyside
+try:
+  from PySide.QtCore import *
+  from PySide.QtWidgets import *
+  io.verb('used module "PySide"')
 
-# if no Qt version is detectable fallback to trying to
-# import pyside6 first and try older versions on import
-# error
-else:
-  try:
+except ImportError:
+  # second attempt: detect Qt version then decide which pyside 
+  # to import
+  if detectQtMajorVersion() == 5:
+    from PySide2.QtCore import *
+    from PySide2.QtWidgets import *
+    io.verb('detected Qt version 5, used module "PySide2"')
+
+  elif detectQtMajorVersion() == 6:
     from PySide6.QtCore import *
     from PySide6.QtWidgets import *
-  except ImportError:
+    io.verb('detected Qt version 6, used module "PySide6"')
+
+  # third attempt: try to import pyside6 first and try older 
+  # versions on import error
+  else:
     try:
-      from PySide2.QtCore import *
-      from PySide2.QtWidgets import *
+      from PySide6.QtCore import *
+      from PySide6.QtWidgets import *
+      io.verb('failed to detect Qt version, used module "PySide6"')
     except ImportError:
-      pass
+      try:
+        from PySide2.QtCore import *
+        from PySide2.QtWidgets import *
+        io.verb('failed to detect Qt version, used module "PySide2"')
+      except ImportError:
+        pass

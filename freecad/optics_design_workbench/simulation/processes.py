@@ -31,6 +31,7 @@ import signal
 from ..detect_pyside import *
 from .. import freecad_elements
 from .. import gui_windows
+from .. import io
 from . import results_store
 
 _SIMULATION_RUNNING = False
@@ -55,7 +56,7 @@ def cancelSimulation():
     _SIMULATION_CANCELED = True
 
 def logMsg(msg):
-  print(datetime.datetime.now().strftime('[%H:%M:%S.%f] ')+msg)
+  io.info(msg)
 
 def runAction(action, simulationRunFolder=None, _isMaster=True, _isWorkerOf=False):
   global _SIMULATION_RUNNING, _SIMULATION_CANCELED

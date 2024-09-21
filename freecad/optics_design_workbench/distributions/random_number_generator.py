@@ -32,12 +32,13 @@ class VectorRandomVariable:
   '''
   Vector valued random variable. 
   '''
-  def __init__(self, probabilityDensity, variableDomains=None, numericalResolutions=None):
+  def __init__(self, probabilityDensity, variableDomains={}, numericalResolutions={}, variableOrder=None):
     self._probabilityDensity = probabilityDensity
     self._probabilityDensityBaseExpr = None
     self._variables = None
     self._variableDomains = variableDomains
     self._numericalResolutions = numericalResolutions
+    self._variableOrder = variableOrder
     self._mode = 'not yet compiled'
 
 
@@ -66,6 +67,7 @@ class VectorRandomVariable:
 
   def showExpressions(self, simplify=True):
     print('probability density expression: ', self._probabilityDensityExpr, ' variables: ', self._variables)
+    print(self._transformLambdas)
     for i, var in enumerate(self._variables):
       print(f'variable "{var}" '+('conditional' if i<len(self._variables)-1 else '')+f' probability density: ')
       probDens, integral, invertedSols = self._transformLambdas[i][0]._origExpressions
@@ -159,6 +161,8 @@ class VectorRandomVariable:
       partialIntegral = sy.Integral(expr, (var,l1,varX)).doit()
       
       exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX)
+      if len(exprYs) == 0:
+        raise ValueError(f'expression {partialIntegral/totalIntegral} seems not to be solvable for {varX}')
       lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY)
                                                 for exprY in exprYs]
 
@@ -185,22 +189,27 @@ class VectorRandomVariable:
                          f'variables {self._variables}')
 
     # make sure resolution is list of right length
-    if self._numericalResolutions is None:
+    if not self._numericalResolutions:
       self._numericalResolutions = 5+int(1e4**(1/len(self._variables)))
-    if not hasattr(self._numericalResolutions, '__iter__'):
-      self._numericalResolutions = [self._numericalResolutions for _ in self._variables]
+    if not type(self._numericalResolutions) is dict:
+      self._numericalResolutions = {str(v): self._numericalResolutions for v in self._variables}
 
     # prepare param grid for probability density evaluation
+    # additional prepare in-between ranges with values sitting between the
+    # original range for use with cumsum later 
     variableRanges = []
+    variableRangesInBetween = []
     #print(f'making grid with {self._numericalResolutions}')
-    for i, var in enumerate(self._variables):
+    for var in self._variables:
       l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
       if not isfinite(l1) or not isfinite(l2):
         raise ValueError(f'failed to find analytical solution, numerical '
                          f'solution requires finite limits, but found limits '
                          f'[{l1}, {l2}] for variable {var}')
-      variableRanges.append(linspace(l1, l2, self._numericalResolutions[i]))
-    variableGrids = meshgrid(*variableRanges)
+      _range = linspace(l1, l2, self._numericalResolutions[str(var)])
+      variableRanges.append(_range)
+      variableRangesInBetween.append((_range[1:]+_range[:-1])/2)
+    variableGrids = meshgrid(*variableRangesInBetween)
 
     # evaluate expression
     exprLam = sy.lambdify(self._variables, expr)
@@ -214,27 +223,62 @@ class VectorRandomVariable:
     # numerically integrate (actually just sum because normalization 
     # happens later anyways) along domain for i<varI
     for _ in range(varI):
-      gridProbs = gridProbs.sum(axis=0)
+      gridProbs = gridProbs.sum(axis=-1)
 
-    # integrate (again actually sum)
-    gridProbs = cumsum(gridProbs, axis=0)
+    # integrate (again actually sum) but insert zeros before to properly start from zero
+    # using the in-between grid makes the result an accurate estimate for probability density
+    # at a given point in the regular (not-in-between) variable grid
+    gridProbs = insert(gridProbs, 0, zeros(gridProbs.shape[:-1]), axis=-1)
+    gridProbs = cumsum(gridProbs, axis=-1)
+
     #print('-=--', varI)
-    #print(gridProbs, variableRanges[varI])
+    #print(gridProbs/gridProbs[...,-1].max(), variableRanges[varI])
 
     # make interpolator function that implements numerical inversion of the integral
     def interpolateResult(x, *params,
                           variableRanges=variableRanges,
+                          variableRangesInBetween=variableRangesInBetween,
                           gridProbs=gridProbs, varI=varI):
-      # select columns according to conditional variable values
-      index = []
-      for i, param in enumerate(params):
-        index.append(argmin(abs(variableRanges[varI+i+1]-param)))
-      gridProbs = gridProbs[:,*index]
 
-      # normalize to maximum entry
-      gridProbs /= gridProbs[-1]
+      # loop over all draw params and assemble result array
+      # if params list is empty, just run loop once with empty list as _params
+      result = []
+      for randIter, _params in enumerate(array(params).T if len(params) else [[]]):
+        # make sure iterating over _params is possible
+        if not hasattr(_params, '__len__'):
+          _params = [_params]
 
-      return interp(x, gridProbs, variableRanges[varI])      
+        # if finite number of params is given, also iterate over individual x
+        # if not params are given, keep shape of x to boost calculation via numpy broadcasting
+        if hasattr(x, '__len__') and len(_params):
+          _x = x[randIter]
+        else:
+          _x = x
+
+        # select columns according to conditional variable values
+        index = []
+        for i, _param in enumerate(_params):
+          index.append(argmin(abs(variableRangesInBetween[varI+i+1]-_param)))
+        #print(f'{shape(gridProbs)=}, {index=}')
+        _gridProbsCol = gridProbs[*index,:]
+
+        # normalize to maximum entry
+        _gridProbsCol /= _gridProbsCol[-1]
+
+        # append interpolated values to result
+        #print(f'{shape(_gridProbsCol)=}, {shape(variableRanges[varI])=}')
+        result.append( interp(_x, _gridProbsCol, variableRanges[varI]) )
+
+      #print(f'{shape(x)=}, {shape(params)=}, {shape(result)=}')
+
+      # transpose results to return in same shape as params were given
+      if len(params):
+        #print('return array')
+        return array(result).T
+
+      # if no params were given return first result only (because there is only one in this case)
+      #print('return first')
+      return result[0]
 
     # numerically invert using interpolator
     lambYs = [interpolateResult]
@@ -246,14 +290,25 @@ class VectorRandomVariable:
 
 
   def draw(self, N=None):
+    # accept float values for N and limit to min 1
+    if N is not None:
+      N = max([1, int(round(N))])
+
     result = []
     for i, transforms in reversed(list(enumerate(self._transformLambdas))):
+      #print(f'drawing var {self._variables[i]}...')
       l1, l2 = self._variableDomains.get(str(self._variables[i]), (-inf, inf))
 
       # roll standard uniform [0,1) rng and transform result, use numpy broadcasting
       # for improved performance
       rand = random.random_sample(**({} if N is None else dict(size=N)))
+      #print(f'{shape(result)=}')
       vals = array([transform(rand, *result[::-1]) for transform in transforms])
+
+      # make sure shapes match (only needed for debugging)
+      if shape(vals) != (1,1) and shape(vals) != shape([rand]*len(transforms)):
+        raise ValueError(f'shape mismatch {shape(vals)=} != {shape([rand]*len(transforms))=}, do '
+                         f'all arguments/attributes of this object have intended shapes?')
 
       # find indices of resulting values that are within bounds
       valid = argwhere(logical_and(l1 <= vals, vals <= l2))
@@ -267,18 +322,41 @@ class VectorRandomVariable:
         result.append(vals[tuple(valid.T)])
       else:
         result.append(vals[tuple(valid.T)][0])
-    return array(result[::-1])
+    
+    # reverse result ordering to restore correct variable order
+    result = array(result[::-1])
+
+    # return results as dictionary with variable names as keys
+    if self._variableOrder is None:
+      return {str(k): v for k, v in zip(self._variables, result)}
+
+    # if variable order is specified, return as array with first dimension ordered as given
+    # first make sure variableOrdering has 1:1 match with _variables
+    _varNames = [str(v) for v in self._variables]
+    for v in self._variableOrder:
+      if v not in _varNames:
+        raise ValueError(f'variable {v} is given in variable ordering, but does not seem to exist in expression {self._probabilityDensityExpr}')
+      _varNames.remove(v)
+    if len(_varNames):
+      raise ValueError(f'variables {_varNames} exist in expression {self._probabilityDensityExpr} but do not exist in {self._variableOrder}')
+
+    # construct ordering index and return
+    _orderingIndex = [[str(v) for v in self._variables].index(_v) for _v in self._variableOrder]
+    return result[_orderingIndex]
 
 
 class ScalarRandomVariable(VectorRandomVariable):
   '''
   Scalar valued random variable. 
   '''
-  def __init__(self, probabilityDensity, variableDomain, numericalResolution=None, **kwargs):
+  def __init__(self, probabilityDensity, variableDomain, variable=None, numericalResolution=None, **kwargs):
+    if variable is None:
+      variable = str(list(sy.sympify(probabilityDensity).free_symbols)[0])
     super().__init__(probabilityDensity, 
-                     variableDomains=[variableDomain],
-                     numericalResolutions=None if numericalResolution is None else [numericalResolution], 
+                     variableDomains={variable: variableDomain},
+                     numericalResolutions=None if numericalResolution is None else {variable: numericalResolution},
+                     variableOrder=[variable,],
                      **kwargs)
 
-  def draw(self, **kwargs):
-    return super().draw(**kwargs)[0]
+  def draw(self, N=None, **kwargs):
+    return super().draw(N=N, **kwargs)[0]
