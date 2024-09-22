@@ -32,14 +32,10 @@ class PointSourceProxy():
   '''
   def execute(self, obj):
     '''Do something when doing a recomputation, this method is mandatory'''
-    # allow redrawing to allow previews during continuous simulation
-    #simulation.cancelSimulation()
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
-    # dont cancel here because the constant redrawing triggers this
-    #simulation.cancelSimulation()
-    
+
     # make sure domains are valid
     if prop in ('PhiDomain', 'ThetaDomain'):
       raw = getattr(obj, prop)
@@ -128,7 +124,7 @@ class PointSourceProxy():
     rays = []
 
     # make sure GUI does not freeze
-    processGuiEvents()
+    keepGuiResponsiveAndRaiseIfSimulationDone()
 
     # fan-mode: generate fans of rays in spherical coordinates
     if mode == 'fans':
@@ -141,7 +137,7 @@ class PointSourceProxy():
       for phi in linspace(0, pi, int(min([obj.Fans, maxFanCount])+1))[:-1]:
 
         # this loop may run for quite some time, keep GUI responsive by handling events
-        processGuiEvents()
+        keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # calculate desired beam power density
         densityLambda = sy.lambdify('theta', densityExpr.subs('phi', phi))
@@ -155,7 +151,7 @@ class PointSourceProxy():
                                               startFrom=0):
 
           # this loop may run for quite some time, keep GUI responsive by handling events
-          processGuiEvents()
+          keepGuiResponsiveAndRaiseIfSimulationDone()
 
           # add lines corresponding to this ray to total ray list
           rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
@@ -195,7 +191,7 @@ class PointSourceProxy():
       thetas, phis = vrv.draw(raysPerIteration)
       for theta, phi in zip(thetas, phis):
         # this loop may run for quite some time, keep GUI responsive by handling events
-        processGuiEvents()
+        keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # create and trace ray
         rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
@@ -217,7 +213,7 @@ class PointSourceProxy():
 
       for (p1,p2), power, medium in r.traceRay(store=store, **kwargs):
         # this loop may run for quite some time, keep GUI responsive by handling events
-        processGuiEvents()
+        keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # add ray segment to storage if enabled
         if store and obj.RecordRays:

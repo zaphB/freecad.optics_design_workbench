@@ -31,11 +31,11 @@ def secondsToStr(secs, length=2):
   return ' '.join(res[:length])
 
 def scaleSuff(x):
-  if x > 3e9:
+  if x >= 2e9:
     return 1e-9, 'G'
-  if x > 3e6:
+  if x >= 2e6:
     return 1e-6, 'M'
-  if x > 3e3:
+  if x >= 2e3:
     return 1e-3, 'k'
   return 1, ''
 
@@ -52,15 +52,31 @@ class QLabeledProgress(QProgressBar):
   def setValue(self, val):
     self.lastVal = val
     scale, suff = scaleSuff(val)
+
+    # decide out how many digits to show
+    digits = 2
+    if val*scale>=10:
+      digits = 1
+    if val*scale>=1e2 or scale==1:
+      digits = 0
+
+    # show progress including target value
     if isfinite(self.maximum):
       if time.time()-self.t0 > 5 and val > 0:
         self.remainingSeconds = (time.time()-self.t0)/val * max([self.maximum-val, 0])
+      self.setRange(0, max([val+1e-2, self.maximum]))
       mscale, msuff = scaleSuff(self.maximum)
-      self.setRange(0, max([val+1e-2, self.maximum])*scale)
-      self.setFormat(f'{self.label}: %v{suff} / {self.maximum*mscale:.0f}{msuff}')
-      super().setValue(val*scale)
+      # decide how many digits to show for maximum
+      mdigits = 1
+      if self.maximum*mscale>=10 or mscale==1:
+        mdigits = 0
+      self.setFormat(f'{self.label}: {val*scale:.{digits}f}{suff}'
+                     f' / {self.maximum*mscale:.{mdigits}f}{msuff}')
+      super().setValue(val)
+
+    # or just show number and never increment bar
     else:
-      self.setFormat(f'{self.label}: {val*scale:.0f}{suff}')
+      self.setFormat(f'{self.label}: {val*scale:.{digits}f}{suff}')
       super().setValue(0)
 
 
@@ -97,13 +113,13 @@ class ProgressWindow(QWidget):
 
   def setStore(self, store):
     self.store = store
-    if any([isfinite(m) for m in (store.maxIterations, store.maxRays, store.maxHits)]):
+    if any([isfinite(m) for m in (store.endAfterIterations, store.endAfterRays, store.endAfterHits)]):
       self.label.setText('simulation progress (approx. ..... remain)')
     else:
       self.label.setText('simulation progress (running infinitely)')
-    self.iterations.maximum = store.maxIterations
-    self.raysTraced.maximum = store.maxRays
-    self.hitsRecorded.maximum = store.maxHits
+    self.iterations.maximum = store.endAfterIterations
+    self.raysTraced.maximum = store.endAfterRays
+    self.hitsRecorded.maximum = store.endAfterHits
     self.iterations.t0 = time.time()
     self.iterations.remainingSeconds = None
     self.raysTraced.t0 = time.time()

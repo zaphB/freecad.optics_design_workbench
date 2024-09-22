@@ -19,11 +19,33 @@ import threading
 from atomicwrites import atomic_write
 
 from .. import freecad_elements
+from .. import io
 from . import processes
 
 def getResultsFolderPath():
   base, fname, folderName = _getFolderBase()
   return f'{base}/{folderName}'
+
+def getLatestRunIndex():
+  folderName = getResultsFolderPath()
+  if os.path.exists(folderName):
+    safeInt = lambda x: int(x) if x.isnumeric() else -1 
+    return max([safeInt(f[4:-4]) for f in os.listdir(folderName) 
+                                    if f.startswith('run-')
+                                          and f.endswith('-raw')]
+                  +[-1])
+  return -1
+
+def generateSimulationFolderName(index=None):
+  if index is None:
+    index = getLatestRunIndex()+1
+  return f'run-{int(index):04d}-raw'
+
+def getLatestRunFolderPath():
+  index = getLatestRunIndex()
+  if index < 0:
+    return None
+  return f'{getResultsFolderPath()}/{generateSimulationFolderName(index)}'
 
 def _getFolderBase():
   # check whether current file is saved
@@ -44,14 +66,6 @@ def _getFolderBase():
   # return results
   return base, fname, folderName
 
-def placeJobDoneFile(simulationRunFolder):
-  path = f'{getResultsFolderPath()}/{simulationRunFolder}'
-  os.makedirs(path, exist_ok=True)
-  with open(f'{path}/job-is-done', 'w') as _:
-    pass
-
-def jobDoneFileExists(simulationRunFolder):
-  return os.path.exists(f'{getResultsFolderPath()}/{simulationRunFolder}/job-is-done')
 
 class SimulationResultsSingleRay:
   def __init__(self, source):
@@ -87,7 +101,7 @@ class SimulationResultsSingleRay:
 class SimulationResults:
   def __init__(self, simulationType, simulationRunFolder, flushEverySeconds=5, 
                dumpProgressEverySeconds=.2,
-               maxIterations=inf, maxRays=inf, maxHits=inf):
+               endAfterIterations=inf, endAfterRays=inf, endAfterHits=inf):
     self.simulationType = simulationType
 
     self.flushEverySeconds = flushEverySeconds
@@ -122,10 +136,10 @@ class SimulationResults:
       except Exception: pass
 
     # set limitss
-    self.maxIterations = maxIterations
-    self.maxRays = maxRays
-    self.maxHits = maxHits
-    self.reachedMax = False
+    self.endAfterIterations = endAfterIterations
+    self.endAfterRays = endAfterRays
+    self.endAfterHits = endAfterHits
+    self.reachedEnd = False
 
     # counters for progress tracking
     self.totalIterations = 0
@@ -256,18 +270,18 @@ class SimulationResults:
         result[k] += v
 
     # check whether simulation is done and call cancelSimulation if so
-    if (result.get('totalIterations', 0) > self.maxIterations
-            or result.get('totalTracedRays', 0) > self.maxRays
-            or result.get('totalRecordedHits', 0) > self.maxHits):
-      self.reachedMax = True
-      processes.cancelSimulation()
+    if (result.get('totalIterations', 0) > self.endAfterIterations
+            or result.get('totalTracedRays', 0) > self.endAfterRays
+            or result.get('totalRecordedHits', 0) > self.endAfterHits):
+      self.reachedEnd = True
+      processes.setIsFinished(True)
 
     # report progress to shell from time to time
     if time.time() - self._lastMsg > 5:
       iteration = result.get("totalIterations") or 0
-      processes.logMsg(f'current iteration {iteration} '
-                       f'({60*60*iteration/(time.time()-self.t0):.1e} iters/hour), '
-                       f'{processes.isWorkerRunning()} workers are alive')
+      io.info(f'current iteration {iteration} '
+              f'({60*60*iteration/(time.time()-self.t0):.1e} iters/hour), '
+              f'{processes.isWorkerRunning()} workers are alive')
       self._lastMsg = time.time()
 
     return result
@@ -332,7 +346,7 @@ class SimulationResults:
     return processes.isRunning() and time.time()-self._latestProgressUpdate < 10+10*self.dumpProgressEverySeconds
 
   def simulationEndedGracefully(self):
-    return not processes.isRunning() and self.reachedMax
+    return not processes.isRunning() and self.reachedEnd
 
   def addRay(self, source):
     if self.rays is None:
@@ -349,18 +363,3 @@ class SimulationResults:
       self.hits = []
     self.hits.append([source, obj, point, power, isEntering])
     self.writeDiskIfNeeded()
-
-def getLatestRunIndex():
-  folderName = getResultsFolderPath()
-  if os.path.exists(folderName):
-    safeInt = lambda x: int(x) if x.isnumeric() else -1 
-    return max([safeInt(f[4:-4]) for f in os.listdir(folderName) 
-                                    if f.startswith('run-')
-                                          and f.endswith('-raw')]
-                  +[-1])
-  return -1
-
-def generateSimulationFolderName(index=None):
-  if index is None:
-    index = getLatestRunIndex()+1
-  return f'run-{int(index):04d}-raw'

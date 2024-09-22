@@ -13,7 +13,7 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 """.strip()
 
 FILENAME_BLACKLIST = ('setup.py',)
-DIRNAME_BLACKLIST  = ('.git', 'dev', 'releases', 'container-home')
+DIRNAME_BLACKLIST  = ('.git', 'dev', 'build', 'releases', 'container-home')
 SRC_SUFFIXES       = ('.py',)
 
 def conf(msg, default=None):
@@ -46,7 +46,7 @@ def main():
       if any([f.endswith(suff) for suff in SRC_SUFFIXES]) and f not in FILENAME_BLACKLIST:
         with open(f'{r}/{f}') as _f:
           content = _f.read()
-        if HEADER[:10] not in content:
+        if HEADER[-30:] not in content:
           path = os.path.relpath(f'{r}/{f}', start=os.path.dirname(__file__)+'/..')
           if conf(f'found source file {path} with missing header, insert?', default=True):
             with open(f'{r}/{f}', 'w') as _f:

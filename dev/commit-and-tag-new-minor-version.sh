@@ -22,6 +22,7 @@ newVer="$major.$(expr $minor + 1).0"
 echo && echo "-> version was $major.$minor.$micro, setting new version $newVer..." \
   && perl -pe 's/version\s*=\s*'\''\d+\.\d+\.\d+'\''/version = '"'$newVer'"'/g' setup.py >/tmp/setup.py \
   && mv /tmp/setup.py setup.py \
+  && ./dev/update-setup.py \
   && echo "done." \
   && pip install . \
   && pip install -e . \

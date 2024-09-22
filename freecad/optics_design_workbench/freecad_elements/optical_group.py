@@ -14,7 +14,6 @@ from . import find
 from .. import simulation
 
 
-
 #####################################################################################################
 class OpticalGroupProxy():
   '''
@@ -22,7 +21,6 @@ class OpticalGroupProxy():
   '''
   def execute(self, obj):
     '''Do something when doing a recomputation, this method is mandatory'''
-    simulation.cancelSimulation()
 
   def setVisibleProperties(self, obj, props):
     dynamicProps = ['AbsorptionLength', 'RefractiveIndex', 'Reflectivity']
@@ -31,7 +29,6 @@ class OpticalGroupProxy():
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
-    simulation.cancelSimulation()
 
     if prop == 'OpticalType':
       oldType = getattr(self, 'oldType', None)

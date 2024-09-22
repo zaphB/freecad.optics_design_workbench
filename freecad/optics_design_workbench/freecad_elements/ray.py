@@ -61,7 +61,7 @@ class Ray():
     prevPower, currentPower = self.initPower, self.initPower
     while True:
       # this loop may run for quite some time, keep GUI responsive by handling events
-      processGuiEvents()
+      keepGuiResponsiveAndRaiseIfSimulationDone()
       
       # stop tracing if maxIntersections limit is reached
       if numIntersections >= maxIntersections:
@@ -160,7 +160,7 @@ class Ray():
     for group in find.relevantOpticalObjects(self.lightSource):
 
       # this loop may run for quite some time, keep GUI responsive by handling events
-      processGuiEvents()
+      keepGuiResponsiveAndRaiseIfSimulationDone()
 
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
@@ -177,7 +177,7 @@ class Ray():
           for face in group.Shape.Faces:
 
             # this loop may run for quite some time, keep GUI responsive by handling events
-            processGuiEvents()
+            keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
             bb = face.BoundBox
@@ -190,7 +190,7 @@ class Ray():
                 for point in points:
                   
                   # this loop may run for quite some time, keep GUI responsive by handling events
-                  processGuiEvents()
+                  keepGuiResponsiveAndRaiseIfSimulationDone()
 
                   vec = Vector(point.X, point.Y, point.Z)
                   vert = Part.Vertex(point)

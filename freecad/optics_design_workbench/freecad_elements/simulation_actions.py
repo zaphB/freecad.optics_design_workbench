@@ -26,7 +26,7 @@ class OpticalSimulationAction:
         obj.Proxy.clear(obj)
         
         # make sure GUI does not freeze during this
-        processGuiEvents()
+        keepGuiResponsive()
     else:
       # forward action to simulations submodule
       simulation.runAction(self.action)
@@ -51,33 +51,25 @@ class OpticalSimulationAction:
         ),
         fans=dict(
           MenuText='Recalculate fans',
-          ToolTip='Calculate and display ray fans for all light sources. '
-                  'Note that the ray fans placed automatically during editing '
-                  'have a reduced density. User this action to calculate ray '
-                  'fans with the full resolution specified in the light source '
-                  'settings.'
+          ToolTip='Calculate and display ray fans for all light sources.'
         ),
         singlepseudo=dict(
           MenuText='Run a single pseudo-random iteration',
-          ToolTip='Run and display a single pseudo-random Monte-Carlo iteration. '
-                  'Editing the project will immediately cancel the simulation.'
+          ToolTip='Run and display a single pseudo-random Monte-Carlo iteration.'
         ),
         singletrue=dict(
           MenuText='Run a single true random iteration',
-          ToolTip='Run and display a single true random Monte-Carlo iteration. '
-                  'Editing the project will immediately cancel the simulation.'
+          ToolTip='Run and display a single true random Monte-Carlo iteration.'
         ),
         pseudo=dict(
           MenuText='Start pseudo-random simulation',
           ToolTip='Start running the pseudo-random Monte-Carlo simulation in '
-                  'the background. Editing the project will immediately cancel '
-                  'the simulation.'
+                  'the background.'
         ),
         true=dict(
           MenuText='Start true random simulation',
           ToolTip='Start running the true random Monte-Carlo simulation in '
-                  'the background. Editing the project will immediately cancel '
-                  'the simulation.'
+                  'the background.'
         ),
         stop=dict(
           MenuText='Stop running simulation',

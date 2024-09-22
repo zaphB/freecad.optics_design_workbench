@@ -36,9 +36,9 @@ class OpticsDesignWorkbench(Gui.Workbench):
         # place/start/stop simulation in the various modes
         'Clear all rays',
         'Place ray fans',
-        'Single pseudo random',
+        #'Single pseudo random',
         'Single true random',
-        'Continuous pseudo random',
+        #'Continuous pseudo random',
         'Continuous true random',
         'Stop continuous',
       ]
