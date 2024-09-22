@@ -343,8 +343,8 @@ class SimulationResults:
       self.dumpProgress()
 
   def isSimulationRunning(self):
-    return processes.isRunning() and time.time()-self._latestProgressUpdate < 10+10*self.dumpProgressEverySeconds
-
+    return processes.isRunning()
+  
   def simulationEndedGracefully(self):
     return not processes.isRunning() and self.reachedEnd
 
