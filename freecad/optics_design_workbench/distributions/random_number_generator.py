@@ -163,8 +163,9 @@ class VectorRandomVariable:
       exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX)
       if len(exprYs) == 0:
         raise ValueError(f'expression {partialIntegral/totalIntegral} seems not to be solvable for {varX}')
-      lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY)
-                                                for exprY in exprYs]
+      lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY, 
+                            modules=['numpy', 'scipy'])
+                                            for exprY in exprYs]
 
       # attach expressions to lambda for convenience
       for lam in lambYs:

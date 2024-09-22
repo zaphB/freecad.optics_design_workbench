@@ -52,6 +52,11 @@ class PointSourceProxy():
       if getattr(obj, prop) < 3:
         setattr(obj, prop, 3)
   
+    # reset random number generator mode to ? if power density expression is changed
+    if prop in ('PowerDensity', 'PhiDomain', 'ThetaDomain'):
+      obj.RandomNumberGeneratorMode = '?'
+
+
   def _parsedDomain(self, domain, default=None):
     # try to parse
     try:
@@ -185,6 +190,7 @@ class PointSourceProxy():
                     theta=obj.ThetaResolutionNumericMode,
                     phi=obj.PhiResolutionNumericMode))
       vrv.compile()
+      obj.RandomNumberGeneratorMode = vrv.mode()
 
       thetas, phis = vrv.draw(raysPerIteration)
       for theta, phi in zip(thetas, phis):
@@ -283,13 +289,14 @@ class AddPointSource():
                   'angle "phi".'),
         ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
         ('FocalLength', 0, 'Float', 'Distance of the ray origin from the location of the light source. '
-                  'Negative values result in a converging beam.')
+                  'Negative values result in a converging beam.'),
+        ('ThetaDomain', '-0.3, 0.3', 'String', ''),
+        ('PhiDomain', '0, 2*pi', 'String', ''),
       ]),
       ('OpticalSimulationSettings', [
+        ('RandomNumberGeneratorMode', '?', 'String', ''),
         ('RecordRays', False, 'Bool', ''),
-        ('ThetaDomain', '-0.1, 0.1', 'String', ''),
-        ('PhiDomain', '0, 2*pi', 'String', ''),
-        ('ThetaResolutionNumericMode', 100, 'Integer', ''),
+        ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
         ('PhiResolutionNumericMode', 100, 'Integer', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
@@ -315,6 +322,9 @@ class AddPointSource():
     # register custom proxy and view provider proxy
     obj.Proxy = PointSourceProxy()
     obj.ViewObject.Proxy = PointSourceViewProxy()
+
+    # make mode readonly
+    obj.setEditorMode('RandomNumberGeneratorMode', 1)
 
     return obj
 

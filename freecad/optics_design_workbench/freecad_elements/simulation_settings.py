@@ -134,6 +134,8 @@ class MakeSimulationSettings:
               'and pseudo random modes.'),
         ('MaxIntersections', 100, 'Float', 'Maximum number of intersections (reflections/refractions/'
               'detections) that a ray may have with optical objects.'),
+        ('DistanceTolerance', 0.01, 'Float', 'If a ray is closer to a surface than this tolerance, '
+              'it is considered to intersect with the surface.'),
         ('MaxRayLength', 100, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
               'may be up to MaxIntersections*MaxRayLength. This is not a strict '
               'limit but rather a possibility for the ray tracer to save time by ignoring '

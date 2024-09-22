@@ -45,7 +45,9 @@ def _getFolderBase():
   return base, fname, folderName
 
 def placeJobDoneFile(simulationRunFolder):
-  with open(f'{getResultsFolderPath()}/{simulationRunFolder}/job-is-done', 'w') as _:
+  path = f'{getResultsFolderPath()}/{simulationRunFolder}'
+  os.makedirs(path, exist_ok=True)
+  with open(f'{path}/job-is-done', 'w') as _:
     pass
 
 def jobDoneFileExists(simulationRunFolder):

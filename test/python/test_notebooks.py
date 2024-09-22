@@ -25,10 +25,8 @@ class TestRunNotebooks(unittest.TestCase):
       for f in files:
         if f.endswith('.ipynb') and not f.endswith('.nbconvert.ipynb'):
           with self.subTest(f):
-            subprocess.run(f'jupyter nbconvert '
-                  f'--ExecutePreprocessor.timeout=None '
-                  f'--to notebook --execute "{f}"',
-                  cwd=root, shell=True, check=True)
+            subprocess.run(f'jupyter execute "{f}"',
+                           cwd=root, shell=True, check=True)
 
 if __name__ == '__main__':
   unittest.main()
