@@ -45,7 +45,7 @@ class VectorRandomVariable:
     self._mode = 'not yet compiled'
 
 
-  def compile(self, timeout=5, disableAnalytical=False, **kwargs):
+  def compile(self, timeout=2, disableAnalytical=False, **kwargs):
     self._deadline = time.time()+timeout
     self._setConstants(**kwargs)
 
@@ -54,12 +54,12 @@ class VectorRandomVariable:
       if disableAnalytical:
         raise ValueError('stop')
 
-      # try to analytical treatment first
+      # try analytical treatment first
       self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
       self._mode = 'analytic'
 
+    # fallback to numerical treatment and analytical mode did not succeed
     except Exception:
-      # fallback to numerical treatment and analytical mode did not succeed
       self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
       self._mode = 'numeric'
 
@@ -150,8 +150,8 @@ class VectorRandomVariable:
           raise ValueError('oops')
       except Exception:
         warnings.warn(f'not sure whether expression for probability density '
-                      f'"{expr}" will always yield '
-                      f'positve values, which will break the RNG')
+                      f'"{expr}" is always positive values; negative '
+                      f'probabilities will lead to undefined behavior')
 
       # integrate along domain for i<varI
       for i in range(varI):
@@ -172,7 +172,8 @@ class VectorRandomVariable:
       totalIntegral = sy.Integral(expr, (var,l1,l2)).doit()
       partialIntegral = sy.Integral(expr, (var,l1,varX)).doit()
       
-      exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX)
+      exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX, 
+                        simplify=False)  # do not simplify, this speeds up the solver a lot
       if len(exprYs) == 0:
         raise ValueError(f'expression {partialIntegral/totalIntegral} seems not to be solvable for {varX}')
       lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY, 

@@ -178,7 +178,7 @@ class TestRunNotebooks(unittest.TestCase):
 
     # run simulation three times without cleaning and cancel after a few seconds
     for _ in range(3):
-      baseDir, filename = self._runFile('playground', cleanup=False, cancelAfter=3)
+      baseDir, filename = self._runFile('gaussian', cleanup=False, cancelAfter=3)
     
     # expect three result folders plus one log file plus one "simulation canceled" file
     results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')

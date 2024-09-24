@@ -25,6 +25,12 @@ from .. import simulation
 from .. import distributions
 from .. import io
 
+# global dict with keys being PointSourceProxy objects and values being 
+# more dicts that store pseudo-attributes. This akward attribute storing
+# format allows to bypass the serializer which wants to safe the Proxy
+# objects whenever the FreeCAD project is saved.
+NON_SERIALIZABLE_STORE = {}
+
 #####################################################################################################
 class PointSourceProxy():
   '''
@@ -49,8 +55,40 @@ class PointSourceProxy():
         setattr(obj, prop, 3)
   
     # reset random number generator mode to ? if power density expression is changed
-    if prop in ('PowerDensity', 'PhiDomain', 'ThetaDomain'):
-      obj.RandomNumberGeneratorMode = '?'
+    if prop in ('PowerDensity', 'PhiDomain', 'ThetaDomain', 
+                'ThetaResolutionNumericMode', 'PhiResolutionNumericMode'):
+      self._clearVrv(obj)
+
+
+  def _getVrv(self, obj):
+    if NON_SERIALIZABLE_STORE.get(self, None) is None:
+      NON_SERIALIZABLE_STORE[self] = {}
+    
+    if NON_SERIALIZABLE_STORE[self].get('vrv', None) is None:
+      # attach to obj and not to self, because attrbutes of self should be serializable
+      NON_SERIALIZABLE_STORE[self]['vrv'] = (
+            distributions.VectorRandomVariable(
+                    obj.PowerDensity+'*abs(sin(theta))', # add correction for spherical coordinate area element size 
+                    variableOrder=('theta', 'phi'),
+                    variableDomains=dict(
+                        theta=self.parsedThetaDomain(obj), 
+                        phi=self.parsedPhiDomain(obj)),
+                    numericalResolutions=dict(
+                        theta=obj.ThetaResolutionNumericMode,
+                        phi=obj.PhiResolutionNumericMode))
+      )
+      vrv = NON_SERIALIZABLE_STORE[self]['vrv']
+      vrv.compile()
+      obj.RandomNumberGeneratorMode = vrv.mode()
+    return NON_SERIALIZABLE_STORE[self]['vrv']
+
+
+  def _clearVrv(self, obj):
+    _stored = NON_SERIALIZABLE_STORE.get(self, {})
+    _stored['vrv'] = None
+    NON_SERIALIZABLE_STORE[self] = _stored
+    obj.RandomNumberGeneratorMode = '?'
+
 
   def _parsedDomain(self, domain, default=None):
     # try to parse
@@ -194,7 +232,7 @@ class PointSourceProxy():
     if mode == 'fans':
       raysPerIteration = min([obj.RaysPerFan, maxRaysPerFan])
 
-      # prepare expression
+      # prepare expression, multiply with theta to correct for spherical coordinates
       densityExpr = sy.sympify(obj.PowerDensity)
 
       # create obj.Fans ray fans oriented in phi0
@@ -207,6 +245,11 @@ class PointSourceProxy():
         densityLambda = sy.lambdify('theta', densityExpr.subs('phi', phi))
         thetas = linspace(*self.parsedThetaDomain(obj), obj.ThetaResolutionNumericMode)
         density = densityLambda(thetas)
+
+        # mirror density for fans if domain is starting from zero
+        if isclose(thetas[0], 0):
+          thetas = concatenate([-thetas[::-1][:-1], thetas])
+          density = concatenate([density[::-1][:-1], density])
 
         # generate the required thetas to place beams at and create beams
         for theta in distributions.generatePointsWithGivenDensity1D(
@@ -239,21 +282,10 @@ class PointSourceProxy():
         raysPerIteration = settings.RaysPerIteration
       raysPerIteration *= obj.RaysPerIterationScale
 
-      # create random variable for theta and phi
-      vrv = distributions.VectorRandomVariable(
-                obj.PowerDensity, 
-                variableOrder=('theta', 'phi'),
-                variableDomains=dict(
-                    theta=self.parsedThetaDomain(obj), 
-                    phi=self.parsedPhiDomain(obj)),
-                numericalResolutions=dict(
-                    theta=obj.ThetaResolutionNumericMode,
-                    phi=obj.PhiResolutionNumericMode))
-      vrv.compile()
-      obj.RandomNumberGeneratorMode = vrv.mode()
-
-      thetas, phis = vrv.draw(raysPerIteration)
+      # create/get random variable for theta and phi and draw samples 
+      thetas, phis = self._getVrv(obj).draw(N=raysPerIteration)
       for theta, phi in zip(thetas, phis):
+
         # this loop may run for quite some time, keep GUI responsive by handling events
         keepGuiResponsiveAndRaiseIfSimulationDone()
 
@@ -313,14 +345,14 @@ class AddPointSource():
         ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
         ('FocalLength', 0, 'Float', 'Distance of the ray origin from the location of the light source. '
                   'Negative values result in a converging beam.'),
-        ('ThetaDomain', '-0.3, 0.3', 'String', ''),
+        ('ThetaDomain', '0, pi/2', 'String', ''),
         ('PhiDomain', '0, 2*pi', 'String', ''),
       ]),
       ('OpticalSimulationSettings', [
         ('RandomNumberGeneratorMode', '?', 'String', ''),
         ('RecordRays', False, 'Bool', ''),
         ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
-        ('PhiResolutionNumericMode', 100, 'Integer', ''),
+        ('PhiResolutionNumericMode', 50, 'Integer', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
         ('IgnoredOpticalElements', [], 'LinkList', 'Rays of this source ignore the optical freecad_elements given'
