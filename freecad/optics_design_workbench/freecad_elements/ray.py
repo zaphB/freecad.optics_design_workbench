@@ -18,6 +18,7 @@ import time
 from . import find
 from .common import *
 
+
 class Ray():
   '''
   Class representing an individual ray.
@@ -27,6 +28,7 @@ class Ray():
     self.startingPoint = startingPoint
     self.direction = direction
     self.initPower = initPower
+  
      
   def traceRay(self, powerTol=1e-6, maxRayLength=None,
                maxIntersections=None, store=False):
@@ -59,7 +61,7 @@ class Ray():
     prevPower, currentPower = self.initPower, self.initPower
     while True:
       # this loop may run for quite some time, keep GUI responsive by handling events
-      processGuiEvents()
+      keepGuiResponsiveAndRaiseIfSimulationDone()
       
       # stop tracing if maxIntersections limit is reached
       if numIntersections >= maxIntersections:
@@ -70,7 +72,7 @@ class Ray():
       intersect = self.findNearestIntersection(currentPoint, currentDirection, maxRayLength=maxRayLength)
       if intersect is None:
         # if no intersection is found yield segment with maxLength and exit loop
-        yield ((currentPoint, currentDirection/currentDirection.Length*maxRayLength), 
+        yield ((currentPoint, currentPoint + currentDirection/currentDirection.Length*maxRayLength), 
                 currentPower, currentMedium)
         break
       obj, face, point = intersect
@@ -86,7 +88,8 @@ class Ray():
       normal, isEntering = self.getNormal(face, prevPoint, currentPoint)
 
       # run onHit handler of object that caused intersection
-      obj.Proxy.onRayHit(source=self.lightSource, obj=obj, point=currentPoint, 
+      obj.Proxy.onRayHit(source=self.lightSource, obj=obj, 
+                         point=currentPoint, direction=currentDirection, 
                          power=currentPower, isEntering=isEntering, store=store)
 
       # hit mirror: direction is mirrored at normal, 
@@ -137,12 +140,21 @@ class Ray():
       if currentPower < powerTol:
         break
   
+  def _getDistTol(self, distTol):
+    if distTol is None:
+      distTol = 1e-2
+      if settings := find.activeSimulationSettings():
+        distTol = settings.DistanceTolerance
+    return max([distTol, 1e-4])
 
-  def findNearestIntersection(self, start, direction, maxRayLength, distTol=1e-6):
+  def findNearestIntersection(self, start, direction, maxRayLength, distTol=None):
     '''
     Find the closest relevant optical object intersecting with the ray
-    of given start and direction.
+    of given start and direction. Start and direction are expected to be
+    given in global coordinates.
     '''
+    distTol = self._getDistTol(distTol)
+
     line = Part.makeLine(start, start+direction/direction.Length*maxRayLength)
     intersects = []
     
@@ -150,54 +162,60 @@ class Ray():
     for group in find.relevantOpticalObjects(self.lightSource):
 
       # this loop may run for quite some time, keep GUI responsive by handling events
-      processGuiEvents()
+      keepGuiResponsiveAndRaiseIfSimulationDone()
 
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
-      if (hasattr(group, 'Shape')
-            and ( not isfinite(maxRayLength)
-                      or any([(group.Shape.BoundBox.getPoint(i)-start).Length
-                                                          < maxRayLength 
-                                                                for i in range(8)]) )
-            and group.Shape.BoundBox.intersect(start, direction) ):
+      if hasattr(group, 'Shape'):
+        bb = group.Shape.BoundBox
+        bb.enlarge(distTol)
+        if ( ( not isfinite(maxRayLength)
+                or any([(bb.getPoint(i)-start).Length
+                                  < maxRayLength 
+                                        for i in range(8)]) )
+            and bb.intersect(start, direction) ):
 
-        # loop through all faces
-        for face in group.Shape.Faces:
+          # loop through all faces
+          for face in group.Shape.Faces:
 
-          # this loop may run for quite some time, keep GUI responsive by handling events
-          processGuiEvents()
+            # this loop may run for quite some time, keep GUI responsive by handling events
+            keepGuiResponsiveAndRaiseIfSimulationDone()
 
-          # only care if bounding box of face intersects with ray
-          if face.BoundBox.intersect(start, direction):
+            # only care if bounding box of face intersects with ray
+            bb = face.BoundBox
+            bb.enlarge(distTol)
+            if bb.intersect(start, direction):
 
-            # find intersection points and loop through all of them
-            if intersect := line.Curve.intersect(face.Surface):
-              points, _ = intersect
-              for point in points:
-                
-                # this loop may run for quite some time, keep GUI responsive by handling events
-                processGuiEvents()
+              # find intersection points and loop through all of them
+              if intersect := line.Curve.intersect(face.Surface):
+                points, _ = intersect
+                for point in points:
+                  
+                  # this loop may run for quite some time, keep GUI responsive by handling events
+                  keepGuiResponsiveAndRaiseIfSimulationDone()
 
-                vec = Vector(point.X, point.Y, point.Z)
-                vert = Part.Vertex(point)
+                  vec = Vector(point.X, point.Y, point.Z)
+                  vert = Part.Vertex(point)
 
-                # if found intersection point has some finite distance from 
-                # origin and lies within the target face and on the line,
-                # add to candidate list
-                if ( (vec-start).Length > distTol
-                      and vert.distToShape(line)[0] < distTol
-                      and vert.distToShape(face)[0] < distTol):
-                  intersects.append([group, face, vec, (vec-start).Length])
+                  # if found intersection point has some finite distance from 
+                  # origin and lies within the target face and on the line,
+                  # add to candidate list
+                  if ( (vec-start).Length > distTol
+                        and vert.distToShape(line)[0] < distTol
+                        and vert.distToShape(face)[0] < distTol):
+                    intersects.append([group, face, vec, (vec-start).Length])
 
     # return intersection that is closest to start (if any)
     if len(intersects):
       return sorted(intersects, key=lambda e: e[-1])[0][:-1]
   
   
-  def getNormal(self, nearest_part, origin, neworigin, distTol=1e-6):
+  def getNormal(self, nearest_part, origin, neworigin, distTol=None):
     '''
     calculate the normal vector given, inherited from OpticsWorkbench, needs cleaning
     '''
+    distTol = self._getDistTol(distTol)
+
     dRay = neworigin - origin
     if hasattr(nearest_part, 'Curve'):
       param = nearest_part.Curve.parameter(neworigin)

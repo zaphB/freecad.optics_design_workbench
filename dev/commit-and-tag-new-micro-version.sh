@@ -22,9 +22,8 @@ newVer="$major.$minor.$(expr $micro + 1)"
 echo && echo "-> version was $major.$minor.$micro, setting new version $newVer..." \
   && perl -pe 's/version\s*=\s*'\''\d+\.\d+\.\d+'\''/version = '"'$newVer'"'/g' setup.py >/tmp/setup.py \
   && mv /tmp/setup.py setup.py \
+  && ./dev/update-setup.py \
   && echo "done." \
-  && pip install . \
-  && pip install -e . \
   && echo && echo "-> adding all files and create new commit " \
   && git add . \
   && git commit $* \

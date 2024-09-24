@@ -1,13 +1,10 @@
+#!/usr/bin/env python3
+
 __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
 
-'''.strip()
-
-
-#!/usr/bin/env python3
 
 from numpy import *
 from matplotlib.pyplot import *
@@ -89,10 +86,10 @@ class TestRunNotebooks(unittest.TestCase):
     return baseDir, filename
 
 
-  def _test_runPlaygroundExample(self):
+  def test_runPlaygroundExample(self):
     # make sure FCStd file runs and yields expected number of hits (> 100 rays * 10 iterations)
     baseDir, filename = self._runFile('playground')
-    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/lightsource-PointSource/hitObject-OpticalAbsorberGroup'
+    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/source-OpticalPointSource/object-OpticalAbsorberGroup'
     results = []
     for f in os.listdir(resultsPath):
       with open(resultsPath+'/'+f, 'rb') as _f:
@@ -107,17 +104,17 @@ class TestRunNotebooks(unittest.TestCase):
     _, filename = self._runFile('nosettings')
     self._cleanResults(filename)
 
-  def _test_runAndCancelGaussianExample(self):
+  def test_runAndCancelGaussianExample(self):
     t0 = time.time()
     baseDir, filename = self._runFile('gaussian', cancelAfter=5)
 
 
 
-  def _test_runGaussianExample(self):
+  def test_runGaussianExample(self):
     baseDir, filename = self._runFile('gaussian')
 
     # make sure results exist
-    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/lightsource-PointSource/hitObject-OpticalAbsorberGroup'
+    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/source-OpticalPointSource/object-OpticalAbsorberGroup'
     results = []
     for f in os.listdir(resultsPath):
       with open(resultsPath+'/'+f, 'rb') as _f:
@@ -156,8 +153,8 @@ class TestRunNotebooks(unittest.TestCase):
     # cleanup
     self._cleanResults(filename)
 
-    
-  def _test_runThreeTimes(self):
+  
+  def test_runThreeTimes(self):
     # make sure working dir is clean
     baseDir, filename = self._runFile('playground')
     self._cleanResults(filename)
@@ -166,30 +163,29 @@ class TestRunNotebooks(unittest.TestCase):
     for _ in range(3):
       baseDir, filename = self._runFile('playground', cleanup=False)
     
-    # expect three result folders
+    # expect three result folders plus one log file plus one "simulation done" file
     results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
-    self.assertEqual(len(results), 3)
+    self.assertEqual(len(results), 3 + 1 + 1)
 
     # cleanup
     self._cleanResults(filename)
 
 
-  def _test_runAndCancelThreeTimes(self):
+  def test_runAndCancelThreeTimes(self):
     # make sure working dir is clean
     baseDir, filename = self._runFile('gaussian', cancelAfter=3)
     self._cleanResults(filename)
 
     # run simulation three times without cleaning and cancel after a few seconds
     for _ in range(3):
-      baseDir, filename = self._runFile('playground', cleanup=False, cancelAfter=3)
+      baseDir, filename = self._runFile('gaussian', cleanup=False, cancelAfter=3)
     
-    # expect three result folders
+    # expect three result folders plus one log file plus one "simulation canceled" file
     results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
-    self.assertEqual(len(results), 3)
+    self.assertEqual(len(results), 3 + 1 + 1)
 
     # cleanup
     self._cleanResults(filename)
-
 
 
 if __name__ == '__main__':

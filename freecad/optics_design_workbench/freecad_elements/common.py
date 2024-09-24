@@ -12,31 +12,29 @@ except ImportError:
 
 import time
 
-from ..detect_pyside import QApplication
 from .. import simulation
 
 _LAST_PROCESS_EVENTS_CALL = time.time()
 _MIN_UPDATE_INTERVAL = 1e-2
 
-class SimulationCanceled(RuntimeError):
+class SimulationEnded(RuntimeError):
   pass
 
-def processGuiEvents():
+def keepGuiResponsive(raiseIfSimulationDone=False):
+  from ..detect_pyside import QApplication  
   global _LAST_PROCESS_EVENTS_CALL
-  if QApplication.instance() and time.time()-_LAST_PROCESS_EVENTS_CALL > _MIN_UPDATE_INTERVAL:
-  
-    # process Qt events
-    QApplication.processEvents()
+  if time.time()-_LAST_PROCESS_EVENTS_CALL > _MIN_UPDATE_INTERVAL:
     _LAST_PROCESS_EVENTS_CALL = time.time()
+  
+    if QApplication.instance():
+      # process Qt events
+      QApplication.processEvents()
+      Gui.updateGui()
+      QApplication.processEvents()
 
-    # check whether simulation was canceled and raise SimulationCanceled if so
-    if simulation.isCanceled():
-      raise SimulationCanceled()
-
-def updateGui():
-  if QApplication.instance():
-    QApplication.processEvents()
-    QApplication.processEvents()
-    Gui.updateGui()
-    QApplication.processEvents()
-    QApplication.processEvents()
+    # check whether simulation was canceled and raise SimulationEnded if so
+    if raiseIfSimulationDone and (simulation.isCanceled() or simulation.isFinished()):
+      raise SimulationEnded()
+      
+def keepGuiResponsiveAndRaiseIfSimulationDone():
+  keepGuiResponsive(raiseIfSimulationDone=True)

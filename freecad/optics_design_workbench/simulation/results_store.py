@@ -19,11 +19,33 @@ import threading
 from atomicwrites import atomic_write
 
 from .. import freecad_elements
+from .. import io
 from . import processes
 
 def getResultsFolderPath():
   base, fname, folderName = _getFolderBase()
   return f'{base}/{folderName}'
+
+def getLatestRunIndex():
+  folderName = getResultsFolderPath()
+  if os.path.exists(folderName):
+    safeInt = lambda x: int(x) if x.isnumeric() else -1 
+    return max([safeInt(f[4:-4]) for f in os.listdir(folderName) 
+                                    if f.startswith('run-')
+                                          and f.endswith('-raw')]
+                  +[-1])
+  return -1
+
+def generateSimulationFolderName(index=None):
+  if index is None:
+    index = getLatestRunIndex()+1
+  return f'run-{int(index):04d}-raw'
+
+def getLatestRunFolderPath():
+  index = getLatestRunIndex()
+  if index < 0:
+    return None
+  return f'{getResultsFolderPath()}/{generateSimulationFolderName(index)}'
 
 def _getFolderBase():
   # check whether current file is saved
@@ -44,12 +66,6 @@ def _getFolderBase():
   # return results
   return base, fname, folderName
 
-def placeJobDoneFile(simulationRunFolder):
-  with open(f'{getResultsFolderPath()}/{simulationRunFolder}/job-is-done', 'w') as _:
-    pass
-
-def jobDoneFileExists(simulationRunFolder):
-  return os.path.exists(f'{getResultsFolderPath()}/{simulationRunFolder}/job-is-done')
 
 class SimulationResultsSingleRay:
   def __init__(self, source):
@@ -85,7 +101,7 @@ class SimulationResultsSingleRay:
 class SimulationResults:
   def __init__(self, simulationType, simulationRunFolder, flushEverySeconds=5, 
                dumpProgressEverySeconds=.2,
-               maxIterations=inf, maxRays=inf, maxHits=inf):
+               endAfterIterations=inf, endAfterRays=inf, endAfterHits=inf):
     self.simulationType = simulationType
 
     self.flushEverySeconds = flushEverySeconds
@@ -120,10 +136,10 @@ class SimulationResults:
       except Exception: pass
 
     # set limitss
-    self.maxIterations = maxIterations
-    self.maxRays = maxRays
-    self.maxHits = maxHits
-    self.reachedMax = False
+    self.endAfterIterations = endAfterIterations
+    self.endAfterRays = endAfterRays
+    self.endAfterHits = endAfterHits
+    self.reachedEnd = False
 
     # counters for progress tracking
     self.totalIterations = 0
@@ -152,9 +168,9 @@ class SimulationResults:
     if type(source) is str:
       folderName += f'/{source}'
     elif source:
-      folderName += f'/lightsource-{source.Label}'
+      folderName += f'/source-{source.Label}'
     if obj:
-      folderName += f'/hitObject-{obj.Label}'
+      folderName += f'/object-{obj.Label}'
 
     # generate filename from fingerprint, timestamp and kind
     fname = f'{self._fingerprint()}-{kind}.pkl'
@@ -200,15 +216,17 @@ class SimulationResults:
     if self.hits is not None:
       # assemble dictionaries to dump
       results = {}
-      for source, obj, p, power, isEntering in self.hits:
+      for source, obj, p, d, power, isEntering in self.hits:
         # create entry in results dict if needed
         fname = self._makeFilename(kind='hits', source=source, obj=obj)
         if fname not in results.keys():
           results[fname] = dict(source=source.Name, obj=obj.Name,
-                                points=[], powers=[], isEntering=[])
+                                points=[], directions=[], 
+                                powers=[], isEntering=[])
 
         # append data to entry
         results[fname]['points'].append(list(p))
+        results[fname]['directions'].append(list(d))
         results[fname]['powers'].append(power)
         results[fname]['isEntering'].append(int(isEntering))
 
@@ -245,7 +263,7 @@ class SimulationResults:
   def progressMonitorPath(self):
     return os.path.dirname(self._makeFilename(source='progress', kind='none'))
 
-  def getProgress(self):
+  def getProgress(self, _neverReport=False):
     result = {}
     for _, prog in self.getProgressByWorker().items():
       for k, v in prog.items():
@@ -254,21 +272,27 @@ class SimulationResults:
         result[k] += v
 
     # check whether simulation is done and call cancelSimulation if so
-    if (result.get('totalIterations', 0) > self.maxIterations
-            or result.get('totalTracedRays', 0) > self.maxRays
-            or result.get('totalRecordedHits', 0) > self.maxHits):
-      self.reachedMax = True
-      processes.cancelSimulation()
+    if (result.get('totalIterations', 0) > self.endAfterIterations
+            or result.get('totalTracedRays', 0) > self.endAfterRays
+            or result.get('totalRecordedHits', 0) > self.endAfterHits):
+      self.reachedEnd = True
+      processes.setIsFinished(True)
 
     # report progress to shell from time to time
-    if time.time() - self._lastMsg > 5:
-      iteration = result.get("totalIterations") or 0
-      processes.logMsg(f'current iteration {iteration} '
-                       f'({60*60*iteration/(time.time()-self.t0):.1e} iters/hour), '
-                       f'{processes.isWorkerRunning()} workers are alive')
+    if time.time() - self._lastMsg > 5 and not _neverReport:
+      iteration = result.get("totalIterations", 0) or 0
+      io.info(f'{iteration} iterations done, '
+              f'{processes.isWorkerRunning()} workers are alive, '
+              f'{self.performanceDescription()}')
       self._lastMsg = time.time()
 
     return result
+
+  def performanceDescription(self):
+    # disable reporting to prevent endless recursion
+    p = self.getProgress(_neverReport=True)
+    return (f'{60*60*p.get("totalTracedRays", 0)/(time.time()-self.t0):.1e} rays/hour, '
+            f'{60*60*p.get("totalRecordedHits", 0)/(time.time()-self.t0):.1e} recorded hits/hour')
 
   def getProgressByWorker(self):
     # find all files in progress dir
@@ -327,10 +351,10 @@ class SimulationResults:
       self.dumpProgress()
 
   def isSimulationRunning(self):
-    return processes.isRunning() and time.time()-self._latestProgressUpdate < 10+10*self.dumpProgressEverySeconds
-
+    return processes.isRunning()
+  
   def simulationEndedGracefully(self):
-    return not processes.isRunning() and self.reachedMax
+    return not processes.isRunning() and self.reachedEnd
 
   def addRay(self, source):
     if self.rays is None:
@@ -342,23 +366,8 @@ class SimulationResults:
     # return single ray results instance
     return ray
 
-  def addRayHit(self, source, obj, point, power, isEntering):
+  def addRayHit(self, source, obj, point, direction, power, isEntering):
     if self.hits is None:
       self.hits = []
-    self.hits.append([source, obj, point, power, isEntering])
+    self.hits.append([source, obj, point, direction, power, isEntering])
     self.writeDiskIfNeeded()
-
-def getLatestRunIndex():
-  folderName = getResultsFolderPath()
-  if os.path.exists(folderName):
-    safeInt = lambda x: int(x) if x.isnumeric() else -1 
-    return max([safeInt(f[4:-4]) for f in os.listdir(folderName) 
-                                    if f.startswith('run-')
-                                          and f.endswith('-raw')]
-                  +[-1])
-  return -1
-
-def generateSimulationFolderName(index=None):
-  if index is None:
-    index = getLatestRunIndex()+1
-  return f'run-{int(index):04d}-raw'

@@ -21,7 +21,6 @@ class SimulationSettingsProxy():
   '''
   def execute(self, obj):
     '''Do something when doing a recomputation, this method is mandatory'''
-    simulation.cancelSimulation()
 
   def onChanged(self, obj, prop):
     # sync Visible property with active property to allow
@@ -46,14 +45,9 @@ class SimulationSettingsProxy():
 
     if prop == 'Active' and obj.Active:
       # always cancel if active settings object was changed
-      simulation.cancelSimulation()
       for settings in find.simulationSettings():
         if settings != obj:
           settings.Active = False
-    
-    # if any other property changed just cancel if it was on the active settings object 
-    if obj.Active:
-      simulation.cancelSimulation()
 
     # sanitize worker count
     if prop == 'WorkerProcessCount':
@@ -117,7 +111,7 @@ class MakeSimulationSettings:
     for section, entries in [
       ('OpticalSimulationSettings', [
         ('Active', True, 'Bool', 'Use these settings as simulation settings.'),
-        ('SimulationDataFolder', '{projectName}.opticalSimulationResults', 'Path', 
+        ('SimulationDataFolder', '{projectName}.opticalSimulationResults', 'Path',
               'Path to folder to store simulation results in. The following placeholders '
               'are possible: {projectName} will be replaced with FCStd filename of the project, '
               '{settingsName} will be replaced with the Label property of this settings object '
@@ -134,6 +128,8 @@ class MakeSimulationSettings:
               'and pseudo random modes.'),
         ('MaxIntersections', 100, 'Float', 'Maximum number of intersections (reflections/refractions/'
               'detections) that a ray may have with optical objects.'),
+        ('DistanceTolerance', 0.01, 'Float', 'If a ray is closer to a surface than this tolerance, '
+              'it is considered to intersect with the surface.'),
         ('MaxRayLength', 100, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
               'may be up to MaxIntersections*MaxRayLength. This is not a strict '
               'limit but rather a possibility for the ray tracer to save time by ignoring '

@@ -2,9 +2,6 @@ __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
-__doc__ = '''
-
-'''.strip()
 
 
 #!/usr/bin/env python3
@@ -25,10 +22,8 @@ class TestRunNotebooks(unittest.TestCase):
       for f in files:
         if f.endswith('.ipynb') and not f.endswith('.nbconvert.ipynb'):
           with self.subTest(f):
-            subprocess.run(f'jupyter nbconvert '
-                  f'--ExecutePreprocessor.timeout=None '
-                  f'--to notebook --execute "{f}"',
-                  cwd=root, shell=True, check=True)
+            subprocess.run(f'jupyter execute "{f}"',
+                           cwd=root, shell=True, check=True)
 
 if __name__ == '__main__':
   unittest.main()

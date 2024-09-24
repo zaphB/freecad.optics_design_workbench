@@ -1,3 +1,9 @@
+__license__ = 'LGPL-3.0-or-later'
+__copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
+__authors__ = 'P. Bredol'
+__url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
+
+
 import logging
 import logging.handlers as handlers
 import os
@@ -80,7 +86,7 @@ def setLogfile(name):
     _LOG_DIR = baseDir
   _init()
 
-def _gatherSlaveFiles():
+def gatherSlaveFiles():
   '''
   collect all log files of slaves and merge with master log, only runs if this
   process is the master process
@@ -134,7 +140,7 @@ def _prefix(kind=''):
 
 def err(*msg, logOnly=False):
   _init()
-  _gatherSlaveFiles()
+  gatherSlaveFiles()
   msg = _indentMsg(msg)
   if _logger():
     _logger().error(msg)
@@ -148,7 +154,7 @@ def formatErr(*msg):
 
 def warn(*msg, logOnly=False):
   _init()
-  _gatherSlaveFiles()
+  gatherSlaveFiles()
   msg = _indentMsg(msg)
   if _logger():
     _logger().warning(msg)
@@ -159,7 +165,7 @@ def warn(*msg, logOnly=False):
 
 def info(*msg, logOnly=False, noNewLine=False):
   _init()
-  _gatherSlaveFiles()
+  gatherSlaveFiles()
   msg = _indentMsg(msg)
   if _logger():
     _logger().info(msg)

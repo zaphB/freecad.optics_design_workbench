@@ -25,6 +25,12 @@ from .. import simulation
 from .. import distributions
 from .. import io
 
+# global dict with keys being PointSourceProxy objects and values being 
+# more dicts that store pseudo-attributes. This akward attribute storing
+# format allows to bypass the serializer which wants to safe the Proxy
+# objects whenever the FreeCAD project is saved.
+NON_SERIALIZABLE_STORE = {}
+
 #####################################################################################################
 class PointSourceProxy():
   '''
@@ -32,14 +38,10 @@ class PointSourceProxy():
   '''
   def execute(self, obj):
     '''Do something when doing a recomputation, this method is mandatory'''
-    # allow redrawing to allow previews during continuous simulation
-    #simulation.cancelSimulation()
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
-    # dont cancel here because the constant redrawing triggers this
-    #simulation.cancelSimulation()
-    
+
     # make sure domains are valid
     if prop in ('PhiDomain', 'ThetaDomain'):
       raw = getattr(obj, prop)
@@ -52,6 +54,42 @@ class PointSourceProxy():
       if getattr(obj, prop) < 3:
         setattr(obj, prop, 3)
   
+    # reset random number generator mode to ? if power density expression is changed
+    if prop in ('PowerDensity', 'PhiDomain', 'ThetaDomain', 
+                'ThetaResolutionNumericMode', 'PhiResolutionNumericMode'):
+      self._clearVrv(obj)
+
+
+  def _getVrv(self, obj):
+    if NON_SERIALIZABLE_STORE.get(self, None) is None:
+      NON_SERIALIZABLE_STORE[self] = {}
+    
+    if NON_SERIALIZABLE_STORE[self].get('vrv', None) is None:
+      # attach to obj and not to self, because attrbutes of self should be serializable
+      NON_SERIALIZABLE_STORE[self]['vrv'] = (
+            distributions.VectorRandomVariable(
+                    obj.PowerDensity+'*abs(sin(theta))', # add correction for spherical coordinate area element size 
+                    variableOrder=('theta', 'phi'),
+                    variableDomains=dict(
+                        theta=self.parsedThetaDomain(obj), 
+                        phi=self.parsedPhiDomain(obj)),
+                    numericalResolutions=dict(
+                        theta=obj.ThetaResolutionNumericMode,
+                        phi=obj.PhiResolutionNumericMode))
+      )
+      vrv = NON_SERIALIZABLE_STORE[self]['vrv']
+      vrv.compile()
+      obj.RandomNumberGeneratorMode = vrv.mode()
+    return NON_SERIALIZABLE_STORE[self]['vrv']
+
+
+  def _clearVrv(self, obj):
+    _stored = NON_SERIALIZABLE_STORE.get(self, {})
+    _stored['vrv'] = None
+    NON_SERIALIZABLE_STORE[self] = _stored
+    obj.RandomNumberGeneratorMode = '?'
+
+
   def _parsedDomain(self, domain, default=None):
     # try to parse
     try:
@@ -76,14 +114,13 @@ class PointSourceProxy():
     _, parsed = self._parsedDomain(obj.PhiDomain)
     return parsed
 
+
   def clear(self, obj):
     # remove shape but make sure placement stays alive
     placement = obj.Placement
     obj.Shape = Part.Shape()
     obj.Placement = placement
-  
-  def redraw(self, *args, **kwargs):
-    self.runIteration(*args, draw=True, store=False, **kwargs)
+
 
   @functools.cache
   def _makeRayCache(self, obj):
@@ -101,7 +138,11 @@ class PointSourceProxy():
 
     return gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin
 
+
   def makeRay(self, obj, theta, phi, power=1):
+    '''
+    Create new ray object with origin and direction given in global coordinates
+    '''
     gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin = self._makeRayCache(obj)
 
     # apply azimuth and polar rotation to (0,0,1) vector
@@ -118,30 +159,97 @@ class PointSourceProxy():
     gorigin, gdirection = p1, (p2-p1)/(p2-p1).Length
     return ray.Ray(obj, gorigin, gdirection, initPower=power)
 
-  def runIteration(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, draw=False, store=False, **kwargs):
+
+  def onInitializeSimulation(self, obj, state, ident):
+    pass
+
+
+  def runSimulationIteration(self, obj, *, mode, draw=False, store=False, **kwargs):
+    # prepare transforms etc that wil be used many times
+    gpM, gpMi = self._makeRayCache(obj)[:2]
+
+    # clear displayed rays on begin of each simulation iteration
+    self.clear(obj)
+
+    # generate rays that we want to trace in this iteration
+    for ray in self._generateRays(obj, mode=mode, **kwargs):
+
+      # add to ray object to results storage if desired
+      rayResults = None
+      if store and obj.RecordRays:
+        if obj.RecordRays:
+          rayResults = store.addRay(source=obj)
+
+      # trace ray through project
+      for (p1,p2), power, medium in ray.traceRay(store=store, **kwargs):
+
+        # this loop may run for quite some time, keep GUI responsive by handling events
+        keepGuiResponsiveAndRaiseIfSimulationDone()
+
+        # add segment to current ray in results storage if enabled
+        if rayResults:
+          rayResults.addSegment(points=(p1, p2), power=power, medium=medium)
+        
+        # draw line in GUI if desired
+        if draw:
+          # save placement parameters in var
+          placement = obj.Placement
+
+          # create new line element in coordinates transformed by inverse-placement transform
+          additionalLine = Part.makeLine(gpMi*p1, gpMi*p2)
+
+          # apply inverse placement-transform to own shape (if it is non-empty)
+          if len(obj.Shape.Vertexes) > 0:
+            obj.Shape = Part.makeCompound([obj.Shape.transformGeometry(gpMi), additionalLine])
+
+          # if previous shape was empty, just set the new line element as the new shape
+          else:
+            obj.Shape = additionalLine
+
+          # restore placement property
+          obj.Placement = placement
+        
+      # increment ray count for progress tracking
+      if store:
+        store.incrementRayCount()
+
+      # mark this ray is complete after tracing to permit flushing it if enabled
+      if rayResults:
+        rayResults.rayComplete()
+
+
+  def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
+    '''
+    This generator yields each ray to be traced for one simulation iteration.
+    '''
     self._makeRayCache.cache_clear()
     rays = []
 
     # make sure GUI does not freeze
-    processGuiEvents()
+    keepGuiResponsiveAndRaiseIfSimulationDone()
 
     # fan-mode: generate fans of rays in spherical coordinates
     if mode == 'fans':
       raysPerIteration = min([obj.RaysPerFan, maxRaysPerFan])
 
-      # prepare expression
+      # prepare expression, multiply with theta to correct for spherical coordinates
       densityExpr = sy.sympify(obj.PowerDensity)
 
       # create obj.Fans ray fans oriented in phi0
       for phi in linspace(0, pi, int(min([obj.Fans, maxFanCount])+1))[:-1]:
 
         # this loop may run for quite some time, keep GUI responsive by handling events
-        processGuiEvents()
+        keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # calculate desired beam power density
         densityLambda = sy.lambdify('theta', densityExpr.subs('phi', phi))
         thetas = linspace(*self.parsedThetaDomain(obj), obj.ThetaResolutionNumericMode)
         density = densityLambda(thetas)
+
+        # mirror density for fans if domain is starting from zero
+        if isclose(thetas[0], 0):
+          thetas = concatenate([-thetas[::-1][:-1], thetas])
+          density = concatenate([density[::-1][:-1], density])
 
         # generate the required thetas to place beams at and create beams
         for theta in distributions.generatePointsWithGivenDensity1D(
@@ -150,10 +258,10 @@ class PointSourceProxy():
                                               startFrom=0):
 
           # this loop may run for quite some time, keep GUI responsive by handling events
-          processGuiEvents()
+          keepGuiResponsiveAndRaiseIfSimulationDone()
 
           # add lines corresponding to this ray to total ray list
-          rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
+          yield self.makeRay(obj=obj, theta=theta, phi=phi)
 
     # pseudo-random mode: place rays by drawing theta and phi from pseudo random distribution
     elif mode == 'pseudo':
@@ -174,66 +282,19 @@ class PointSourceProxy():
         raysPerIteration = settings.RaysPerIteration
       raysPerIteration *= obj.RaysPerIterationScale
 
-      # create random variable for theta and phi
-      vrv = distributions.VectorRandomVariable(
-                obj.PowerDensity, 
-                variableOrder=('theta', 'phi'),
-                variableDomains=dict(
-                    theta=self.parsedThetaDomain(obj), 
-                    phi=self.parsedPhiDomain(obj)),
-                numericalResolutions=dict(
-                    theta=obj.ThetaResolutionNumericMode,
-                    phi=obj.PhiResolutionNumericMode))
-      vrv.compile()
-
-      thetas, phis = vrv.draw(raysPerIteration)
+      # create/get random variable for theta and phi and draw samples 
+      thetas, phis = self._getVrv(obj).draw(N=raysPerIteration)
       for theta, phi in zip(thetas, phis):
+
         # this loop may run for quite some time, keep GUI responsive by handling events
-        processGuiEvents()
+        keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # create and trace ray
-        rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
+        yield self.makeRay(obj=obj, theta=theta, phi=phi)
 
     else:
       raise ValueError(f'unexpected ray placement mode {mode}')
 
-    # create compound containing all the lines and set it as the shape of the light source,
-    # use inverse global transform because the Line freecad_elements are assigned as obj.Shape and
-    # thus will be transformed by FreeCAD 
-    gpM, gpMi = self._makeRayCache(obj)[:2]
-    lines = []
-    for r in rays:
-      # add to ray to results storage
-      if store:
-        store.incrementRayCount()
-        if obj.RecordRays:
-          rayResults = store.addRay(source=obj)
-
-      for (p1,p2), power, medium in r.traceRay(store=store, **kwargs):
-        # this loop may run for quite some time, keep GUI responsive by handling events
-        processGuiEvents()
-
-        # add ray segment to storage if enabled
-        if store and obj.RecordRays:
-          # add segment to current ray in results storage
-          rayResults.addSegment(points=(p1, p2), power=power, medium=medium)
-        
-        # add line to list of draw is enabled
-        if draw:
-          lines.append(Part.makeLine(gpMi*p1, gpMi*p2))
-      
-      # mark this ray is complete to permit flushing it
-      if store and obj.RecordRays:
-        rayResults.rayComplete()
-
-    # set obj.Shape to display rays if draw is enabled
-    if draw:
-      if len(lines):
-        placement = obj.Placement
-        obj.Shape = Part.makeCompound(lines)
-        obj.Placement = placement
-      else:
-        self.clear(obj)
 
 #####################################################################################################
 class PointSourceViewProxy():
@@ -283,14 +344,15 @@ class AddPointSource():
                   'angle "phi".'),
         ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
         ('FocalLength', 0, 'Float', 'Distance of the ray origin from the location of the light source. '
-                  'Negative values result in a converging beam.')
+                  'Negative values result in a converging beam.'),
+        ('ThetaDomain', '0, pi/2', 'String', ''),
+        ('PhiDomain', '0, 2*pi', 'String', ''),
       ]),
       ('OpticalSimulationSettings', [
+        ('RandomNumberGeneratorMode', '?', 'String', ''),
         ('RecordRays', False, 'Bool', ''),
-        ('ThetaDomain', '-0.1, 0.1', 'String', ''),
-        ('PhiDomain', '0, 2*pi', 'String', ''),
-        ('ThetaResolutionNumericMode', 100, 'Integer', ''),
-        ('PhiResolutionNumericMode', 100, 'Integer', ''),
+        ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
+        ('PhiResolutionNumericMode', 50, 'Integer', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
         ('IgnoredOpticalElements', [], 'LinkList', 'Rays of this source ignore the optical freecad_elements given'
@@ -315,6 +377,9 @@ class AddPointSource():
     # register custom proxy and view provider proxy
     obj.Proxy = PointSourceProxy()
     obj.ViewObject.Proxy = PointSourceViewProxy()
+
+    # make mode readonly
+    obj.setEditorMode('RandomNumberGeneratorMode', 1)
 
     return obj
 

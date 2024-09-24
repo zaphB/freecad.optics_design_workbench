@@ -16,10 +16,13 @@ import signal
 
 def _setAlarm(deadline):
     timeout = deadline-time.time()
+    # it may seem a bit drastic to raise a KeyboardInterrupt here, but other Exceptions
+    # seem to be caught by sympy internally in certain cases. Only KeyboardInterrupt
+    # is able to actually stop a hung sympy function.
     if timeout < 0:
-      raise RuntimeError('time is up')
+      raise KeyboardInterrupt('time is up')
     def handler(sig, n):
-      raise RuntimeError('time is up')
+      raise KeyboardInterrupt('time is up')
     signal.signal(signal.SIGALRM, handler)
     signal.alarm(int(timeout)+1)
 
@@ -42,7 +45,7 @@ class VectorRandomVariable:
     self._mode = 'not yet compiled'
 
 
-  def compile(self, timeout=5, disableAnalytical=False, **kwargs):
+  def compile(self, timeout=2, disableAnalytical=False, **kwargs):
     self._deadline = time.time()+timeout
     self._setConstants(**kwargs)
 
@@ -51,12 +54,12 @@ class VectorRandomVariable:
       if disableAnalytical:
         raise ValueError('stop')
 
-      # try to analytical treatment first
+      # try analytical treatment first
       self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
       self._mode = 'analytic'
 
+    # fallback to numerical treatment and analytical mode did not succeed
     except Exception:
-      # fallback to numerical treatment and analytical mode did not succeed
       self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
       self._mode = 'numeric'
 
@@ -96,6 +99,15 @@ class VectorRandomVariable:
     
     # set variables attribute if not set
     self._variables = list(expr.free_symbols)
+
+    # fix variable order if given
+    if self._variableOrder:
+      sortedVars = []
+      for varName in self._variableOrder:
+        varNames = [str(v) for v in self._variables]
+        if varName in varNames:
+          sortedVars.append(self._variables.pop(varNames.index(varName)))
+      self._variables = sortedVars + self._variables
 
     # substitute remaining free symbols with symbols that 
     # have 'real' assumption
@@ -138,8 +150,8 @@ class VectorRandomVariable:
           raise ValueError('oops')
       except Exception:
         warnings.warn(f'not sure whether expression for probability density '
-                      f'"{expr}" will always yield '
-                      f'positve values, which will break the RNG')
+                      f'"{expr}" is always positive values; negative '
+                      f'probabilities will lead to undefined behavior')
 
       # integrate along domain for i<varI
       for i in range(varI):
@@ -160,15 +172,24 @@ class VectorRandomVariable:
       totalIntegral = sy.Integral(expr, (var,l1,l2)).doit()
       partialIntegral = sy.Integral(expr, (var,l1,varX)).doit()
       
-      exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX)
+      exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX, 
+                        simplify=False)  # do not simplify, this speeds up the solver a lot
       if len(exprYs) == 0:
         raise ValueError(f'expression {partialIntegral/totalIntegral} seems not to be solvable for {varX}')
-      lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY)
-                                                for exprY in exprYs]
+      lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY, 
+                            modules=['numpy', 'scipy'])
+                                            for exprY in exprYs]
 
       # attach expressions to lambda for convenience
       for lam in lambYs:
         lam._origExpressions = (expr/totalIntegral, partialIntegral/totalIntegral, exprYs)
+
+    # re-raise special KeyboardInterrupt raised by timer handler as a RuntimeError,
+    # re-raise any other KeyboardInterrupts unchanged
+    except KeyboardInterrupt as e:
+      if str(e) == 'time is up':
+        raise RuntimeError('time is up')
+      raise
 
     finally:
       # disable alarm again
