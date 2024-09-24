@@ -16,10 +16,13 @@ import signal
 
 def _setAlarm(deadline):
     timeout = deadline-time.time()
+    # it may seem a bit drastic to raise a KeyboardInterrupt here, but other Exceptions
+    # seem to be caught by sympy internally in certain cases. Only KeyboardInterrupt
+    # is able to actually stop a hung sympy function.
     if timeout < 0:
-      raise RuntimeError('time is up')
+      raise KeyboardInterrupt('time is up')
     def handler(sig, n):
-      raise RuntimeError('time is up')
+      raise KeyboardInterrupt('time is up')
     signal.signal(signal.SIGALRM, handler)
     signal.alarm(int(timeout)+1)
 
@@ -179,6 +182,13 @@ class VectorRandomVariable:
       # attach expressions to lambda for convenience
       for lam in lambYs:
         lam._origExpressions = (expr/totalIntegral, partialIntegral/totalIntegral, exprYs)
+
+    # re-raise special KeyboardInterrupt raised by timer handler as a RuntimeError,
+    # re-raise any other KeyboardInterrupts unchanged
+    except KeyboardInterrupt as e:
+      if str(e) == 'time is up':
+        raise RuntimeError('time is up')
+      raise
 
     finally:
       # disable alarm again
