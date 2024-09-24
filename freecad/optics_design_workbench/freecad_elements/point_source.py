@@ -52,7 +52,6 @@ class PointSourceProxy():
     if prop in ('PowerDensity', 'PhiDomain', 'ThetaDomain'):
       obj.RandomNumberGeneratorMode = '?'
 
-
   def _parsedDomain(self, domain, default=None):
     # try to parse
     try:
@@ -77,14 +76,13 @@ class PointSourceProxy():
     _, parsed = self._parsedDomain(obj.PhiDomain)
     return parsed
 
+
   def clear(self, obj):
     # remove shape but make sure placement stays alive
     placement = obj.Placement
     obj.Shape = Part.Shape()
     obj.Placement = placement
-  
-  def redraw(self, *args, **kwargs):
-    self.runIteration(*args, draw=True, store=False, **kwargs)
+
 
   @functools.cache
   def _makeRayCache(self, obj):
@@ -102,7 +100,11 @@ class PointSourceProxy():
 
     return gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin
 
+
   def makeRay(self, obj, theta, phi, power=1):
+    '''
+    Create new ray object with origin and direction given in global coordinates
+    '''
     gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin = self._makeRayCache(obj)
 
     # apply azimuth and polar rotation to (0,0,1) vector
@@ -119,7 +121,69 @@ class PointSourceProxy():
     gorigin, gdirection = p1, (p2-p1)/(p2-p1).Length
     return ray.Ray(obj, gorigin, gdirection, initPower=power)
 
-  def runIteration(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, draw=False, store=False, **kwargs):
+
+  def onInitializeSimulation(self, obj, state, ident):
+    pass
+
+
+  def runSimulationIteration(self, obj, *, mode, draw=False, store=False, **kwargs):
+    # prepare transforms etc that wil be used many times
+    gpM, gpMi = self._makeRayCache(obj)[:2]
+
+    # clear displayed rays on begin of each simulation iteration
+    self.clear(obj)
+
+    # generate rays that we want to trace in this iteration
+    for ray in self._generateRays(obj, mode=mode, **kwargs):
+
+      # add to ray object to results storage if desired
+      rayResults = None
+      if store and obj.RecordRays:
+        if obj.RecordRays:
+          rayResults = store.addRay(source=obj)
+
+      # trace ray through project
+      for (p1,p2), power, medium in ray.traceRay(store=store, **kwargs):
+
+        # this loop may run for quite some time, keep GUI responsive by handling events
+        keepGuiResponsiveAndRaiseIfSimulationDone()
+
+        # add segment to current ray in results storage if enabled
+        if rayResults:
+          rayResults.addSegment(points=(p1, p2), power=power, medium=medium)
+        
+        # draw line in GUI if desired
+        if draw:
+          # save placement parameters in var
+          placement = obj.Placement
+
+          # create new line element in coordinates transformed by inverse-placement transform
+          additionalLine = Part.makeLine(gpMi*p1, gpMi*p2)
+
+          # apply inverse placement-transform to own shape (if it is non-empty)
+          if len(obj.Shape.Vertexes) > 0:
+            obj.Shape = Part.makeCompound([obj.Shape.transformGeometry(gpMi), additionalLine])
+
+          # if previous shape was empty, just set the new line element as the new shape
+          else:
+            obj.Shape = additionalLine
+
+          # restore placement property
+          obj.Placement = placement
+        
+      # increment ray count for progress tracking
+      if store:
+        store.incrementRayCount()
+
+      # mark this ray is complete after tracing to permit flushing it if enabled
+      if rayResults:
+        rayResults.rayComplete()
+
+
+  def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
+    '''
+    This generator yields each ray to be traced for one simulation iteration.
+    '''
     self._makeRayCache.cache_clear()
     rays = []
 
@@ -154,7 +218,7 @@ class PointSourceProxy():
           keepGuiResponsiveAndRaiseIfSimulationDone()
 
           # add lines corresponding to this ray to total ray list
-          rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
+          yield self.makeRay(obj=obj, theta=theta, phi=phi)
 
     # pseudo-random mode: place rays by drawing theta and phi from pseudo random distribution
     elif mode == 'pseudo':
@@ -194,48 +258,11 @@ class PointSourceProxy():
         keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # create and trace ray
-        rays.append(self.makeRay(obj=obj, theta=theta, phi=phi))
+        yield self.makeRay(obj=obj, theta=theta, phi=phi)
 
     else:
       raise ValueError(f'unexpected ray placement mode {mode}')
 
-    # create compound containing all the lines and set it as the shape of the light source,
-    # use inverse global transform because the Line freecad_elements are assigned as obj.Shape and
-    # thus will be transformed by FreeCAD 
-    gpM, gpMi = self._makeRayCache(obj)[:2]
-    lines = []
-    for r in rays:
-      # add to ray to results storage
-      if store:
-        store.incrementRayCount()
-        if obj.RecordRays:
-          rayResults = store.addRay(source=obj)
-
-      for (p1,p2), power, medium in r.traceRay(store=store, **kwargs):
-        # this loop may run for quite some time, keep GUI responsive by handling events
-        keepGuiResponsiveAndRaiseIfSimulationDone()
-
-        # add ray segment to storage if enabled
-        if store and obj.RecordRays:
-          # add segment to current ray in results storage
-          rayResults.addSegment(points=(p1, p2), power=power, medium=medium)
-        
-        # add line to list of draw is enabled
-        if draw:
-          lines.append(Part.makeLine(gpMi*p1, gpMi*p2))
-      
-      # mark this ray is complete to permit flushing it
-      if store and obj.RecordRays:
-        rayResults.rayComplete()
-
-    # set obj.Shape to display rays if draw is enabled
-    if draw:
-      if len(lines):
-        placement = obj.Placement
-        obj.Shape = Part.makeCompound(lines)
-        obj.Placement = placement
-      else:
-        self.clear(obj)
 
 #####################################################################################################
 class PointSourceViewProxy():

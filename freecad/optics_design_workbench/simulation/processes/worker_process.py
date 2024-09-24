@@ -51,8 +51,8 @@ class WorkerProcess:
 
     # launch child process
     self._p = subprocess.Popen([freecadPath, '-c', self.simulationFilePath],
-                                #stdout=subprocess.DEVNULL,
-                                #stderr=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
                                 stdin=subprocess.PIPE, 
                                 text=True, bufsize=-1)
 

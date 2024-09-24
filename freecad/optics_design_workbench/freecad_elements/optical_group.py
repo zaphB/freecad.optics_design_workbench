@@ -71,20 +71,13 @@ class OpticalGroupProxy():
       # update old type attribute of proxy
       self.oldType = newType
 
-  def onRayHit(self, source, obj, point, power, isEntering, store):
-    if store and obj.RecordHits:
-      # transform point according to coordinate mode
-      if obj.HitCoordinateMode == 'global':
-        pass
-      elif obj.HitCoordinateMode == 'local':
-        raise RuntimeError('local hit coordinate mode is not implemented')
-      elif obj.HitCoordinateMode == 'relative-to-center-of-mass':
-        raise RuntimeError('relative-to-center-of-mass coordinate mode is not implemented')
-      else:
-        raise RuntimeError(f'unexpected coordinate mode {obj.HitCoordinateMode}')
+  def onInitializeSimulation(self, obj, state, ident):
+    pass
 
-      # add hit to store
-      store.addRayHit(source=source, obj=obj, point=point, power=power, isEntering=isEntering)
+  def onRayHit(self, source, obj, point, direction, power, isEntering, store):
+    if store and obj.RecordHits:
+      store.addRayHit(source=source, obj=obj, point=point, direction=direction, 
+                      power=power, isEntering=isEntering)
 
 
 #####################################################################################################
@@ -140,8 +133,6 @@ class MakeOpticalGroup:
       ('OpticalSimulationSettings', [
         ('RecordHits', False, 'Bool', 
               'Enable recording ray hits on this optical group to disk during simulations.'),
-        ('HitCoordinateMode', ['global', 'local', 'relative to center-of-mass'], 'Enumeration', 
-              'Not implemented'),
       ]),
     ]:
       for name, default, kind, tooltip in entries:

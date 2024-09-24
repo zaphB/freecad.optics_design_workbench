@@ -88,7 +88,8 @@ class Ray():
       normal, isEntering = self.getNormal(face, prevPoint, currentPoint)
 
       # run onHit handler of object that caused intersection
-      obj.Proxy.onRayHit(source=self.lightSource, obj=obj, point=currentPoint, 
+      obj.Proxy.onRayHit(source=self.lightSource, obj=obj, 
+                         point=currentPoint, direction=currentDirection, 
                          power=currentPower, isEntering=isEntering, store=store)
 
       # hit mirror: direction is mirrored at normal, 
@@ -149,7 +150,8 @@ class Ray():
   def findNearestIntersection(self, start, direction, maxRayLength, distTol=None):
     '''
     Find the closest relevant optical object intersecting with the ray
-    of given start and direction.
+    of given start and direction. Start and direction are expected to be
+    given in global coordinates.
     '''
     distTol = self._getDistTol(distTol)
 

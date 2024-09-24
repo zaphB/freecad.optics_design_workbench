@@ -89,7 +89,7 @@ class TestRunNotebooks(unittest.TestCase):
   def test_runPlaygroundExample(self):
     # make sure FCStd file runs and yields expected number of hits (> 100 rays * 10 iterations)
     baseDir, filename = self._runFile('playground')
-    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/lightsource-PointSource/hitObject-OpticalAbsorberGroup'
+    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/source-OpticalPointSource/object-OpticalAbsorberGroup'
     results = []
     for f in os.listdir(resultsPath):
       with open(resultsPath+'/'+f, 'rb') as _f:
@@ -114,7 +114,7 @@ class TestRunNotebooks(unittest.TestCase):
     baseDir, filename = self._runFile('gaussian')
 
     # make sure results exist
-    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/lightsource-PointSource/hitObject-OpticalAbsorberGroup'
+    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/source-OpticalPointSource/object-OpticalAbsorberGroup'
     results = []
     for f in os.listdir(resultsPath):
       with open(resultsPath+'/'+f, 'rb') as _f:
@@ -153,7 +153,7 @@ class TestRunNotebooks(unittest.TestCase):
     # cleanup
     self._cleanResults(filename)
 
-    
+  
   def test_runThreeTimes(self):
     # make sure working dir is clean
     baseDir, filename = self._runFile('playground')
@@ -163,9 +163,9 @@ class TestRunNotebooks(unittest.TestCase):
     for _ in range(3):
       baseDir, filename = self._runFile('playground', cleanup=False)
     
-    # expect three result folders plus one log file
+    # expect three result folders plus one log file plus one "simulation done" file
     results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
-    self.assertEqual(len(results), 3 + 1)
+    self.assertEqual(len(results), 3 + 1 + 1)
 
     # cleanup
     self._cleanResults(filename)
@@ -180,13 +180,12 @@ class TestRunNotebooks(unittest.TestCase):
     for _ in range(3):
       baseDir, filename = self._runFile('playground', cleanup=False, cancelAfter=3)
     
-    # expect three result folders plus one log file
+    # expect three result folders plus one log file plus one "simulation canceled" file
     results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
-    self.assertEqual(len(results), 3 + 1)
+    self.assertEqual(len(results), 3 + 1 + 1)
 
     # cleanup
     self._cleanResults(filename)
-
 
 
 if __name__ == '__main__':

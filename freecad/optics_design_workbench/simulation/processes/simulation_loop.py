@@ -19,7 +19,6 @@ __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
-
 try:
   import FreeCADGui as Gui
   import FreeCAD as App
@@ -35,6 +34,7 @@ import os
 import sys
 import threading
 import signal
+import itertools
 
 from ...detect_pyside import *
 from ... import freecad_elements
@@ -45,6 +45,7 @@ from . import worker_process
 
 _IS_MASTER_PROCESS = None
 _BACKGROUND_PROCESSES = []
+_ASSUME_DEAD_TIMEOUT = 15
 
 # process info
 def isMasterProcess():
@@ -73,7 +74,31 @@ def _setStatus(name, status):
     os.remove(path)
 
 def isRunning():
-  return _queryStatus('simulation-is-running')
+  # if is-running file does not exist, case is closed
+  if not _queryStatus('simulation-is-running'):
+    return False
+
+  # if is canceled file does not exist or a running
+  # worker is known to us, assume we are still running
+  if not isCanceled() or isWorkerRunning():
+    return True
+
+  # if cancel file and running file both exist and not a single worker is
+  # known to this freecad process, assume run has ended without proper cleanup
+  try:
+    runningSince = os.stat(_statusFilePath('simulation-is-canceled')).st_mtime
+    if time.time()-runningSince > _ASSUME_DEAD_TIMEOUT:
+      io.warn(f'simulation was canceled {time.time()-runningSince:.1e}s ago but '
+              f'is-running file still exists, assuming it died without proper '
+              f'clean-up')
+      setIsRunning(False)
+      return False
+  except Exception:
+    pass
+
+  # return true if none if the above applies  
+  return True
+
 
 def setIsRunning(state):
   return _setStatus('simulation-is-running', state)
@@ -141,6 +166,10 @@ def runSimulation(action, slaveInfo={}):
   store = None
   iteration = 0
   try:
+    ##########################################################################################
+    # prepare simulation, assemble simulation parameters from the various sources (settings,
+    # defaults, mutual conditions, ...)
+
     # make sure other simulations have stopped and no other simulation
     # can be started
     if isMasterProcess():
@@ -219,8 +248,19 @@ def runSimulation(action, slaveInfo={}):
       if isMasterProcess() and continuous:
         gui_windows.showProgressWindow(store)
 
-    # launch background worker processes (one less than specified if draw is true because then the
-    # master process will also do work), only launch if we are the master process
+    ##########################################################################################
+    # do pre-worker launched init and post-worker launched init of each light source
+    # and optical object
+
+    # run pre-worker-launch init
+    if isMasterProcess():
+      io.verb(f'doing pre-worker-lauch init of all components...')
+      for obj in itertools.chain(freecad_elements.find.lightSources(), 
+                                 freecad_elements.find.relevantOpticalObjects()):
+        obj.Proxy.onInitializeSimulation(obj=obj, state='pre-worker-launch', ident='master')
+
+    # launch background worker processes (one less than specified if draw is true because 
+    # then the master process will also do work), only launch if we are the master process
     if isMasterProcess():
       if draw:
         backgroundWorkers = workers-1
@@ -234,6 +274,12 @@ def runSimulation(action, slaveInfo={}):
           freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
           time.sleep(.01)
 
+    # doing post-worker-launch init
+    io.verb(f'doing post-worker-lauch init of all components...')
+    for obj in itertools.chain(freecad_elements.find.lightSources(), 
+                                freecad_elements.find.relevantOpticalObjects()):
+      obj.Proxy.onInitializeSimulation(obj=obj, state='post-worker-launch', ident='master' if isMasterProcess() else 'worker')
+
     # report to shell that simulation starts
     if isMasterProcess():
       io.info(f'starting simulation {mode=}, {store=}, {draw=}, {workers=}, {continuous=}')
@@ -246,16 +292,11 @@ def runSimulation(action, slaveInfo={}):
         io.verb(f'gui process is not lazy and runs the simulation mainloop')
       
       while True:
-        # increment counter and cancel if enough iterations were run
-        if iteration >= endAfterIterations:
-          break
-        iteration += 1
-
         # do ray-tracing for all light sources
         for obj in freecad_elements.find.lightSources():
 
           # run iteration for the light source
-          obj.Proxy.runIteration(obj, mode=mode, draw=draw, store=store)
+          obj.Proxy.runSimulationIteration(obj=obj, mode=mode, draw=draw, store=store)
 
           # raise simulation canceled exception if parent PID is not alive
           if not isMasterProcess():
@@ -309,6 +350,12 @@ def runSimulation(action, slaveInfo={}):
     timer.timeout.connect(updateProgress)
     timer.start(300)
 
+    # this busy-loop makes the timer useless, but it is needed because cleanup is done
+    # in the finally block. Maybe restructure this in the future to improve performance
+    while isWorkerRunning():
+      time.sleep(1e-2)
+      freecad_elements.keepGuiResponsive()
+
   ##########################################################################################
   # SimulationEnded exception is silently ignored
   except freecad_elements.SimulationEnded:
@@ -356,13 +403,18 @@ def runSimulation(action, slaveInfo={}):
           io.info(f'waiting for {len(_BACKGROUND_PROCESSES)} worker processes to finish...')
           lastPrint = time.time()
 
+      # make sure all logfiles of worker processes are collected and merged into main log
+      io.gatherSlaveFiles()
+
       # remove is running flag
       setIsRunning(False)
 
       # report success
+      performanceDescription = ''
+      if store and hasattr(store, 'performanceDescription'):
+        performanceDescription = f' ({store.performanceDescription()})'
       io.info(f'simulation {"ended gracefully" if not isCanceled() else "was canceled"} '
-              f'after {time.time()-t0:.1e}s at {iteration=} '
-              f'({60*60*iteration/(time.time()-t0):.1e} iters/hour)')
+              f'after {time.time()-t0:.1e}s{performanceDescription}')
 
 
 @functools.cache
