@@ -97,6 +97,15 @@ class VectorRandomVariable:
     # set variables attribute if not set
     self._variables = list(expr.free_symbols)
 
+    # fix variable order if given
+    if self._variableOrder:
+      sortedVars = []
+      for varName in self._variableOrder:
+        varNames = [str(v) for v in self._variables]
+        if varName in varNames:
+          sortedVars.append(self._variables.pop(varNames.index(varName)))
+      self._variables = sortedVars + self._variables
+
     # substitute remaining free symbols with symbols that 
     # have 'real' assumption
     _newVariables = []
