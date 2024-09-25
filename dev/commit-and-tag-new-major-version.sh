@@ -24,8 +24,6 @@ echo && echo "-> version was $major.$minor.$micro, setting new version $newVer..
   && mv /tmp/setup.py setup.py \
   && ./dev/update-setup.py \
   && echo "done." \
-  && pip install . \
-  && pip install -e . \
   && echo && echo "-> adding all files and create new commit " \
   && git add . \
   && git commit $* \
