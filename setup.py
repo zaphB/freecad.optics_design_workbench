@@ -23,6 +23,7 @@ setup(
     'numpy',
     'scipy',
     'matplotlib',
+    'sympy',
     'atomicwrites'
   ],
   include_package_data=True
