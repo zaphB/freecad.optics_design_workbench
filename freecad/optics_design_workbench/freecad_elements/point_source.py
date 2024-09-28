@@ -13,31 +13,18 @@ except ImportError:
   pass
 
 from numpy import *
-import numpy
-import time
-import functools
 import sympy as sy
 
+from .generic_source import *
+from .common import *
 from . import ray
 from . import find
-from .common import *
 from .. import simulation
 from .. import distributions
 from .. import io
 
-# global dict with keys being PointSourceProxy objects and values being 
-# more dicts that store pseudo-attributes. This akward attribute storing
-# format allows to bypass the serializer which wants to safe the Proxy
-# objects whenever the FreeCAD project is saved.
-NON_SERIALIZABLE_STORE = {}
-
 #####################################################################################################
-class PointSourceProxy():
-  '''
-  Proxy of the point point source object responsible for the logic
-  '''
-  def execute(self, obj):
-    '''Do something when doing a recomputation, this method is mandatory'''
+class PointSourceProxy(GenericSourceProxy):
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
@@ -115,30 +102,6 @@ class PointSourceProxy():
     return parsed
 
 
-  def clear(self, obj):
-    # remove shape but make sure placement stays alive
-    placement = obj.Placement
-    obj.Shape = Part.Shape()
-    obj.Placement = placement
-
-
-  @functools.cache
-  def _makeRayCache(self, obj):
-    '''
-    Make sure matrices and vectors that do not change during ray 
-    tracing are calculated only once.
-    '''
-    gpM = obj.getGlobalPlacement().toMatrix()
-    gpMi = obj.getGlobalPlacement().toMatrix().inverse()
-
-    # prepare Placement-adjusted beam orientation vectors in local coordinates
-    opticalAxis = Vector(0,0,1)
-    orthoAxis = Vector(1,0,0)
-    sourceOrigin = Vector(0,0,0)
-
-    return gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin
-
-
   def makeRay(self, obj, theta, phi, power=1):
     '''
     Create new ray object with origin and direction given in global coordinates
@@ -160,70 +123,20 @@ class PointSourceProxy():
     return ray.Ray(obj, gorigin, gdirection, initPower=power)
 
 
-  def onInitializeSimulation(self, obj, state, ident):
-    pass
-
-
-  def runSimulationIteration(self, obj, *, mode, draw=False, store=False, **kwargs):
-    # prepare transforms etc that wil be used many times
-    gpM, gpMi = self._makeRayCache(obj)[:2]
-
-    # clear displayed rays on begin of each simulation iteration
-    self.clear(obj)
-
-    # generate rays that we want to trace in this iteration
-    for ray in self._generateRays(obj, mode=mode, **kwargs):
-
-      # add to ray object to results storage if desired
-      rayResults = None
-      if store and obj.RecordRays:
-        if obj.RecordRays:
-          rayResults = store.addRay(source=obj)
-
-      # trace ray through project
-      for (p1,p2), power, medium in ray.traceRay(store=store, **kwargs):
-
-        # this loop may run for quite some time, keep GUI responsive by handling events
-        keepGuiResponsiveAndRaiseIfSimulationDone()
-
-        # add segment to current ray in results storage if enabled
-        if rayResults:
-          rayResults.addSegment(points=(p1, p2), power=power, medium=medium)
-
-        # draw line in GUI if desired
-        if draw:
-          # create new line element in local coordinates (global->local: transformed by inverse-GLOBAL-placement transform)
-          newLineElement = Part.makeLine(gpMi*p1, gpMi*p2)
-
-          # prepare list of existing shapes in local coordinates (with-placement-applied->local: transformed by inverse-placement transform)
-          pMi = obj.Placement.toMatrix().inverse()
-          existingShapes = [s.transformGeometry(pMi) for s in obj.Shape.SubShapes]
-
-          # make new compound that contains the additional line and make sure Placement information
-          # is restored properly, and clear transform matrix cache
-          _placement = obj.Placement
-          obj.Shape = Part.makeCompound(existingShapes + [newLineElement])
-          obj.Placement = _placement
-          self._makeRayCache.cache_clear()
-        
-      # increment ray count for progress tracking
-      if store:
-        store.incrementRayCount()
-
-      # mark this ray is complete after tracing to permit flushing it if enabled
-      if rayResults:
-        rayResults.rayComplete()
-
-
   def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
     '''
     This generator yields each ray to be traced for one simulation iteration.
     '''
-    self._makeRayCache.cache_clear()
     rays = []
 
     # make sure GUI does not freeze
     keepGuiResponsiveAndRaiseIfSimulationDone()
+
+    # determine number of rays to place
+    raysPerIteration = 100
+    if settings := find.activeSimulationSettings():
+      raysPerIteration = settings.RaysPerIteration
+    raysPerIteration *= obj.RaysPerIterationScale
 
     # fan-mode: generate fans of rays in spherical coordinates
     if mode == 'fans':
@@ -263,21 +176,10 @@ class PointSourceProxy():
     # pseudo-random mode: place rays by drawing theta and phi from pseudo random distribution
     elif mode == 'pseudo':
       # determine number of rays to place
-      raysPerIteration = 100
-      if settings := find.activeSimulationSettings():
-        raysPerIteration = min([raysPerIteration, settings.RaysPerIteration])
-      raysPerIteration *= obj.RaysPerIterationScale
-
       raise ValueError('not implemented')
 
     # true random mode: place rays by drawing theta and phi from true random distribution
     elif mode == 'true':
-
-      # determine number of rays to place
-      raysPerIteration = 100
-      if settings := find.activeSimulationSettings():
-        raysPerIteration = settings.RaysPerIteration
-      raysPerIteration *= obj.RaysPerIterationScale
 
       # create/get random variable for theta and phi and draw samples 
       thetas, phis = self._getVrv(obj).draw(N=raysPerIteration)
@@ -294,40 +196,12 @@ class PointSourceProxy():
 
 
 #####################################################################################################
-class PointSourceViewProxy():
-  '''
-  Proxy of the point point source object responsible for the view
-  '''
-  def getIcon(self):
-    '''Return the icon which will appear in the tree view. This method is optional and if not defined a default icon is shown.'''
-    return find.iconpath('pointsource')
-
-  def attach(self, vobj):
-    '''Setup the scene sub-graph of the view provider, this method is mandatory'''
-    pass
-
-  def updateData(self, obj, prop):
-    '''If a property of the handled feature has changed we have the chance to handle this here'''
-    pass
-
-  def claimChildren(self):
-    '''Return a list of objects that will be modified by this feature'''
-    return []
-
-  def onDelete(self, obj, subelements):
-    '''Here we can do something when the feature will be deleted'''
-    return True
-
-  def onChanged(self, obj, prop):
-    '''Here we can do something when a single property got changed'''
-    pass
-
+class PointSourceViewProxy(GenericSourceViewProxy):
+  pass
   
 #####################################################################################################
-class AddPointSource():
-  '''
-  Command to add a new point source to the project
-  '''
+class AddPointSource(AddGenericSource):
+
   def Activated(self):
     # create new feature python object
     obj = App.activeDocument().addObject('Part::FeaturePython', 'OpticalPointSource')
@@ -346,30 +220,20 @@ class AddPointSource():
         ('PhiDomain', '0, 2*pi', 'String', ''),
       ]),
       ('OpticalSimulationSettings', [
+        *self.defaultSimulationSettings(obj),
         ('RandomNumberGeneratorMode', '?', 'String', ''),
-        ('RecordRays', False, 'Bool', ''),
         ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
-        ('PhiResolutionNumericMode', 50, 'Integer', ''),
+        ('PhiResolutionNumericMode', 3, 'Integer', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
-        ('IgnoredOpticalElements', [], 'LinkList', 'Rays of this source ignore the optical freecad_elements given'
-                 ' in this list.'),
-        ('RaysPerIterationScale', 1, 'Float', 'Number of rays to place per simulation iteration. '
-                 'This will be multiplied with the RayCount property of the active simulation settings.'),
-        ('MaxIntersectionsScale', 1, 'Float', 'Maximum number of intersections (reflections/refractions/'
-                 'detections) that ray may have with optical objects. This will be '
-                 'multiplied with the MaxIntersections property of the active simulation settings.'),
-        ('MaxRayLengthScale', 1, 'Float', 'Maximum length of each ray segment. This will be '
-                 'multiplied with the MaxRayLength property of the active simulation settings.'),
-      ]),
+       ]),
     ]:
       for name, default, kind, tooltip in entries:
         obj.addProperty('App::Property'+kind, name, section, tooltip)
         setattr(obj, name, default)
 
     # set default view properties
-    obj.ViewObject.LineColor = (1.,.3,.0,.0)
-    obj.ViewObject.Transparency = 30
+    self.defaultViewSettings(obj)
 
     # register custom proxy and view provider proxy
     obj.Proxy = PointSourceProxy()
@@ -380,11 +244,8 @@ class AddPointSource():
 
     return obj
 
-  def IsActive(self):
-    return bool(App.activeDocument())
-
   def GetResources(self):
-    return dict(Pixmap=find.iconpath('add-pointsource'),
+    return dict(Pixmap=self.iconpath(),
                 Accel='',
                 MenuText='Make point source',
                 ToolTip='Add a point light source to the current project.')

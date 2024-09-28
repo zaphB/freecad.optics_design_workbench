@@ -233,7 +233,7 @@ class SimulationResults:
       # loop through create fnames, convert to numpy arrays and dump
       for fname, res in results.items():
         with open(fname, 'wb') as f:
-          for k in 'points powers isEntering'.split():
+          for k in 'points directions powers isEntering'.split():
             res[k] = array(res[k]) 
           pickle.dump(res, f)
 

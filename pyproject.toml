@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "setuptools-git-versioning"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools-git-versioning]
+enabled = true
+
+[tool.setuptools.packages.find]
+where = ["freecad"]
+
+[project]
+name = "freecad.optics_design_workbench"
+dynamic = ["version"]
+dependencies = [
+  "numpy", "scipy", "matplotlib", "sympy", "atomicwrites"
+]
+requires-python = ">=3.8"
+authors = [
+  {name = "Philipp Bredol", email = "philipp.bredol@rwth-aachen.de"}
+]
+description = "Physically accurate forward ray tracing for optics simulation and optimization with FreeCAD workbench frontend"
+readme = "README.md"
+license = {file = "LICENSE.txt"}
+
+[project.urls]
+Homepage = "https://github.com/zaphB/freecad.optics_design_workbench"
+Repository = "https://github.com/zaphB/freecad.optics_design_workbench.git"

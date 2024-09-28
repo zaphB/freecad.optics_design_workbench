@@ -2,13 +2,19 @@ __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
+__version__ = None
 
+def _determinePackageVersion():
+  '''
+  find out installed version of the workbench and set global variable
+  '''
+  from importlib.metadata import version
+  global __version__
+  __version__ = version('freecad.optics_design_workbench')
 
-import os
-import types
-import importlib
-import functools
-from .version import __version__
+# make sure __version__ is set
+_determinePackageVersion()
+
 
 def _ensureSystemPackagesCanBeImported():
   '''

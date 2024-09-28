@@ -10,9 +10,6 @@ import os
 import datetime
 import random
 
-from .simulation import results_store
-from .simulation import processes
-
 _LOG_DIR             = None
 _LOGFILE_NAME        = f'optics_design_workbench.log'
 _ROTATE_DIR          = 'oldlogs'
@@ -28,6 +25,7 @@ def _logger():
 
 def _getLogDir():
   try:
+    from .simulation import results_store
     return results_store.getResultsFolderPath()
   # runtime error is raised if no FCStd file is opened, AttributeError is
   # raised if module is not fully initialized yet. In both cases no logging
@@ -36,9 +34,13 @@ def _getLogDir():
     return None
 
 def _init():
+  from .simulation import processes
   global _IS_INIT, _LOG_DIR
+
   if _LOG_DIR != _getLogDir():
-    if processes.isMasterProcess():
+    if processes.isMasterProcess() is None:
+      return
+    elif processes.isMasterProcess():
       setLogfile(_getLogDir()+'/'+_LOGFILE_NAME)
     else:
       setLogfile(_getLogDir()+'/'+_LOGFILE_NAME[:-4]+f'.pid{os.getpid()}')
@@ -69,6 +71,7 @@ def setLogfile(name):
   change name (and path) of active logfile
   '''
   global _IS_INIT, _LOGFILE_NAME, _LOG_DIR
+
   # close old logfile if logger already existed
   if _IS_INIT:
     for h in _logger().handlers:
@@ -91,6 +94,8 @@ def gatherSlaveFiles():
   collect all log files of slaves and merge with master log, only runs if this
   process is the master process
   '''
+  from .simulation import processes
+
   if not _IS_INIT or not processes.isMasterProcess():
     return
 
@@ -116,7 +121,7 @@ def gatherSlaveFiles():
         with open(tmpName, 'r') as inFile:
           with open(_LOG_DIR+'/'+_LOGFILE_NAME, 'a') as outFile:
             for line in inFile:
-              outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}')
+              outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}\n')
         
         # remove tempfile
         os.remove(tmpName) 

@@ -74,6 +74,9 @@ class OpticalGroupProxy():
   def onInitializeSimulation(self, obj, state, ident):
     pass
 
+  def onExitSimulation(self, obj, ident):
+    pass
+
   def onRayHit(self, source, obj, point, direction, power, isEntering, store):
     if store and obj.RecordHits:
       store.addRayHit(source=source, obj=obj, point=point, direction=direction, 

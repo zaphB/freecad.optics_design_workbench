@@ -296,7 +296,9 @@ def runSimulation(action, slaveInfo={}):
       
       while True:
         # do ray-tracing for all light sources
+        lightSourceExists = False
         for obj in freecad_elements.find.lightSources():
+          lightSourceExists = True
 
           # run iteration for the light source
           obj.Proxy.runSimulationIteration(obj=obj, mode=mode, draw=draw, store=store)
@@ -310,6 +312,11 @@ def runSimulation(action, slaveInfo={}):
 
           # handle GUI events and raise if simulation is done
           freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
+        
+        # make sure simulation is canceled if not light source exists
+        if not lightSourceExists:
+          io.err(f'no light source exists in current project, cannot trace any rays.')
+          raise SimulationEnded()
 
         if store:
           # tell storage object that iteration is done
@@ -408,6 +415,12 @@ def runSimulation(action, slaveInfo={}):
 
       # make sure all logfiles of worker processes are collected and merged into main log
       io.gatherSlaveFiles()
+
+      # run simulation exit hooks
+      io.verb(f'runnign simulation-exit hook of all components...')
+      for obj in itertools.chain(freecad_elements.find.lightSources(), 
+                                 freecad_elements.find.relevantOpticalObjects()):
+        obj.Proxy.onExitSimulation(obj=obj, ident='master' if isMasterProcess() else 'worker')
 
       # remove is running flag
       setIsRunning(False)

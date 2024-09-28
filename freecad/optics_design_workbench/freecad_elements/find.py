@@ -31,7 +31,7 @@ def lightSources():
   '''
   for obj in _allObjects():
     if ( obj.TypeId == 'Part::FeaturePython'
-            and isinstance(obj.Proxy, point_source.PointSourceProxy) ):
+            and isinstance(obj.Proxy, point_source.GenericSourceProxy) ):
       yield obj
 
 
