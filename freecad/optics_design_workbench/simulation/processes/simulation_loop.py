@@ -163,6 +163,9 @@ def runSimulation(action, slaveInfo={}):
   _IS_MASTER_PROCESS = not bool(slaveInfo)
   t0 = time.time()
 
+  # setup random seeds to ensure good randomness across all workers and threads
+  setupRandomSeed()
+
   store = None
   iteration = 0
   try:
@@ -450,3 +453,13 @@ def cpuCount():
   except Exception:
     count = os.cpu_count()  
   return max([1, count//2])
+
+
+def setupRandomSeed():
+  # setup random seeds for numpy's and python's random module to something
+  # that will differs between processes and threads for good Monte-Carlo
+  # performance
+  import random
+  import numpy.random
+  random.seed(int(abs(os.getpid()*(time.time()%1)*threading.get_ident()+1000) % 2**32))
+  numpy.random.seed(int(abs(os.getpid()*(time.time()%1)*threading.get_ident()+1000) % 2**32))

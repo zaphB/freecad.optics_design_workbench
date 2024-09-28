@@ -145,7 +145,7 @@ class Ray():
       distTol = 1e-2
       if settings := find.activeSimulationSettings():
         distTol = settings.DistanceTolerance
-    return max([distTol, 1e-4])
+    return max([distTol, 1e-6])
 
   def findNearestIntersection(self, start, direction, maxRayLength, distTol=None):
     '''
@@ -167,13 +167,13 @@ class Ray():
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
       if hasattr(group, 'Shape'):
-        bb = group.Shape.BoundBox
-        bb.enlarge(distTol)
+        sbb = group.Shape.BoundBox
+        #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
         if ( ( not isfinite(maxRayLength)
-                or any([(bb.getPoint(i)-start).Length
+                or any([(sbb.getPoint(i)-start).Length
                                   < maxRayLength 
                                         for i in range(8)]) )
-            and bb.intersect(start, direction) ):
+            and sbb.intersect(start, direction) ):
 
           # loop through all faces
           for face in group.Shape.Faces:
@@ -182,9 +182,9 @@ class Ray():
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
-            bb = face.BoundBox
-            bb.enlarge(distTol)
-            if bb.intersect(start, direction):
+            fbb = face.BoundBox
+            fbb.enlarge(distTol)
+            if fbb.intersect(start, direction):
 
               # find intersection points and loop through all of them
               if intersect := line.Curve.intersect(face.Surface):
@@ -210,19 +210,17 @@ class Ray():
       return sorted(intersects, key=lambda e: e[-1])[0][:-1]
   
   
-  def getNormal(self, nearest_part, origin, neworigin, distTol=None):
+  def getNormal(self, nearest_part, origin, neworigin, epsLength = 1e-6):
     '''
-    calculate the normal vector given, inherited from OpticsWorkbench, needs cleaning
+    calculate the normal vector given, inherited from OpticsWorkbench
     '''
-    distTol = self._getDistTol(distTol)
-
     dRay = neworigin - origin
     if hasattr(nearest_part, 'Curve'):
       param = nearest_part.Curve.parameter(neworigin)
       tangent = nearest_part.tangentAt(param)
       normal1 = dRay.cross(tangent)
       normal = tangent.cross(normal1)
-      if normal.Length < distTol:
+      if normal.Length < epsLength:
         return Vector(0, 0, 0)
       normal = normal / normal.Length
     elif hasattr(nearest_part, 'Surface'):
@@ -236,9 +234,15 @@ class Ray():
     return normal, False
 
   def mirror(self, ray, normal):
+    '''
+    mirror a ray at a normal vector, inherited from OpticsWorkbench
+    '''
     return -(2*normal*(ray*normal) - ray)
 
   def snellsLaw(self, ray, n1, n2, normal):
+    '''
+    apply snell's law, inherited from OpticsWorkbench
+    '''
     root = 1 - n1/n2 * n1/n2 * normal.cross(ray) * normal.cross(ray)
     if root < 0: # total reflection
       return self.mirror(ray, normal), True

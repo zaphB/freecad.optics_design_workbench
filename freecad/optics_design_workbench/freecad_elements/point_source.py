@@ -189,25 +189,22 @@ class PointSourceProxy():
         # add segment to current ray in results storage if enabled
         if rayResults:
           rayResults.addSegment(points=(p1, p2), power=power, medium=medium)
-        
+
         # draw line in GUI if desired
         if draw:
-          # save placement parameters in var
-          placement = obj.Placement
+          # create new line element in local coordinates (global->local: transformed by inverse-GLOBAL-placement transform)
+          newLineElement = Part.makeLine(gpMi*p1, gpMi*p2)
 
-          # create new line element in coordinates transformed by inverse-placement transform
-          additionalLine = Part.makeLine(gpMi*p1, gpMi*p2)
+          # prepare list of existing shapes in local coordinates (with-placement-applied->local: transformed by inverse-placement transform)
+          pMi = obj.Placement.toMatrix().inverse()
+          existingShapes = [s.transformGeometry(pMi) for s in obj.Shape.SubShapes]
 
-          # apply inverse placement-transform to own shape (if it is non-empty)
-          if len(obj.Shape.Vertexes) > 0:
-            obj.Shape = Part.makeCompound([obj.Shape.transformGeometry(gpMi), additionalLine])
-
-          # if previous shape was empty, just set the new line element as the new shape
-          else:
-            obj.Shape = additionalLine
-
-          # restore placement property
-          obj.Placement = placement
+          # make new compound that contains the additional line and make sure Placement information
+          # is restored properly, and clear transform matrix cache
+          _placement = obj.Placement
+          obj.Shape = Part.makeCompound(existingShapes + [newLineElement])
+          obj.Placement = _placement
+          self._makeRayCache.cache_clear()
         
       # increment ray count for progress tracking
       if store:
