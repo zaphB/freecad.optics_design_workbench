@@ -151,7 +151,7 @@ class Ray():
     if distTol is None:
       distTol = 1e-2
       if settings := find.activeSimulationSettings():
-        distTol = settings.DistanceTolerance
+        distTol = float(settings.DistanceTolerance)
     return max([distTol, 1e-6])
 
   def findNearestIntersection(self, start, direction, maxRayLength, distTol=None):
