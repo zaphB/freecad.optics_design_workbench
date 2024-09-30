@@ -74,7 +74,7 @@ class Ray():
       if intersect is None:
         # if no intersection is found yield segment with maxLength and exit loop
         yield ((currentPoint, currentPoint + currentDirection/currentDirection.Length*maxRayLength), 
-                currentPower, currentMedium, None)
+                currentPower, currentMedium, colorChange)
         break
       obj, face, point = intersect
 
@@ -92,6 +92,12 @@ class Ray():
       obj.Proxy.onRayHit(source=self.lightSource, obj=obj, 
                          point=currentPoint, direction=currentDirection, 
                          power=currentPower, isEntering=isEntering, store=store)
+
+      # set colorChange to value requested by the hit object
+      if obj.ViewObject.Weight != 0:
+        colorChange = (obj.ViewObject.Weight, obj.ViewObject.Color)
+      else:
+        colorChange = None
 
       # hit mirror: direction is mirrored at normal, 
       # medium is unchanged, power is altered according to reflectivity

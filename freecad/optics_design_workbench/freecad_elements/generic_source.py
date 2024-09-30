@@ -108,6 +108,12 @@ class GenericSourceProxy():
 
         # draw line in GUI if desired
         if draw:
+
+          # if color change is requested, do so
+          if colorChange is not None:
+            weight, newColor = colorChange
+            weight = min([1, max([0, weight])])
+            color = tuple(array(color)*(1-weight) + array(newColor)*weight)
           
           # create new line element in local coordinates (global->local: transformed by inverse-GLOBAL-placement transform)
           newLineElement = Part.makeLine(gpMi*p1, gpMi*p2)
@@ -116,10 +122,10 @@ class GenericSourceProxy():
           # first to avoid rays being shown with wrong placement for a very short moment
           _obj = simulation.simulatingDocument().addObject('Part::Feature', f'RaySegment')
           _obj.Visibility = False
-          _obj.ViewObject.LineColor = color
           _obj.ViewObject.LineWidth = obj.ViewObject.LineWidth
-          obj.ElementList = obj.ElementList + [_obj]
+          _obj.ViewObject.LineColor = color
           _obj.Shape = newLineElement
+          obj.ElementList = obj.ElementList + [_obj]
         
       # increment ray count for progress tracking
       if store:

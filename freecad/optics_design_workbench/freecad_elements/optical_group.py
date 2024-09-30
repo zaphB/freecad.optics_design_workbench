@@ -139,6 +139,21 @@ class MakeOpticalGroup:
         obj.addProperty('App::Property'+kind, name, section, tooltip)
         setattr(obj, name, default)
 
+    # create custom view object properties
+    for section, entries in [
+      ('ColorizeRays', [
+        ('Weight', 0, 'Float', 
+              'Weight of ray colorization, should be between 0 and 1. 1 means set color '
+              'immediately, 0 means do not change color at all.'),
+        ('Color', (0.,0.,0.,0.), 'Color', 
+              'Color to mix with previous ray color during colorization. Weight determines '
+              'fraction of old and new colors in mix.'),
+      ]),
+    ]:
+      for name, default, kind, tooltip in entries:
+        obj.ViewObject.addProperty('App::Property'+kind, name, section, tooltip)
+        setattr(obj.ViewObject, name, default)
+
     # register custom proxy and view provider proxy
     obj.Proxy = OpticalGroupProxy()
     obj.ViewObject.Proxy = OpticalGroupViewProxy()
