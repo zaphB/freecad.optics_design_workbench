@@ -13,12 +13,14 @@ except ImportError:
 from . import find
 from .. import simulation
 
+# global dict with keys being PointSourceProxy objects and values being 
+# more dicts that store pseudo-attributes. This akward attribute storing
+# format allows to bypass the serializer which wants to safe the Proxy
+# objects whenever the FreeCAD project is saved.
+NON_SERIALIZABLE_STORE = {}
 
 #####################################################################################################
 class OpticalGroupProxy():
-  '''
-  Proxy of the point point source object responsible for the logic
-  '''
   def execute(self, obj):
     '''Do something when doing a recomputation, this method is mandatory'''
 
@@ -85,18 +87,13 @@ class OpticalGroupProxy():
 
 #####################################################################################################
 class OpticalGroupViewProxy():
-  '''
-  Proxy of the point point source object responsible for the view
-  '''
-  def __init__(self, obj):
-    self.objectName = obj.Name
 
   def getIcon(self):
     '''Return the icon which will appear in the tree view. This method is optional and if not defined a default icon is shown.'''
-    return find.iconpath(App.activeDocument().getObject(self.objectName).OpticalType.lower())
+    return find.iconpath(NON_SERIALIZABLE_STORE[self].OpticalType.lower())
 
   def attach(self, vobj):
-    '''Setup the scene sub-graph of the view provider, this method is mandatory'''
+    NON_SERIALIZABLE_STORE[self] = vobj.Object
     pass
 
   def updateData(self, obj, prop):
@@ -144,7 +141,7 @@ class MakeOpticalGroup:
 
     # register custom proxy and view provider proxy
     obj.Proxy = OpticalGroupProxy()
-    obj.ViewObject.Proxy = OpticalGroupViewProxy(obj)
+    obj.ViewObject.Proxy = OpticalGroupViewProxy()
 
     # set OpticalType property again to trigger onChange handler
     obj.OpticalType = self.opticalType

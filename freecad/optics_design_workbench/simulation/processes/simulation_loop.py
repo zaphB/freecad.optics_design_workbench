@@ -44,6 +44,7 @@ from .. import results_store
 from . import worker_process
 
 _IS_MASTER_PROCESS = None
+_SIMULATING_DOCUMENT = None
 _BACKGROUND_PROCESSES = []
 _ASSUME_DEAD_TIMEOUT = 15
 
@@ -55,6 +56,11 @@ def isWorkerRunning():
   #print(isCanceled(), [w.isRunning() for w in _BACKGROUND_PROCESSES])
   _BACKGROUND_PROCESSES[:] = [w for w in _BACKGROUND_PROCESSES if w.isRunning()]
   return len(_BACKGROUND_PROCESSES)
+
+def simulatingDocument():
+  if _SIMULATING_DOCUMENT is not None:
+    return _SIMULATING_DOCUMENT
+  return App.activeDocument()
 
 # status file info/manipulation
 def _statusFilePath(name):
@@ -159,7 +165,7 @@ def runSimulation(action, slaveInfo={}):
              from calling master process if called in a worker process
   '''
   # set global variable to mark whether we are slave or master
-  global _IS_MASTER_PROCESS
+  global _IS_MASTER_PROCESS, _SIMULATING_DOCUMENT
   _IS_MASTER_PROCESS = not bool(slaveInfo)
   t0 = time.time()
 
@@ -188,8 +194,9 @@ def runSimulation(action, slaveInfo={}):
         raise RuntimeError('slave was launched but no simulation seems to be running')
         
     # recompute and save document
-    App.ActiveDocument.recompute()
-    App.ActiveDocument.save()
+    _SIMULATING_DOCUMENT = App.activeDocument()
+    _SIMULATING_DOCUMENT.recompute()
+    _SIMULATING_DOCUMENT.save()
 
     # determine simulation mode
     mode = action
@@ -316,7 +323,7 @@ def runSimulation(action, slaveInfo={}):
         # make sure simulation is canceled if not light source exists
         if not lightSourceExists:
           io.err(f'no light source exists in current project, cannot trace any rays.')
-          raise SimulationEnded()
+          raise freecad_elements.SimulationEnded()
 
         if store:
           # tell storage object that iteration is done
@@ -421,6 +428,9 @@ def runSimulation(action, slaveInfo={}):
       for obj in itertools.chain(freecad_elements.find.lightSources(), 
                                  freecad_elements.find.relevantOpticalObjects()):
         obj.Proxy.onExitSimulation(obj=obj, ident='master' if isMasterProcess() else 'worker')
+
+      # reset simulating document global reference
+      _SIMULATING_DOCUMENT = None
 
       # remove is running flag
       setIsRunning(False)

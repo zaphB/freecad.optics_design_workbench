@@ -159,7 +159,7 @@ class AddReplaySource(AddGenericSource):
 
   def Activated(self):
     # create new feature python object
-    obj = App.activeDocument().addObject('Part::FeaturePython', 'OpticalReplaySource')
+    obj = App.activeDocument().addObject('App::LinkGroupPython', 'OpticalReplaySource')
 
     # create properties of object
     for section, entries in [
@@ -174,9 +174,6 @@ class AddReplaySource(AddGenericSource):
       for name, default, kind, tooltip in entries:
         obj.addProperty('App::Property'+kind, name, section, tooltip)
         setattr(obj, name, default)
-
-    # set default view properties
-    self.defaultViewSettings(obj)
 
     # register custom proxy and view provider proxy
     obj.Proxy = ReplaySourceProxy()

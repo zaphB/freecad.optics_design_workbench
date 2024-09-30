@@ -204,7 +204,7 @@ class AddPointSource(AddGenericSource):
 
   def Activated(self):
     # create new feature python object
-    obj = App.activeDocument().addObject('Part::FeaturePython', 'OpticalPointSource')
+    obj = App.activeDocument().addObject('App::LinkGroupPython', 'OpticalPointSource')
 
     # create properties of object
     for section, entries in [
@@ -231,9 +231,6 @@ class AddPointSource(AddGenericSource):
       for name, default, kind, tooltip in entries:
         obj.addProperty('App::Property'+kind, name, section, tooltip)
         setattr(obj, name, default)
-
-    # set default view properties
-    self.defaultViewSettings(obj)
 
     # register custom proxy and view provider proxy
     obj.Proxy = PointSourceProxy()

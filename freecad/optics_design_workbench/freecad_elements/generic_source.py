@@ -16,6 +16,7 @@ import functools
 
 from .common import *
 from . import find
+from .. import simulation
 from .. import io
 
 # global dict with keys being PointSourceProxy objects and values being 
@@ -34,12 +35,15 @@ class GenericSourceProxy():
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
+    print(obj, prop)
 
   def clear(self, obj):
     # remove shape but make sure placement stays alive
-    placement = obj.Placement
-    obj.Shape = Part.Shape()
-    obj.Placement = placement
+    #placement = obj.Placement
+    #obj.Shape = Part.Shape()
+    #obj.Placement = placement
+    for segment in obj.ElementList:
+      simulation.simulatingDocument().removeObject(segment.Name)
 
   
   @functools.cache
@@ -48,9 +52,13 @@ class GenericSourceProxy():
     Make sure matrices and vectors that do not change during ray 
     tracing are calculated only once.
     '''
-    gpM = obj.getGlobalPlacement().toMatrix()
-    gpMi = obj.getGlobalPlacement().toMatrix().inverse()
-
+    # insert dummy object if empty to get access to global placement
+    gpM = obj.Placement.toMatrix()
+    gpMi = obj.Placement.toMatrix().inverse()
+    #elem = obj.ElementList[0]
+    #gpM = elem.getGlobalPlacement().toMatrix()
+    #gpMi = elem.getGlobalPlacement().toMatrix().inverse()
+    
     # prepare Placement-adjusted beam orientation vectors in local coordinates
     opticalAxis = Vector(0,0,1)
     orthoAxis = Vector(1,0,0)
@@ -83,8 +91,13 @@ class GenericSourceProxy():
         if obj.RecordRays:
           rayResults = store.addRay(source=obj)
 
+      # set starting color to diffuse color of light source at begin of tracing
+      # the diffuse color is the first one visible in the view settings, so it
+      # is most intuitive to use this 
+      color = obj.ViewObject.ShapeMaterial.DiffuseColor
+
       # trace ray through project
-      for (p1,p2), power, medium in ray.traceRay(store=store, **kwargs):
+      for (p1,p2), power, medium, colorChange in ray.traceRay(store=store, **kwargs):
 
         # this loop may run for quite some time, keep GUI responsive by handling events
         keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -95,19 +108,18 @@ class GenericSourceProxy():
 
         # draw line in GUI if desired
         if draw:
+          
           # create new line element in local coordinates (global->local: transformed by inverse-GLOBAL-placement transform)
           newLineElement = Part.makeLine(gpMi*p1, gpMi*p2)
 
-          # prepare list of existing shapes in local coordinates (with-placement-applied->local: transformed by inverse-placement transform)
-          pMi = obj.Placement.toMatrix().inverse()
-          existingShapes = [s.transformGeometry(pMi) for s in obj.Shape.SubShapes]
-
-          # make new compound that contains the additional line and make sure Placement information
-          # is restored properly, and clear transform matrix cache
-          _placement = obj.Placement
-          obj.Shape = Part.makeCompound(existingShapes + [newLineElement])
-          obj.Placement = _placement
-          self._makeRayCache.cache_clear()
+          # create new line element and add to ray source group, set visibility to false at 
+          # first to avoid rays being shown with wrong placement for a very short moment
+          _obj = simulation.simulatingDocument().addObject('Part::Feature', f'RaySegment')
+          _obj.Visibility = False
+          _obj.ViewObject.LineColor = color
+          _obj.ViewObject.LineWidth = obj.ViewObject.LineWidth
+          obj.ElementList = obj.ElementList + [_obj]
+          _obj.Shape = newLineElement
         
       # increment ray count for progress tracking
       if store:
@@ -120,16 +132,13 @@ class GenericSourceProxy():
 
 #####################################################################################################
 class GenericSourceViewProxy():
-  '''
-  Proxy of the point point source object responsible for the view
-  '''
+
   def getIcon(self):
     '''Return the icon which will appear in the tree view. This method is optional and if not defined a default icon is shown.'''
     return find.iconpath(self.__class__.__name__.replace('ViewProxy', '').lower())
 
   def attach(self, vobj):
-    '''Setup the scene sub-graph of the view provider, this method is mandatory'''
-    pass
+    NON_SERIALIZABLE_STORE[self] = vobj.Object
 
   def updateData(self, obj, prop):
     '''If a property of the handled feature has changed we have the chance to handle this here'''
@@ -137,10 +146,11 @@ class GenericSourceViewProxy():
 
   def claimChildren(self):
     '''Return a list of objects that will be modified by this feature'''
-    return []
+    return NON_SERIALIZABLE_STORE[self].ElementList
 
-  def onDelete(self, obj, subelements):
-    '''Here we can do something when the feature will be deleted'''
+  def onDelete(self, vobj, subelements):
+    # make sure all ray segments are deleted
+    NON_SERIALIZABLE_STORE[self].Proxy.clear(NON_SERIALIZABLE_STORE[self])
     return True
 
   def onChanged(self, obj, prop):
@@ -155,7 +165,11 @@ class AddGenericSource():
     return find.iconpath('add-'+self.__class__.__name__.replace('Add', '').lower())
 
   def IsActive(self):
-    return bool(App.activeDocument())
+    # for some reason this makes the button always inactive in some FreeCAD versions...
+    #return bool(App.activeDocument())
+
+    # just always make it active is a quick-n-dirty fix for this
+    return True
 
   def defaultSimulationSettings(self, obj):
     return [
@@ -170,7 +184,3 @@ class AddGenericSource():
       ('MaxRayLengthScale', 1, 'Float', 'Maximum length of each ray segment. This will be '
                 'multiplied with the MaxRayLength property of the active simulation settings.'),
     ]
-
-  def defaultViewSettings(self, obj):
-    obj.ViewObject.LineColor = (1., .3, 0., 1.)
-    obj.ViewObject.LineWidth = 1

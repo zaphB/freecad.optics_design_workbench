@@ -59,6 +59,7 @@ class Ray():
     currentDirection = self.direction
     prevMedium, currentMedium = None, None
     prevPower, currentPower = self.initPower, self.initPower
+    colorChange = None
     while True:
       # this loop may run for quite some time, keep GUI responsive by handling events
       keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -73,7 +74,7 @@ class Ray():
       if intersect is None:
         # if no intersection is found yield segment with maxLength and exit loop
         yield ((currentPoint, currentPoint + currentDirection/currentDirection.Length*maxRayLength), 
-                currentPower, currentMedium)
+                currentPower, currentMedium, None)
         break
       obj, face, point = intersect
 
@@ -82,7 +83,7 @@ class Ray():
       currentPoint = point
 
       # add yield latest segment
-      yield (prevPoint, currentPoint), prevPower, prevMedium
+      yield (prevPoint, currentPoint), prevPower, prevMedium, colorChange
 
       # calculate normal and whether ray is facing the object from the outside or the inside
       normal, isEntering = self.getNormal(face, prevPoint, currentPoint)

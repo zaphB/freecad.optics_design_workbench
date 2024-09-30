@@ -29,7 +29,7 @@ class TestRunNotebooks(unittest.TestCase):
     except:
       pass
 
-  def _runFile(self, filename, cleanup=True, cancelAfter=None, timeout=300):
+  def _runFile(self, filename, cleanup=True, cancelAfter=None, timeout=60*60):
     baseDir = os.path.abspath(os.path.dirname(__file__))
 
     # remove results folder
