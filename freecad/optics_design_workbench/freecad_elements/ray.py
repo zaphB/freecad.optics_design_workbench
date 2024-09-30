@@ -94,7 +94,7 @@ class Ray():
                          power=currentPower, isEntering=isEntering, store=store)
 
       # set colorChange to value requested by the hit object
-      if obj.ViewObject.Weight != 0:
+      if obj.ViewObject is not None and obj.ViewObject.Weight != 0:
         colorChange = (obj.ViewObject.Weight, obj.ViewObject.Color)
       else:
         colorChange = None

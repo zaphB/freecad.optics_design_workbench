@@ -225,6 +225,10 @@ def runSimulation(action, slaveInfo={}):
     if action in ('pseudo', 'true'):
       draw = drawContinuous
 
+    # always disable drawing in slave processes
+    if not isMasterProcess():
+      draw = False
+
     # determine number if workers to spawn (single for single shot simulations, 
     # according to settings for more than one iteration)
     workers = 1
