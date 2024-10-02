@@ -142,36 +142,29 @@ class PointSourceProxy(GenericSourceProxy):
     if mode == 'fans':
       raysPerIteration = min([obj.RaysPerFan, maxRaysPerFan])
 
-      # prepare expression, multiply with theta to correct for spherical coordinates
-      densityExpr = sy.sympify(obj.PowerDensity)
-
       # create obj.Fans ray fans oriented in phi0
-      for phi in linspace(0, pi, int(min([obj.Fans, maxFanCount])+1))[:-1]:
-
-        # this loop may run for quite some time, keep GUI responsive by handling events
-        keepGuiResponsiveAndRaiseIfSimulationDone()
-
-        # calculate desired beam power density
-        densityLambda = sy.lambdify('theta', densityExpr.subs('phi', phi))
-        thetas = linspace(*self.parsedThetaDomain(obj), obj.ThetaResolutionNumericMode)
-        density = densityLambda(thetas)
-
-        # mirror density for fans if domain is starting from zero
-        if isclose(thetas[0], 0):
-          thetas = concatenate([-thetas[::-1][:-1], thetas])
-          density = concatenate([density[::-1][:-1], density])
-
-        # generate the required thetas to place beams at and create beams
-        for theta in distributions.generatePointsWithGivenDensity1D(
-                                              density=(thetas, density),
-                                              N=raysPerIteration,
-                                              startFrom=0):
+      for _phi in linspace(0, pi, int(min([obj.Fans, maxFanCount])+1))[:-1]:
+        for phi in (_phi, _phi+pi):
 
           # this loop may run for quite some time, keep GUI responsive by handling events
           keepGuiResponsiveAndRaiseIfSimulationDone()
 
-          # add lines corresponding to this ray to total ray list
-          yield self.makeRay(obj=obj, theta=theta, phi=phi)
+          # generate the required thetas to place beams at and create beams
+          # create a scalar random variable here, treat Phi as a constant
+          vrv = distributions.ScalarRandomVariable(
+                      obj.PowerDensity, # no sin(theta) correction here because fans are 2D
+                      variableOrder=('theta', 'phi'),
+                      variable='theta',
+                      variableDomain=self.parsedThetaDomain(obj), 
+                      numericalResolution=obj.ThetaResolutionNumericMode)
+          vrv.compile(phi=phi)
+          for theta in vrv.findGrid(N=raysPerIteration):
+
+            # this loop may run for quite some time, keep GUI responsive by handling events
+            keepGuiResponsiveAndRaiseIfSimulationDone()
+
+            # add lines corresponding to this ray to total ray list
+            yield self.makeRay(obj=obj, theta=theta, phi=phi)
 
     # pseudo-random mode: place rays by drawing theta and phi from pseudo random distribution
     elif mode == 'pseudo':
