@@ -13,6 +13,8 @@ import warnings
 import time
 import signal
 
+from . import points_by_density
+
 
 def _setAlarm(deadline):
     timeout = deadline-time.time()
@@ -35,17 +37,34 @@ class VectorRandomVariable:
   '''
   Vector valued random variable. 
   '''
-  def __init__(self, probabilityDensity, variableDomains={}, numericalResolutions={}, variableOrder=None):
+  def __init__(self, probabilityDensity, variableDomains={}, numericalResolutions={}, variableOrder=None,
+               warnIfDiscretizationStepAbove=5e-2):
     self._probabilityDensity = probabilityDensity
     self._probabilityDensityBaseExpr = None
     self._variables = None
     self._variableDomains = variableDomains
     self._numericalResolutions = numericalResolutions
     self._variableOrder = variableOrder
+    self._constantsDict = {}
     self._mode = 'not yet compiled'
+    self._warnIfDiscretizationStepAbove = warnIfDiscretizationStepAbove
 
 
   def compile(self, timeout=2, disableAnalytical=False, **kwargs):
+    '''
+    Draw random numbers (or vectors) following the distribution represented by this object.
+
+    Arguments:
+    ==========
+    timeout : numeric
+      Give up on finding an analytical solution and fallback to numeric mode after timeout seconds.
+
+    disableAnalytical : boolean
+      Set to true to completely disable analytic mode.
+
+    **kwargs    
+      Dictionary of constants to substitute in the distribution expression.
+    '''
     self._deadline = time.time()+timeout
     self._setConstants(**kwargs)
 
@@ -69,6 +88,9 @@ class VectorRandomVariable:
 
 
   def showExpressions(self, simplify=True):
+    '''
+    Pretty print generated internal expressions and lambdas for debugging purposes.
+    '''
     print('probability density expression: ', self._probabilityDensityExpr, ' variables: ', self._variables)
     print(self._transformLambdas)
     for i, var in enumerate(self._variables):
@@ -89,6 +111,10 @@ class VectorRandomVariable:
 
 
   def _setConstants(self, **kwargs):
+    # store passed constants dictionary for later reference
+    self._constantsDict = kwargs
+
+    # prepare expression object
     if self._probabilityDensityBaseExpr is None:
       self._probabilityDensityBaseExpr = sy.sympify(self._probabilityDensity)
     expr = self._probabilityDensityBaseExpr    
@@ -241,6 +267,18 @@ class VectorRandomVariable:
       raise ValueError(f'found negative probability density, '
                        f'expression: {expr}, variable: {self._variables[varI]}')
 
+    # warn if neighboring points in gridsProbs differ by more than threshold
+    for dim in range(len(gridProbs.shape)):
+      scale = gridProbs.max()-gridProbs.min()
+      if scale < 1e-10:
+        scale = 1
+      r1, r2 = arange(gridProbs.shape[dim])[:-1], arange(gridProbs.shape[dim])[1:]
+      diff = take(gridProbs, r1, axis=dim) - take(gridProbs, r2, axis=dim)
+      if abs(diff).max()/scale > self._warnIfDiscretizationStepAbove:
+        warnings.warn(f'numerical evaluation of probability density expression '
+                      f'{self._probabilityDensityExpr} had jumps larger than '
+                      f'{1e2*self._warnIfDiscretizationStepAbove:.1f}%')
+
     # numerically integrate (actually just sum because normalization 
     # happens later anyways) along domain for i<varI
     for _ in range(varI):
@@ -310,7 +348,26 @@ class VectorRandomVariable:
     return lambYs
 
 
-  def draw(self, N=None):
+  def draw(self, N=None, constants={}):
+    '''
+    Draw random numbers (or vectors) following the distribution represented by this object.
+
+    Arguments:
+    ==========
+    N : int
+      number of random numbers (vectors) to draw. If this argument is not passed, the return
+      value will have the same shape as the random number variable implied by the distribution.
+      If N is passed, the result will have an additional dimension of size N.
+
+    constants : dict    
+      Dictionary of constants to substitute in the distribution expression.
+    '''
+
+    # compile variable first if either constants are passed or
+    # if it was not yet compiled
+    if not hasattr(self, '_transformLambdas') or constants != self._constantsDict:
+      self.compile(**constants)
+
     # accept float values for N and limit to min 1
     if N is not None:
       N = max([1, int(round(N))])
@@ -356,14 +413,179 @@ class VectorRandomVariable:
     _varNames = [str(v) for v in self._variables]
     for v in self._variableOrder:
       if v not in _varNames:
-        raise ValueError(f'variable {v} is given in variable ordering, but does not seem to exist in expression {self._probabilityDensityExpr}')
+        raise ValueError(f'variable {v} is given in variable ordering, but does not seem to '
+                         f'exist in expression {self._probabilityDensityExpr}')
       _varNames.remove(v)
     if len(_varNames):
-      raise ValueError(f'variables {_varNames} exist in expression {self._probabilityDensityExpr} but do not exist in {self._variableOrder}')
+      raise ValueError(f'variables {_varNames} exist in expression {self._probabilityDensityExpr}'
+                       f' but do not exist in {self._variableOrder}; are all constants specified?')
 
     # construct ordering index and return
     _orderingIndex = [[str(v) for v in self._variables].index(_v) for _v in self._variableOrder]
     return result[_orderingIndex]
+
+  def drawPseudo(self, N, bins=None, overdrawFactor=1.1, overdrawIterations=30, constants={}, plotHistograms=False):
+    '''
+    Draw pseudo random (or vectors) almost following the distribution represented by this object.
+    The histogram if the returned numbers will be close to the expected histogram, outliers are
+    removed.
+
+    Arguments:
+    ==========
+    N : int
+      Number of random numbers (vectors) to draw. This must be greater than 1, because a histogram
+      is not well defined otherwise.
+
+    constants : dict    
+      Dictionary of constants to substitute in the distribution expression.
+
+    overdrawFactor : float
+      Draw N*overdrawFactor true random numbers and return only the N numbers out of these, that
+      represent the expected histogram best.
+
+    overdrawIterations : int
+      Redraw new values overdrawIterations times to refine histogram 
+    '''
+    if N <= 1:
+      raise ValueError(f'N must be greater than one in pseudo random mode')
+    if overdrawFactor <= 1:
+      raise ValueError(f'overdrawFactor must be greater than one')
+    if overdrawIterations <= 1:
+      raise ValueError(f'overdrawIterations must be greater than one')
+    if not self._variableOrder:
+      raise ValueError(f'variableOrder must be passed to constructor to use pseudo random mode.')
+
+    draws = None
+    for _ in range(round(int(overdrawIterations))):
+      # draw true random samples
+      newDraws =  self.draw(N=round(N*overdrawFactor), constants=constants)
+      if draws is None:
+        draws = newDraws
+      elif len(draws.shape) == 1:
+        # concatenate with old non-nan samples
+        draws = concatenate([draws[logical_not(isnan(draws))], newDraws])
+      else:
+        # concatenate with old non-nan samples
+        draws = concatenate([draws[...,logical_not(isnan(draws[0]))], newDraws], axis=-1)
+
+      # calc n-D histogram
+      if bins is None:
+        bins = int( (overdrawFactor*sqrt(overdrawIterations)*N)**(1/(3*len(self._variableOrder))) )
+      hist, edges = histogramdd(draws.T, bins=bins)
+      binCenters = [(e[1:]+e[:-1])/2 for e in edges]
+
+      # calc expected histogram
+      expr = self._probabilityDensityExpr
+      lambdExpr = sy.lambdify(list(reversed(self._variableOrder)), expr)
+      expectedHist = lambdExpr(*meshgrid(*reversed(binCenters)))
+
+      # fix shape in case of missing variables in expression
+      if not hasattr(expectedHist, 'shape'):
+        expectedHist = expectedHist*ones(hist.shape)
+
+      while True:
+        # drop values in bins that have more than expected values'
+        histDiff = hist/hist.sum() - expectedHist/expectedHist.sum()
+        outlierIndex = argwhere(histDiff == histDiff.max())[0]
+        outlierEdge1 = [e[i] for e,i in zip(edges, outlierIndex)]
+        outlierEdge2 = [e[i+1] for e,i in zip(edges, outlierIndex)]
+
+        #print(outlierEdge1, outlierEdge2)
+        isInBin = None
+        if len(draws.shape) == 1:
+          isInBin = logical_and(outlierEdge1[0] < draws, draws <= outlierEdge2[0])
+        else:
+          for i, (e1, e2) in enumerate(zip(outlierEdge1, outlierEdge2)):
+            _isInBin = logical_and(e1 < draws[i], draws[i] <= e2)
+            if isInBin is None:
+              isInBin = _isInBin
+            else:
+              isInBin = logical_and(isInBin, _isInBin)
+        drawDeleteIndices = argwhere(isInBin)
+        #print(draws[...,drawDeleteIndices[0]])
+
+        # replace random value from that bin with nan and reduce respective histogram count by one,
+        # if that bin has no values left, exit loop
+        if len(drawDeleteIndices) > 0:
+          drawDeleteIndex = drawDeleteIndices[int(random.random()*drawDeleteIndices.shape[0])]
+          draws[...,*drawDeleteIndex] = nan
+          hist[*outlierIndex] -= 1
+          #print(f'hist reduced at {outlierIndex=}, removed draw index [{drawDeleteIndex=}]')
+        else:
+          draws = draws[...,logical_not(isnan(draws if len(draws.shape)==1 else draws[0]))]
+          draws = draws[...,-int(N):]
+          #print('end prematurely')
+          break
+
+        # end loop if only N values left
+        if len(draws.shape) == 1:
+          if sum(logical_not(isnan(draws))) <= N:
+            #print('end because need more samples')
+            break
+        else:
+          if sum(logical_not(isnan(draws[-1]))) <= N:
+            #print('end because need more samples')
+            break
+
+      if plotHistograms:
+        histDiff = hist/hist.sum() - expectedHist/expectedHist.sum()
+        import matplotlib.pyplot as plt 
+        plt.figure(figsize=(5,2))
+        plt.plot(hist/hist.sum())
+        plt.plot(expectedHist/expectedHist.sum())
+        plt.plot(histDiff)
+
+    # clean out nans and return, make sure length is right and return
+    result = draws[...,logical_not(isnan(draws if len(draws.shape)==1 else draws[0]))]
+    if draws.shape[-1] / result.shape[-1] > 5:
+      warnings.warn('pseudo random generation was not very successful, maybe bins '
+                    'or overdraw parameters have to be tweaked...')
+    return result[...,-int(round(N)):]
+
+
+  def findGrid(self, N, startFrom=None, constants={}):
+    '''
+    Return values whose density follows the given probability density as close as possible.
+    '''
+    # compile variable first if either constants are passed or
+    # if it was not yet compiled
+    if not hasattr(self, '_transformLambdas') or constants != self._constantsDict:
+      self.compile(**constants)
+
+    # perform 1D grid generation
+    if len(self._variables) == 1:
+      # prepare ranges and parameters      
+      var = self._variables[0]
+      l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
+      if not isfinite(l1) or not isfinite(l2):
+        raise ValueError(f'variable domains must be finite for grid generation')
+      res = self._numericalResolutions.get(str(var), int(1e4))
+      varRange = linspace(l1, l2, res)
+
+      # calc density
+      expr = self._probabilityDensityExpr
+      lambdExpr = sy.lambdify(var, expr)
+      density = lambdExpr(varRange)
+
+      # fix shape in case of missing variables in expression
+      if not hasattr(density, 'shape'):
+        density = density*ones(varRange.shape)
+
+      # find startFrom parameter if not given explicitly
+      if startFrom is None:
+        startFrom = varRange[argmax(density)]
+      
+      # call algorithm from points_by_density module
+      result = points_by_density.generatePointsWithGivenDensity1D(
+                              density=(varRange, density),
+                              N=N,
+                              startFrom=startFrom)
+      
+      # clip result to range and return
+      return result[logical_and(min(varRange) <= result, result <= max(varRange))]
+    else:
+      raise RuntimeError('grid generation is not implemented for variable count greater than 1')
+
 
 
 class ScalarRandomVariable(VectorRandomVariable):
@@ -371,13 +593,39 @@ class ScalarRandomVariable(VectorRandomVariable):
   Scalar valued random variable. 
   '''
   def __init__(self, probabilityDensity, variableDomain, variable=None, numericalResolution=None, **kwargs):
+    self._desiredVariable = variable
     if variable is None:
       variable = str(list(sy.sympify(probabilityDensity).free_symbols)[0])
     super().__init__(probabilityDensity, 
                      variableDomains={variable: variableDomain},
-                     numericalResolutions=None if numericalResolution is None else {variable: numericalResolution},
+                     numericalResolutions={} if numericalResolution is None else {variable: numericalResolution},
                      variableOrder=[variable,],
                      **kwargs)
+
+  def compile(self, **kwargs):
+    # subfunction that raises human readable exceptions if conditions for scalar random variable are not fulfilled 
+    def _checkScalarity():
+      freeSymbols = sy.sympify(self._probabilityDensityExpr).free_symbols
+      if ( len(freeSymbols) 
+            and self._desiredVariable is not None
+            and self._desiredVariable not in [str(s) for s in freeSymbols] ):
+        raise ValueError(f'specified variable "{self._desiredVariable}" does not seem to appear '
+                         f'in expression "{self._probabilityDensityExpr}"')
+
+      if len(self._variables) > 1:
+        raise ValueError(f'expression "{self._probabilityDensityExpr}" seems to have more than '
+                        f'one free variable after substituting constants; did you pass all constants '
+                        f'to .compile() or .draw()?')
+
+    # run vector random variable's compile and reraise exceptions caused by non-scalarity as 
+    # useful human readable exceptions
+    try:
+      super().compile(**kwargs)
+    except ValueError as e:
+      if 'requires finite limits' in str(e):
+        _checkScalarity()
+      raise
+    _checkScalarity()
 
   def draw(self, N=None, **kwargs):
     return super().draw(N=N, **kwargs)[0]

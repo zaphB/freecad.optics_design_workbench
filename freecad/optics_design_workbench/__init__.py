@@ -8,9 +8,12 @@ def _determinePackageVersion():
   '''
   find out installed version of the workbench and set global variable
   '''
-  from importlib.metadata import version
-  global __version__
-  __version__ = version('freecad.optics_design_workbench')
+  try:
+    from importlib.metadata import version
+    global __version__
+    __version__ = version('freecad.optics_design_workbench')
+  except Exception:
+    __version__ = '?'
 
 # make sure __version__ is set
 _determinePackageVersion()

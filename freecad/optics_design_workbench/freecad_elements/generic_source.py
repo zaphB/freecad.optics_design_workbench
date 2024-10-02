@@ -38,12 +38,12 @@ class GenericSourceProxy():
     print(obj, prop)
 
   def clear(self, obj):
-    # remove shape but make sure placement stays alive
-    #placement = obj.Placement
-    #obj.Shape = Part.Shape()
-    #obj.Placement = placement
-    for segment in obj.ElementList:
-      simulation.simulatingDocument().removeObject(segment.Name)
+    # delete all children, which are the RaySegments
+    if hasattr(obj, 'ElementList'):
+      for segment in obj.ElementList:
+        simulation.simulatingDocument().removeObject(segment.Name)
+    else:
+      raise RuntimeError(f'light source object {obj.Name} does not have ElementList property. Older project? Recreate the source.')
 
   
   @functools.cache
@@ -52,12 +52,12 @@ class GenericSourceProxy():
     Make sure matrices and vectors that do not change during ray 
     tracing are calculated only once.
     '''
-    # insert dummy object if empty to get access to global placement
+    # TODO: LinkGroupPython has no global placement method... Is this sufficient?
     gpM = obj.Placement.toMatrix()
     gpMi = obj.Placement.toMatrix().inverse()
     #elem = obj.ElementList[0]
-    #gpM = elem.getGlobalPlacement().toMatrix()
-    #gpMi = elem.getGlobalPlacement().toMatrix().inverse()
+    #gpM = obj.Shape.getGlobalPlacement().toMatrix()
+    #gpMi = obj.Shape.getGlobalPlacement().toMatrix().inverse()
     
     # prepare Placement-adjusted beam orientation vectors in local coordinates
     opticalAxis = Vector(0,0,1)
@@ -91,6 +91,10 @@ class GenericSourceProxy():
         if obj.RecordRays:
           rayResults = store.addRay(source=obj)
 
+      # reference to previously drawn ray object updated in ray tracing loop, initialize
+      # with ray of color given by light source
+      prevRaySegment = None
+
       # set starting color to diffuse color of light source at begin of tracing
       # the diffuse color is the first one visible in the view settings, so it
       # is most intuitive to use this
@@ -109,25 +113,38 @@ class GenericSourceProxy():
 
         # draw line in GUI if desired
         if draw:
-          # if color change is requested, do so
-          if colorChange is not None:
-            weight, newColor = colorChange
-            weight = min([1, max([0, weight])])
-            color = tuple(array(color)*(1-weight) + array(newColor)*weight)
-          
           # create new line element in local coordinates (global->local: transformed by inverse-GLOBAL-placement transform)
           newLineElement = Part.makeLine(gpMi*p1, gpMi*p2)
 
-          # create new line element and add to ray source group, set visibility to false at 
-          # first to avoid rays being shown with wrong placement for a very short moment
-          _obj = simulation.simulatingDocument().addObject('Part::Feature', f'RaySegment')
-          _obj.Visibility = False
-          if _obj.ViewObject:
-            _obj.ViewObject.ShowInTree = False
-            _obj.ViewObject.LineWidth = obj.ViewObject.LineWidth
-            _obj.ViewObject.LineColor = color
-          _obj.Shape = newLineElement
-          obj.ElementList = obj.ElementList + [_obj]
+          # if color change is requested or no ray segment Part::Feature exists yet, 
+          # add new Part::Feature with updated color
+          if colorChange is not None or prevRaySegment is None:
+            
+            # calculate new color if needed
+            if colorChange is not None:
+              weight, newColor = colorChange
+              weight = min([1, max([0, weight])])
+              color = tuple(array(color)*(1-weight) + array(newColor)*weight)
+          
+            # create new line element and add to ray source group, set visibility to false at 
+            # first to avoid rays being shown with wrong placement for a very short moment
+            _obj = simulation.simulatingDocument().addObject('Part::Feature', f'RaySegment')
+            _obj.Visibility = False
+            if _obj.ViewObject:
+              _obj.ViewObject.ShowInTree = False
+              _obj.ViewObject.LineWidth = obj.ViewObject.LineWidth
+              _obj.ViewObject.LineColor = color
+
+            # make sure to create a compound with one member, instead of setting the line directly as Shape
+            # setting a line directly makes the SubShapes correspond to its Vertices, which will break
+            # adding possible adding of line segments to the compound in following iterations (else branch of this)
+            _obj.Shape = Part.makeCompound([newLineElement])
+            obj.ElementList = obj.ElementList + [_obj]
+            prevRaySegment = _obj
+
+          # if now color change is requested, add line segment as compound
+          else:
+            prevRaySegment.Shape = Part.makeCompound(prevRaySegment.Shape.SubShapes + [newLineElement])
         
       # increment ray count for progress tracking
       if store:

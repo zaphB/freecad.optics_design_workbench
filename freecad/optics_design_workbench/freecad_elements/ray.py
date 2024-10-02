@@ -23,11 +23,12 @@ class Ray():
   '''
   Class representing an individual ray.
   '''
-  def __init__(self, lightSource, startingPoint, direction, initPower=1):
+  def __init__(self, lightSource, startingPoint, direction, initPower=1, wavelength=1):
     self.lightSource = lightSource
     self.startingPoint = startingPoint
     self.direction = direction
     self.initPower = initPower
+    self.initWavelength = wavelength
   
      
   def traceRay(self, powerTol=1e-6, maxRayLength=None,

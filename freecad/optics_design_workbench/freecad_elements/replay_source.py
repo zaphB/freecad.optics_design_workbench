@@ -73,6 +73,10 @@ class ReplaySourceProxy(GenericSourceProxy):
     randomized order. The functools.cache decorator makes sure every result is only yielded
     once. Calling the cache_clear method resets the generator. 
     '''
+    if not obj.ReplayFromDir:
+      raise RuntimeError(f'please set a replay directory for light source {obj.Name} '
+                         f'(Data -> Optical Emission -> Replay From Dir)')
+
     if not os.path.exists(obj.ReplayFromDir):
       raise RuntimeError(f'selected replay directory of light source {obj.Name} does not '
                          f'seem to exist: {obj.ReplayFromDir} ')
