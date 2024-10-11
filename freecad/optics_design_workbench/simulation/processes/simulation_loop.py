@@ -44,6 +44,7 @@ from .. import results_store
 from . import worker_process
 
 _IS_MASTER_PROCESS = None
+_SIMULATING_DOCUMENT = None
 _BACKGROUND_PROCESSES = []
 _ASSUME_DEAD_TIMEOUT = 15
 
@@ -55,6 +56,11 @@ def isWorkerRunning():
   #print(isCanceled(), [w.isRunning() for w in _BACKGROUND_PROCESSES])
   _BACKGROUND_PROCESSES[:] = [w for w in _BACKGROUND_PROCESSES if w.isRunning()]
   return len(_BACKGROUND_PROCESSES)
+
+def simulatingDocument():
+  if _SIMULATING_DOCUMENT is not None:
+    return _SIMULATING_DOCUMENT
+  return App.activeDocument()
 
 # status file info/manipulation
 def _statusFilePath(name):
@@ -159,9 +165,12 @@ def runSimulation(action, slaveInfo={}):
              from calling master process if called in a worker process
   '''
   # set global variable to mark whether we are slave or master
-  global _IS_MASTER_PROCESS
+  global _IS_MASTER_PROCESS, _SIMULATING_DOCUMENT
   _IS_MASTER_PROCESS = not bool(slaveInfo)
   t0 = time.time()
+
+  # setup random seeds to ensure good randomness across all workers and threads
+  setupRandomSeed()
 
   store = None
   iteration = 0
@@ -185,8 +194,9 @@ def runSimulation(action, slaveInfo={}):
         raise RuntimeError('slave was launched but no simulation seems to be running')
         
     # recompute and save document
-    App.ActiveDocument.recompute()
-    App.ActiveDocument.save()
+    _SIMULATING_DOCUMENT = App.activeDocument()
+    _SIMULATING_DOCUMENT.recompute()
+    _SIMULATING_DOCUMENT.save()
 
     # determine simulation mode
     mode = action
@@ -214,6 +224,10 @@ def runSimulation(action, slaveInfo={}):
       drawContinuous = settings.ShowRaysInContinuousMode
     if action in ('pseudo', 'true'):
       draw = drawContinuous
+
+    # always disable drawing in slave processes
+    if not isMasterProcess():
+      draw = False
 
     # determine number if workers to spawn (single for single shot simulations, 
     # according to settings for more than one iteration)
@@ -293,7 +307,9 @@ def runSimulation(action, slaveInfo={}):
       
       while True:
         # do ray-tracing for all light sources
+        lightSourceExists = False
         for obj in freecad_elements.find.lightSources():
+          lightSourceExists = True
 
           # run iteration for the light source
           obj.Proxy.runSimulationIteration(obj=obj, mode=mode, draw=draw, store=store)
@@ -307,6 +323,11 @@ def runSimulation(action, slaveInfo={}):
 
           # handle GUI events and raise if simulation is done
           freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
+        
+        # make sure simulation is canceled if not light source exists
+        if not lightSourceExists:
+          io.err(f'no light source exists in current project, cannot trace any rays.')
+          raise freecad_elements.SimulationEnded()
 
         if store:
           # tell storage object that iteration is done
@@ -406,6 +427,15 @@ def runSimulation(action, slaveInfo={}):
       # make sure all logfiles of worker processes are collected and merged into main log
       io.gatherSlaveFiles()
 
+      # run simulation exit hooks
+      io.verb(f'running simulation-exit hook of all components...')
+      for obj in itertools.chain(freecad_elements.find.lightSources(), 
+                                 freecad_elements.find.relevantOpticalObjects()):
+        obj.Proxy.onExitSimulation(obj=obj, ident='master' if isMasterProcess() else 'worker')
+
+      # reset simulating document global reference
+      _SIMULATING_DOCUMENT = None
+
       # remove is running flag
       setIsRunning(False)
 
@@ -450,3 +480,13 @@ def cpuCount():
   except Exception:
     count = os.cpu_count()  
   return max([1, count//2])
+
+
+def setupRandomSeed():
+  # setup random seeds for numpy's and python's random module to something
+  # that will differs between processes and threads for good Monte-Carlo
+  # performance
+  import random
+  import numpy.random
+  random.seed(int(abs(os.getpid()*(time.time()%1)*threading.get_ident()+1000) % 2**32))
+  numpy.random.seed(int(abs(os.getpid()*(time.time()%1)*threading.get_ident()+1000) % 2**32))

@@ -10,7 +10,7 @@ if [ ! -e setup.py ]; then
 fi
 
 # extract version info from setup.py
-ver=$(./dev/update-setup.py --clean)
+ver=$(./dev/update-packagexml.py)
 major="$(echo "$ver" | grep -oP '^\d+')"
 minor="$(echo "$ver" | grep -oP '\d+\.\d+$' | grep -oP '^\d+')"
 micro="$(echo "$ver" | grep -oP '\d+$')"
@@ -20,12 +20,12 @@ newVer="$major.$minor.$(expr $micro + 1)"
 
 # replace version number in setup.py
 echo && echo "-> version was $major.$minor.$micro, setting new version $newVer..." \
-  && perl -pe 's/version\s*=\s*'\''\d+\.\d+\.\d+'\''/version = '"'$newVer'"'/g' setup.py >/tmp/setup.py \
-  && mv /tmp/setup.py setup.py \
-  && ./dev/update-setup.py \
-  && echo "done." \
+  && git tag "v$newVer" \
+  && ./dev/update-packagexml.py \
+  && git tag -d "v$newVer" \
   && echo && echo "-> adding all files and create new commit " \
   && git add . \
   && git commit $* \
   && git tag "v$newVer" \
   && echo "done."
+

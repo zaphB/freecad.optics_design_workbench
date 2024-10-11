@@ -23,11 +23,12 @@ class Ray():
   '''
   Class representing an individual ray.
   '''
-  def __init__(self, lightSource, startingPoint, direction, initPower=1):
+  def __init__(self, lightSource, startingPoint, direction, initPower=1, wavelength=1):
     self.lightSource = lightSource
     self.startingPoint = startingPoint
     self.direction = direction
     self.initPower = initPower
+    self.initWavelength = wavelength
   
      
   def traceRay(self, powerTol=1e-6, maxRayLength=None,
@@ -59,6 +60,7 @@ class Ray():
     currentDirection = self.direction
     prevMedium, currentMedium = None, None
     prevPower, currentPower = self.initPower, self.initPower
+    colorChange = None
     while True:
       # this loop may run for quite some time, keep GUI responsive by handling events
       keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -73,7 +75,7 @@ class Ray():
       if intersect is None:
         # if no intersection is found yield segment with maxLength and exit loop
         yield ((currentPoint, currentPoint + currentDirection/currentDirection.Length*maxRayLength), 
-                currentPower, currentMedium)
+                currentPower, currentMedium, colorChange)
         break
       obj, face, point = intersect
 
@@ -82,7 +84,7 @@ class Ray():
       currentPoint = point
 
       # add yield latest segment
-      yield (prevPoint, currentPoint), prevPower, prevMedium
+      yield (prevPoint, currentPoint), prevPower, prevMedium, colorChange
 
       # calculate normal and whether ray is facing the object from the outside or the inside
       normal, isEntering = self.getNormal(face, prevPoint, currentPoint)
@@ -91,6 +93,12 @@ class Ray():
       obj.Proxy.onRayHit(source=self.lightSource, obj=obj, 
                          point=currentPoint, direction=currentDirection, 
                          power=currentPower, isEntering=isEntering, store=store)
+
+      # set colorChange to value requested by the hit object
+      if obj.ViewObject is not None and obj.ViewObject.Weight != 0:
+        colorChange = (obj.ViewObject.Weight, obj.ViewObject.Color)
+      else:
+        colorChange = None
 
       # hit mirror: direction is mirrored at normal, 
       # medium is unchanged, power is altered according to reflectivity
@@ -144,8 +152,8 @@ class Ray():
     if distTol is None:
       distTol = 1e-2
       if settings := find.activeSimulationSettings():
-        distTol = settings.DistanceTolerance
-    return max([distTol, 1e-4])
+        distTol = float(settings.DistanceTolerance)
+    return max([distTol, 1e-6])
 
   def findNearestIntersection(self, start, direction, maxRayLength, distTol=None):
     '''
@@ -167,13 +175,13 @@ class Ray():
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
       if hasattr(group, 'Shape'):
-        bb = group.Shape.BoundBox
-        bb.enlarge(distTol)
+        sbb = group.Shape.BoundBox
+        #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
         if ( ( not isfinite(maxRayLength)
-                or any([(bb.getPoint(i)-start).Length
+                or any([(sbb.getPoint(i)-start).Length
                                   < maxRayLength 
                                         for i in range(8)]) )
-            and bb.intersect(start, direction) ):
+            and sbb.intersect(start, direction) ):
 
           # loop through all faces
           for face in group.Shape.Faces:
@@ -182,9 +190,9 @@ class Ray():
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
-            bb = face.BoundBox
-            bb.enlarge(distTol)
-            if bb.intersect(start, direction):
+            fbb = face.BoundBox
+            fbb.enlarge(distTol)
+            if fbb.intersect(start, direction):
 
               # find intersection points and loop through all of them
               if intersect := line.Curve.intersect(face.Surface):
@@ -210,19 +218,17 @@ class Ray():
       return sorted(intersects, key=lambda e: e[-1])[0][:-1]
   
   
-  def getNormal(self, nearest_part, origin, neworigin, distTol=None):
+  def getNormal(self, nearest_part, origin, neworigin, epsLength = 1e-6):
     '''
-    calculate the normal vector given, inherited from OpticsWorkbench, needs cleaning
+    calculate the normal vector given, inherited from OpticsWorkbench
     '''
-    distTol = self._getDistTol(distTol)
-
     dRay = neworigin - origin
     if hasattr(nearest_part, 'Curve'):
       param = nearest_part.Curve.parameter(neworigin)
       tangent = nearest_part.tangentAt(param)
       normal1 = dRay.cross(tangent)
       normal = tangent.cross(normal1)
-      if normal.Length < distTol:
+      if normal.Length < epsLength:
         return Vector(0, 0, 0)
       normal = normal / normal.Length
     elif hasattr(nearest_part, 'Surface'):
@@ -236,9 +242,15 @@ class Ray():
     return normal, False
 
   def mirror(self, ray, normal):
+    '''
+    mirror a ray at a normal vector, inherited from OpticsWorkbench
+    '''
     return -(2*normal*(ray*normal) - ray)
 
   def snellsLaw(self, ray, n1, n2, normal):
+    '''
+    apply snell's law, inherited from OpticsWorkbench
+    '''
     root = 1 - n1/n2 * n1/n2 * normal.cross(ray) * normal.cross(ray)
     if root < 0: # total reflection
       return self.mirror(ray, normal), True

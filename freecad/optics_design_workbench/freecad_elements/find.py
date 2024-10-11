@@ -22,7 +22,15 @@ def iconpath(name):
 
 
 def _allObjects():
-  return App.activeDocument().Objects
+  for obj in App.activeDocument().Objects:
+    # make sure TypeId attribute can be read without exception 
+    # before yiedling to avoid yielding deleted objects
+    try:
+      obj.TypeId
+    except Exception:
+      pass
+    else:
+      yield obj
 
 
 def lightSources():
@@ -30,8 +38,8 @@ def lightSources():
   yield all light source objects in the current project.
   '''
   for obj in _allObjects():
-    if ( obj.TypeId == 'Part::FeaturePython'
-            and isinstance(obj.Proxy, point_source.PointSourceProxy) ):
+    if ( obj.TypeId == 'App::LinkGroupPython'
+            and isinstance(obj.Proxy, point_source.GenericSourceProxy) ):
       yield obj
 
 
@@ -42,11 +50,11 @@ def relevantOpticalObjects(lightSource=None):
   ignoreList = []
   if lightSource:
     ignoreList = lightSource.IgnoredOpticalElements
-  for group in App.activeDocument().Objects:
-    if ( group.TypeId == 'App::LinkGroupPython'
-          and isinstance(group.Proxy, optical_group.OpticalGroupProxy)
-          and group not in ignoreList):
-      yield group
+  for obj in _allObjects():
+    if ( obj.TypeId == 'App::LinkGroupPython'
+          and isinstance(obj.Proxy, optical_group.OpticalGroupProxy)
+          and obj not in ignoreList):
+      yield obj
 
 
 def simulationSettings():

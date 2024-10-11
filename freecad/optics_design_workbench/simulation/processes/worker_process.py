@@ -16,6 +16,7 @@ import signal
 
 from ... import io
 from .. import results_store
+from .. import processes
 
 _WORKER_INDEX = 0
 
@@ -34,7 +35,7 @@ class WorkerProcess:
 
     # start freecad in cli mode (-c) with current document as active document
     self.simulationType = simulationType
-    self.simulationFilePath = os.path.realpath(App.activeDocument().getFileName())
+    self.simulationFilePath = os.path.realpath(processes.simulatingDocument().getFileName())
     self.simulationRunFolder = simulationRunFolder
     self._isRunning = True
 

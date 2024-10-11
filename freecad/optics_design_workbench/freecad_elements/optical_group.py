@@ -13,12 +13,14 @@ except ImportError:
 from . import find
 from .. import simulation
 
+# global dict with keys being PointSourceProxy objects and values being 
+# more dicts that store pseudo-attributes. This akward attribute storing
+# format allows to bypass the serializer which wants to safe the Proxy
+# objects whenever the FreeCAD project is saved.
+NON_SERIALIZABLE_STORE = {}
 
 #####################################################################################################
 class OpticalGroupProxy():
-  '''
-  Proxy of the point point source object responsible for the logic
-  '''
   def execute(self, obj):
     '''Do something when doing a recomputation, this method is mandatory'''
 
@@ -74,6 +76,9 @@ class OpticalGroupProxy():
   def onInitializeSimulation(self, obj, state, ident):
     pass
 
+  def onExitSimulation(self, obj, ident):
+    pass
+
   def onRayHit(self, source, obj, point, direction, power, isEntering, store):
     if store and obj.RecordHits:
       store.addRayHit(source=source, obj=obj, point=point, direction=direction, 
@@ -82,18 +87,13 @@ class OpticalGroupProxy():
 
 #####################################################################################################
 class OpticalGroupViewProxy():
-  '''
-  Proxy of the point point source object responsible for the view
-  '''
-  def __init__(self, obj):
-    self.objectName = obj.Name
 
   def getIcon(self):
     '''Return the icon which will appear in the tree view. This method is optional and if not defined a default icon is shown.'''
-    return find.iconpath(App.activeDocument().getObject(self.objectName).OpticalType.lower())
+    return find.iconpath(NON_SERIALIZABLE_STORE[self].OpticalType.lower())
 
   def attach(self, vobj):
-    '''Setup the scene sub-graph of the view provider, this method is mandatory'''
+    NON_SERIALIZABLE_STORE[self] = vobj.Object
     pass
 
   def updateData(self, obj, prop):
@@ -139,9 +139,24 @@ class MakeOpticalGroup:
         obj.addProperty('App::Property'+kind, name, section, tooltip)
         setattr(obj, name, default)
 
+    # create custom view object properties
+    for section, entries in [
+      ('ColorizeRays', [
+        ('Weight', 0, 'Float', 
+              'Weight of ray colorization, should be between 0 and 1. 1 means set color '
+              'immediately, 0 means do not change color at all.'),
+        ('Color', (0.,0.,0.,0.), 'Color', 
+              'Color to mix with previous ray color during colorization. Weight determines '
+              'fraction of old and new colors in mix.'),
+      ]),
+    ]:
+      for name, default, kind, tooltip in entries:
+        obj.ViewObject.addProperty('App::Property'+kind, name, section, tooltip)
+        setattr(obj.ViewObject, name, default)
+
     # register custom proxy and view provider proxy
     obj.Proxy = OpticalGroupProxy()
-    obj.ViewObject.Proxy = OpticalGroupViewProxy(obj)
+    obj.ViewObject.Proxy = OpticalGroupViewProxy()
 
     # set OpticalType property again to trigger onChange handler
     obj.OpticalType = self.opticalType

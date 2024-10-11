@@ -2,13 +2,22 @@ __license__ = 'LGPL-3.0-or-later'
 __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
+__version__ = None
 
+def _determinePackageVersion():
+  '''
+  find out installed version of the workbench and set global variable
+  '''
+  try:
+    from importlib.metadata import version
+    global __version__
+    __version__ = version('freecad.optics_design_workbench')
+  except Exception:
+    __version__ = '?'
 
-import os
-import types
-import importlib
-import functools
-from .version import __version__
+# make sure __version__ is set
+_determinePackageVersion()
+
 
 def _ensureSystemPackagesCanBeImported():
   '''
@@ -33,12 +42,6 @@ def _ensureSystemPackagesCanBeImported():
           print(f'[freecad.optics_design_workbench] python package path {candidate} exists on '
                 f'filesystem but not in sys.path, appending to sys.path...')
           sys.path.append(candidate)
-
-        # stop looking after the first candidate existed on disk
-        found = True
-        break
-    if found:
-      break
 
 # run on module load
 _ensureSystemPackagesCanBeImported()

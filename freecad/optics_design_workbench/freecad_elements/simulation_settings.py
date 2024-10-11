@@ -80,6 +80,18 @@ class SimulationSettingsProxy():
           if val < 0:
             setattr(obj, prop, '1')
 
+    # sanitize DistanceTolerance
+    if prop == 'DistanceTolerance':
+      val = getattr(obj, prop)
+      try:
+        val = float(val)
+      except ValueError:
+        setattr(obj, prop, '0.01')
+      else:
+        # limit range
+        if val < 1e-12:
+          setattr(obj, prop, '1e-12')
+
 
 #####################################################################################################
 class SimulationSettingsViewProxy():
@@ -128,7 +140,7 @@ class MakeSimulationSettings:
               'and pseudo random modes.'),
         ('MaxIntersections', 100, 'Float', 'Maximum number of intersections (reflections/refractions/'
               'detections) that a ray may have with optical objects.'),
-        ('DistanceTolerance', 0.01, 'Float', 'If a ray is closer to a surface than this tolerance, '
+        ('DistanceTolerance', '0.01', 'String', 'If a ray is closer to a surface than this tolerance, '
               'it is considered to intersect with the surface.'),
         ('MaxRayLength', 100, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
               'may be up to MaxIntersections*MaxRayLength. This is not a strict '

@@ -8,6 +8,7 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 from .point_source import *
+from .replay_source import *
 from .optical_group import *
 from .simulation_settings import *
 from .simulation_actions import *
@@ -19,6 +20,7 @@ def loadAll():
   Load all FreeCAD components defined in the submodules and add them to the interface.
   '''
   loadPointSource()
+  loadReplaySource()
   loadGroups()
   loadSimulationSettings()
   loadSimulationActions()

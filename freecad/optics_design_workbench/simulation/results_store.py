@@ -49,12 +49,12 @@ def getLatestRunFolderPath():
 
 def _getFolderBase():
   # check whether current file is saved
-  if not App.activeDocument() or not App.activeDocument().getFileName():
+  if not processes.simulatingDocument() or not processes.simulatingDocument().getFileName():
     raise RuntimeError('cannot start simulation because no active document '
                        'or active document is not yet saved')
 
   # generate paths
-  base, fname = os.path.split(os.path.realpath(App.activeDocument().getFileName()))
+  base, fname = os.path.split(os.path.realpath(processes.simulatingDocument().getFileName()))
   if fname.lower().endswith('.fcstd'):
     fname = fname[:-6]
   folderNamePattern = '{projectName}.opticalSimulationResults'
@@ -233,7 +233,7 @@ class SimulationResults:
       # loop through create fnames, convert to numpy arrays and dump
       for fname, res in results.items():
         with open(fname, 'wb') as f:
-          for k in 'points powers isEntering'.split():
+          for k in 'points directions powers isEntering'.split():
             res[k] = array(res[k]) 
           pickle.dump(res, f)
 

@@ -21,6 +21,7 @@ class OpticsDesignWorkbench(Gui.Workbench):
       self.toolbox = [
         # sources
         'Add point source', 
+        'Add replay source', 
 
         # optical elements
         'Make mirror', 
