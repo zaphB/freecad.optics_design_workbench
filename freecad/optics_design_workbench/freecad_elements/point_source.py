@@ -153,7 +153,6 @@ class PointSourceProxy(GenericSourceProxy):
           # create a scalar random variable here, treat Phi as a constant
           vrv = distributions.ScalarRandomVariable(
                       obj.PowerDensity, # no sin(theta) correction here because fans are 2D
-                      variableOrder=('theta', 'phi'),
                       variable='theta',
                       variableDomain=self.parsedThetaDomain(obj), 
                       numericalResolution=obj.ThetaResolutionNumericMode)

@@ -9,6 +9,7 @@ import logging.handlers as handlers
 import os
 import datetime
 import random
+import warnings
 
 _LOG_DIR             = None
 _LOGFILE_NAME        = f'optics_design_workbench.log'
@@ -163,6 +164,7 @@ def warn(*msg, logOnly=False):
   msg = _indentMsg(msg)
   if _logger():
     _logger().warning(msg)
+  warnings.warn(msg)
   if not logOnly:
     print(_prefix('warning')+msg)
     if '\n' in msg:

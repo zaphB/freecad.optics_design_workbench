@@ -9,11 +9,11 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 from numpy import *
 import sympy as sy
-import warnings
 import time
 import signal
 
 from . import points_by_density
+from .. import io
 
 
 def _setAlarm(deadline):
@@ -175,9 +175,9 @@ class VectorRandomVariable:
         if bool(sy.solve(expr < 0)):
           raise ValueError('oops')
       except Exception:
-        warnings.warn(f'not sure whether expression for probability density '
-                      f'"{expr}" is always positive values; negative '
-                      f'probabilities will lead to undefined behavior')
+        io.warn(f'not sure whether expression for probability density '
+                f'"{expr}" is always positive values; negative '
+                f'probabilities will lead to undefined behavior')
 
       # integrate along domain for i<varI
       for i in range(varI):
@@ -275,9 +275,9 @@ class VectorRandomVariable:
       r1, r2 = arange(gridProbs.shape[dim])[:-1], arange(gridProbs.shape[dim])[1:]
       diff = take(gridProbs, r1, axis=dim) - take(gridProbs, r2, axis=dim)
       if abs(diff).max()/scale > self._warnIfDiscretizationStepAbove:
-        warnings.warn(f'numerical evaluation of probability density expression '
-                      f'{self._probabilityDensityExpr} had jumps larger than '
-                      f'{1e2*self._warnIfDiscretizationStepAbove:.1f}%')
+        io.warn(f'numerical evaluation of probability density expression '
+                f'{self._probabilityDensityExpr} had jumps larger than '
+                f'{1e2*self._warnIfDiscretizationStepAbove:.1f}%')
 
     # numerically integrate (actually just sum because normalization 
     # happens later anyways) along domain for i<varI
@@ -424,7 +424,7 @@ class VectorRandomVariable:
     _orderingIndex = [[str(v) for v in self._variables].index(_v) for _v in self._variableOrder]
     return result[_orderingIndex]
 
-  def drawPseudo(self, N, bins=None, overdrawFactor=1.1, overdrawIterations=30, constants={}, plotHistograms=False):
+  def drawPseudo(self, N, bins=None, overdrawFactor=0.1, overdrawIterations=50, constants={}, plotHistograms=False):
     '''
     Draw pseudo random (or vectors) almost following the distribution represented by this object.
     The histogram if the returned numbers will be close to the expected histogram, outliers are
@@ -448,8 +448,8 @@ class VectorRandomVariable:
     '''
     if N <= 1:
       raise ValueError(f'N must be greater than one in pseudo random mode')
-    if overdrawFactor <= 1:
-      raise ValueError(f'overdrawFactor must be greater than one')
+    if overdrawFactor <= 0:
+      raise ValueError(f'overdrawFactor must be greater than zero')
     if overdrawIterations <= 1:
       raise ValueError(f'overdrawIterations must be greater than one')
     if not self._variableOrder:
@@ -460,7 +460,8 @@ class VectorRandomVariable:
       # draw true random samples
       newDraws =  self.draw(N=round(N*overdrawFactor), constants=constants)
       if draws is None:
-        draws = newDraws
+        # draw (1+factor)*N in the beginning instead of factor*N
+        draws = self.draw(N=round(N*(1+overdrawFactor)), constants=constants)
       elif len(draws.shape) == 1:
         # concatenate with old non-nan samples
         draws = concatenate([draws[logical_not(isnan(draws))], newDraws])
