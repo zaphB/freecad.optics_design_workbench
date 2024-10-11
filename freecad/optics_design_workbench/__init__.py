@@ -43,12 +43,6 @@ def _ensureSystemPackagesCanBeImported():
                 f'filesystem but not in sys.path, appending to sys.path...')
           sys.path.append(candidate)
 
-        # stop looking after the first candidate existed on disk
-        found = True
-        break
-    if found:
-      break
-
 # run on module load
 _ensureSystemPackagesCanBeImported()
 

@@ -87,17 +87,17 @@ class ReplaySourceProxy(GenericSourceProxy):
       # go through files in random order
       random.shuffle(fs)
       random.shuffle(ds)
-
       for f in fs:
-        if f.endswith('-hits.pkl') and not self._isFileConsumed(obj, f'{r}/{f}'):
+        if f.endswith('-hits.pkl'):
           foundHitsFile = True
-          data = {}
-          with open(f'{r}/{f}', 'rb') as _f:
-            data = pickle.load(_f)
-          indices = list(range(len(data['powers'])))
-          random.shuffle(indices)
-          for i in indices:
-            yield data['points'][i], data['directions'][i], data['powers'][i]
+          if not self._isFileConsumed(obj, f'{r}/{f}'):
+            data = {}
+            with open(f'{r}/{f}', 'rb') as _f:
+              data = pickle.load(_f)
+            indices = list(range(len(data['powers'])))
+            random.shuffle(indices)
+            for i in indices:
+              yield data['points'][i], data['directions'][i], data['powers'][i]
 
     # raise if not a single good datafile was found
     if not foundHitsFile:
