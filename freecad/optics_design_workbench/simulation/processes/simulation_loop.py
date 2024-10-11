@@ -428,7 +428,7 @@ def runSimulation(action, slaveInfo={}):
       io.gatherSlaveFiles()
 
       # run simulation exit hooks
-      io.verb(f'runnign simulation-exit hook of all components...')
+      io.verb(f'running simulation-exit hook of all components...')
       for obj in itertools.chain(freecad_elements.find.lightSources(), 
                                  freecad_elements.find.relevantOpticalObjects()):
         obj.Proxy.onExitSimulation(obj=obj, ident='master' if isMasterProcess() else 'worker')
