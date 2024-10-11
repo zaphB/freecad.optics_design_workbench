@@ -26,7 +26,7 @@ fi
 #fi
 
 # extract version info from setup.py and check if successful
-ver="$(./dev/update-setup.py --clean)"
+ver="$(./dev/update-packagexml.py)"
 if [[ "$ver" == "" ]]; then
   echo "failed to extract current version from setup.py"
   exit 1
