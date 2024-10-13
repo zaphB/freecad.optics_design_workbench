@@ -5,13 +5,17 @@ the GUI. Only one single simulation loop can run at a time, i.e. no
 fan preview is possible while another job is running.
 
 Terminology in this module:
-* master process: process that runs the FreeCAD gui.
+* master process: process that launches workers, tracks progress and 
+                  cleans up in the end. The master may or may not run
+                  the GUI, and it may or may not contribute to the
+                  simulation work, depending how the simulation was started.
 * worker process: background processes launched with subprocess module
-                  that run FreeCAD in headless mode.
+                  that run FreeCAD in headless mode and run simulation work.
 * simulation: ray-tracing procedure that accumulates a certain amount
-              of rays/hits/iterations with multiple processes. A simulation
+              of rays/hits/iterations with one or more processes. A simulation
               can be canceled or finish gracefully. Status files in the 
-              simulation results folder indicate that state of a simulation. 
+              simulation results folder indicate that state of a simulation.
+              Only one simulation for a given FCStd file can run at a time.
 '''
 
 __license__ = 'LGPL-3.0-or-later'
@@ -35,6 +39,7 @@ import sys
 import threading
 import signal
 import itertools
+import traceback
 
 from ...detect_pyside import *
 from ... import freecad_elements
@@ -193,10 +198,18 @@ def runSimulation(action, slaveInfo={}):
       if not isRunning():
         raise RuntimeError('slave was launched but no simulation seems to be running')
         
-    # recompute and save document
+    # save active document and recompute
     _SIMULATING_DOCUMENT = App.activeDocument()
     _SIMULATING_DOCUMENT.recompute()
-    _SIMULATING_DOCUMENT.save()
+
+    # Save document so background workers will work on the exact state of the project,
+    # but make sure to save only if GUI exists, otherwise all ViewProvider objects will
+    # break and loose their info. This implies that a master running in headless mode
+    # will not save before spawning the workers, because nothing can change in the document
+    # in headless mode.
+    io.verb(f'{isMasterProcess()=} and {App.GuiUp=}')
+    if isMasterProcess() and App.GuiUp:
+      _SIMULATING_DOCUMENT.save()
 
     # determine simulation mode
     mode = action
@@ -284,9 +297,7 @@ def runSimulation(action, slaveInfo={}):
         io.info(f'doing simulation work with {backgroundWorkers} background workers and lazy gui process')
       for workerNo in range(backgroundWorkers):
         _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, simulationRunFolder=simulationRunFolder))
-        for _ in range(50):
-          freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
-          time.sleep(.01)
+        freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
 
     # doing post-worker-launch init
     io.verb(f'doing post-worker-lauch init of all components...')
@@ -348,7 +359,7 @@ def runSimulation(action, slaveInfo={}):
 
     ##########################################################################################
     # mainloop B: do not do simulation work if we are the master and draw is False, just
-    #             poll progress instead, do not use a loop, but a QTimer for 
+    #             poll progress instead, do not use a loop, but a QTimer
     io.verb(f'gui process is lazy and just tracks progress')
 
     timer = QTimer()
@@ -385,6 +396,7 @@ def runSimulation(action, slaveInfo={}):
   # any other error cancels simulation and is reraised
   except Exception:
     setIsCanceled(True)
+    io.err(traceback.format_exc())
     raise
 
   # cleanup after simulation loop finishes
@@ -439,6 +451,10 @@ def runSimulation(action, slaveInfo={}):
       # remove is running flag
       setIsRunning(False)
 
+      # clean temp files if existing
+      if store:
+        store.cleanup()
+
       # report success
       performanceDescription = ''
       if store and hasattr(store, 'performanceDescription'):
@@ -484,7 +500,7 @@ def cpuCount():
 
 def setupRandomSeed():
   # setup random seeds for numpy's and python's random module to something
-  # that will differs between processes and threads for good Monte-Carlo
+  # that will differ between processes and threads for good Monte-Carlo
   # performance
   import random
   import numpy.random

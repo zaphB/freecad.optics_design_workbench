@@ -186,3 +186,20 @@ def verb(*args, **kwargs):
     return
   info(*args, **kwargs)
 
+
+# format times
+def secondsToYMDhms(secs):
+  res = []
+  for mult in [365*24*60*60, 30*24*60*60, 24*60*60, 60*60, 60, 1]:
+    res.append(int(secs/mult))
+    secs -= res[-1]*mult
+  return res
+
+def secondsToStr(secs, length=2):
+  res = []
+  split = secondsToYMDhms(secs)
+  for num, label in zip(split,
+                        ['Y', 'M', 'd', 'h', 'm', 's']):
+    if res or num:
+      res.append(str(num) + label)
+  return ' '.join(res[:length])

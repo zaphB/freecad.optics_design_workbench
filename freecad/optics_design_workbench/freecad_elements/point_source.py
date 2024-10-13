@@ -226,7 +226,8 @@ class AddPointSource(AddGenericSource):
 
     # register custom proxy and view provider proxy
     obj.Proxy = PointSourceProxy()
-    obj.ViewObject.Proxy = PointSourceViewProxy()
+    if App.GuiUp:
+      obj.ViewObject.Proxy = PointSourceViewProxy()
 
     # make mode readonly
     obj.setEditorMode('RandomNumberGeneratorMode', 1)

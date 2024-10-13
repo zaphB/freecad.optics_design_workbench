@@ -190,10 +190,6 @@ class AddGenericSource():
     return find.iconpath('add-'+self.__class__.__name__.replace('Add', '').lower())
 
   def IsActive(self):
-    # for some reason this makes the button always inactive in some FreeCAD versions...
-    #return bool(App.activeDocument())
-
-    # just always make it active is a quick-n-dirty fix for this
     return True
 
   def defaultSimulationSettings(self, obj):

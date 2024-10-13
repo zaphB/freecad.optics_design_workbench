@@ -123,12 +123,12 @@ class MakeSimulationSettings:
     for section, entries in [
       ('OpticalSimulationSettings', [
         ('Active', True, 'Bool', 'Use these settings as simulation settings.'),
-        ('SimulationDataFolder', '{projectName}.opticalSimulationResults', 'Path',
-              'Path to folder to store simulation results in. The following placeholders '
-              'are possible: {projectName} will be replaced with FCStd filename of the project, '
-              '{settingsName} will be replaced with the Label property of this settings object '
-              'and %d %m and %Y and similar will be replaced according to Python\'s '
-              'time.strftime'),
+        # DEPRECATE: removed SimulationDataFolder property after v0.2.0
+        #('SimulationDataFolder', '{projectName}.OpticsDesign', 'Path',
+        #      'Path to folder to store simulation results in. The following placeholders '
+        #      'are possible: {projectName} will be replaced with FCStd filename of the project, '
+        #      '{settingsName} will be replaced with the Label property of this settings object '
+        #      'and %d, %m, %Y and similar will be replaced according to Python\'s time.strftime'),
         ('EnableStoreSingleShotData', False, 'Bool', 'Store rays and hits to disk for every single-shot '
               'simulation.'),
       ]),
@@ -159,7 +159,8 @@ class MakeSimulationSettings:
 
     # register custom proxy and view provider proxy
     obj.Proxy = SimulationSettingsProxy()
-    obj.ViewObject.Proxy = SimulationSettingsViewProxy(obj)
+    if App.GuiUp:
+      obj.ViewObject.Proxy = SimulationSettingsViewProxy(obj)
 
     # set active property to true again to trigger onChange handler
     obj.Active = True
@@ -167,7 +168,7 @@ class MakeSimulationSettings:
     return obj
 
   def IsActive(self):
-    return bool(App.activeDocument())
+    return True
 
   def GetResources(self):
     return dict(Pixmap=find.iconpath('settings'),

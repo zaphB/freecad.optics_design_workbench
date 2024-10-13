@@ -10,6 +10,7 @@ import time
 import os
 
 from ..detect_pyside import *
+from . import common
 
 _PROGRESS_WINDOW = None
 
@@ -157,6 +158,10 @@ class ProgressWindow(QWidget):
 
 def showProgressWindow(store):
   global _PROGRESS_WINDOW
+  
+  # ignore call if gui windows are set to be hidden
+  if common.HIDE_GUI:
+    return
 
   # only create window if inside a QtApp
   if QApplication.instance() is not None:

@@ -181,7 +181,8 @@ class AddReplaySource(AddGenericSource):
 
     # register custom proxy and view provider proxy
     obj.Proxy = ReplaySourceProxy()
-    obj.ViewObject.Proxy = ReplaySourceViewProxy()
+    if App.GuiUp:
+      obj.ViewObject.Proxy = ReplaySourceViewProxy()
 
     return obj
 

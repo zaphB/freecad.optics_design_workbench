@@ -33,14 +33,6 @@ class OpticalSimulationAction:
 
   def IsActive(self):
     return True
-    # does not work reliably, use always active to be on the safe side:
-    #if not App.activeDocument():
-    #  return False
-    #if self.action in ('pseudo', 'true', 'singletrue', 'fans'):
-    #  return not simulation.isRunning()
-    #if self.action == 'stop':
-    #  return simulation.isRunning()
-    #return True
 
   def GetResources(self):
     return dict(

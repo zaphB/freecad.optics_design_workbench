@@ -11,7 +11,7 @@ __pycache__
 *.tar.gz
 *.egg-info
 *.nbconvert*
-*.opticalSimulationResults
+*.OpticsDesign
 *.md5
 test-docker/**/container-home
 *.AppImage
