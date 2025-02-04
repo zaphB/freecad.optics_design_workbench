@@ -10,8 +10,9 @@ import functools
 import glob
 import pickle
 
-from .. import io
-from . import progress
+from freecad.optics_design_workbench import io
+from freecad.optics_design_workbench.simulation import processes
+from freecad.optics_design_workbench.jupyter_utils import progress
 
 # signal handler that kills all running freecad processes
 # in case this process is killed
@@ -51,7 +52,7 @@ class FreecadProperty:
     return f'App.activeDocument().getObject("{self._obj}").{self._path}'
 
   def _ensureExists(self):
-    if (out:=self._doc.query(
+    if ((out:=self._doc.query(
             f'try: ',
             f'  {self._freecadShellRepr()}',
             f'except Exception: ',
@@ -59,11 +60,11 @@ class FreecadProperty:
             f'else: ',
             f'  print("success")',
             expect=['failed', 'success']
-        ) != 'success'):
+        )) != 'success'):
       raise ValueError(f'property {self} does not exist')
 
   def __setattr__(self, key, value):
-    if (out:=self._doc.query(
+    if ((out:=self._doc.query(
             f'try: ',
             f'  {self._freecadShellRepr()}.{key} = {value}',
             f'except Exception: ',
@@ -71,7 +72,7 @@ class FreecadProperty:
             f'else: ',
             f'  print("success")', 
             expect=['failed', 'success']
-        ) != 'success'):
+        )) != 'success'):
       raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
 
   def __getattr__(self, key):
@@ -148,7 +149,7 @@ class FreecadDocument:
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
-    # autodetect path is non is given
+    # autodetect path is none is given
     if path is None:
       _path = os.path.realpath(os.getcwd())
       while _path.count('/') > 1:
@@ -221,93 +222,119 @@ class FreecadDocument:
     case, the endIf(..) will run not more often than once per second, and at
     least once per hour.
     '''
-    allowedActions = 'true pseudo singletrue singlepseudo fans'.split()
-    if action not in allowedActions:
-      raise ValueError(f'illegal action {action}, expected one of {", ".join(allowedActions)}')
-
-    # save list of existing raw data folders
-    rawFoldersBefore = []
-    if os.path.exists(self._resultsPath+'/raw'):
-      rawFoldersBefore = os.listdir(self._resultsPath+'/raw')
-
-    # subfunction to detect new results folder
-    def newFolder(allowEmpty=True):
-      # find and return newly appeared folder in results dir
-      newFolders = [d for d in os.listdir(self._resultsPath+'/raw') 
-                                            if d not in rawFoldersBefore]
-
-      # check plausibility of result
-      if len(newFolders) == 0 and not allowEmpty:
-        if action == 'fans' or 'single' in action:
-          raise RuntimeError(f'no new results folder was created during {action} '
-                            f'simulation, did you enable "Enable Store Single Shot '
-                            f'Data" in the active Simulation Settings?')
-        raise RuntimeError(f'no new results folder was created during {action} '
-                          f'simulation, is another simulation running? '
-                          f'{self._path=}, {self._resultsPath=}')
-      elif len(newFolders) > 1:
-        raise RuntimeError(f'somehow more than one result folder was created '
-                          f'during {action} simulation, this should not be '
-                          f'possible...')
-      elif len(newFolders) > 1:
-        raise RuntimeError(f'somehow more than one result folder was created '
-                          f'during {action} simulation, this should not be '
-                          f'possible...')
-      # return result
-      return RawFolder(f'{self._resultsPath}/raw/{newFolders[0]}') if len(newFolders) else None 
-
-    # write command
-    self.write(f'from freecad.optics_design_workbench import simulation',
-               f'simulation.runSimulation(action="{action}")')
-
-    # start progress tracker background thread
-    progressTracker = progress.progressTrackerInstance(doc=self)
-
-    # start mainloop that detects end of simulation and endIf-calls
     try:
-      lastSentRandom = 0
-      lastEndIfCheck = time.time()
-      endIfDuration = 0
-      rn, l = None, None
-      while rn is None or rn != l:
-        # ask to print random number every 60 seconds 
-        if time.time()-lastSentRandom > 60:
-          rn = f'{random.random():.8f}'
-          self.write(f'print("{rn}")')
-          lastSentRandom = time.time()
+      # behave as slave process while simulation is running (the FreeCAD simulation master
+      # running in the background wants to be master, therefore we have to step back)
+      processes.jupyterBecomeSlave()
 
-        # check for new folders and update simulation tracker folder if so
-        _newFolder = newFolder()
-        progressTracker.resultsFolder = _newFolder
+      # check actions argument
+      allowedActions = 'true pseudo singletrue singlepseudo fans'.split()
+      if action not in allowedActions:
+        raise ValueError(f'illegal action {action}, expected one of {", ".join(allowedActions)}')
 
-        # check custom simulation-end criterion with ~50% dutycycle
-        if ( endIf is not None 
-              and time.time()-lastEndIfCheck 
-                    > min([60*60, max([1, 1/max([0.01, endIfMaxLoad]) * endIfDuration ]) ]) ):
-          lastEndIfCheck = time.time()
-          if _newFolder is not None:
-            # if endIf callback returns True, place simulation-done file
-            _t0 = time.time()
-            if endIf(_newFolder):
-              with open(f'{self._resultsPath}/simulation-is-done', 'w') as _:
-                pass
-            endIfDuration = time.time()-t0
+      # save list of existing raw data folders
+      rawFoldersBefore = []
+      if os.path.exists(self._resultsPath+'/raw'):
+        rawFoldersBefore = os.listdir(self._resultsPath+'/raw')
 
-        # if random number appears in output the simulation must be done
-        # print any other output line for good verbosity
-        for l in self.read():
-          if rn and rn == l:
-            break
-          #print(l) # dont print output
-        time.sleep(1e-2)
+      # subfunction to detect new results folder
+      def newFolder(allowEmpty=True):
+        # find and return newly appeared folder in results dir
+        newFolders = [d for d in os.listdir(self._resultsPath+'/raw') 
+                                              if d not in rawFoldersBefore]
 
-      # return new results folder generated during the simulation
-      return newFolder(allowEmpty=False)
+        # check plausibility of result
+        if len(newFolders) == 0 and not allowEmpty:
+          if action == 'fans' or 'single' in action:
+            raise RuntimeError(f'no new results folder was created during {action} '
+                              f'simulation, did you enable "Enable Store Single Shot '
+                              f'Data" in the active Simulation Settings?')
+          raise RuntimeError(f'no new results folder was created during {action} '
+                            f'simulation, is another simulation running? '
+                            f'{self._path=}, {self._resultsPath=}')
+        elif len(newFolders) > 1:
+          raise RuntimeError(f'somehow more than one result folder was created '
+                            f'during {action} simulation, this should not be '
+                            f'possible...')
+        elif len(newFolders) > 1:
+          raise RuntimeError(f'somehow more than one result folder was created '
+                            f'during {action} simulation, this should not be '
+                            f'possible...')
+        # return result
+        return RawFolder(f'{self._resultsPath}/raw/{newFolders[0]}') if len(newFolders) else None 
 
-    # clean up progress tracker
+      # write command
+      self.write(f'from freecad.optics_design_workbench import simulation',
+                f'simulation.runSimulation(action="{action}")')
+
+      # start progress tracker background thread
+      progressTracker = progress.progressTrackerInstance(doc=self)
+
+      # start mainloop that detects end of simulation and endIf-calls
+      possibleStacktrace = []
+      try:
+        lastSentRandom = 0
+        lastEndIfCheck = time.time()
+        endIfDuration = 0
+        rn, l = None, None
+        while rn is None or rn != l:
+          # ask to print random number every 60 seconds 
+          if time.time()-lastSentRandom > 60:
+            rn = f'{random.random():.8f}'
+            self.write(f'print("{rn}")')
+            lastSentRandom = time.time()
+
+          # check for new folders and update simulation tracker folder if so
+          _newFolder = newFolder()
+          progressTracker.resultsFolder = _newFolder
+
+          # check custom simulation-end criterion with ~50% dutycycle
+          if ( endIf is not None 
+                and time.time()-lastEndIfCheck 
+                      > min([60*60, max([1, 1/max([0.01, endIfMaxLoad]) * endIfDuration ]) ]) ):
+            lastEndIfCheck = time.time()
+            if _newFolder is not None:
+              # if endIf callback returns True, place simulation-done file
+              _t0 = time.time()
+              if endIf(_newFolder):
+                with open(f'{self._resultsPath}/simulation-is-done', 'w') as _:
+                  pass
+              endIfDuration = time.time()-t0
+
+          # if random number appears in output the simulation must be done
+          for l in self.read():
+            if rn and rn == l:
+              break
+
+            # if line looks like the beginning of a stacktrace, reset stacktrace buffer
+            if 'traceback (most recent call last)' in l.lower():
+              possibleStacktrace = []
+            possibleStacktrace.append(l)
+
+          # limit loop speed
+          time.sleep(1e-2)
+
+        # presence of simulation-canceled file or absence of simulation-is-done file indicates
+        # that simulation was ended by an exception: raise this exception
+        if (os.path.exists(f'{self._resultsPath}/simulation-is-canceled') 
+            or not os.path.exists(f'{self._resultsPath}/simulation-is-done')):
+          stacktraceGuess = ''
+          if len((''.join(possibleStacktrace)).strip()):
+            stacktraceGuess = f'; I guess it has something to do with this output:\n\n'+'\n'.join(possibleStacktrace)
+          logfile = os.path.relpath(self._resultsPath+'/optics_design_workbench.log')
+          raise RuntimeError(f'simulation process failed, see logfile {logfile} for details'+stacktraceGuess) 
+
+        # return new results folder generated during the simulation
+        return newFolder(allowEmpty=False)
+
+      # clean up progress tracker
+      finally:
+        # increment progress tracker iteration count
+        progressTracker.nextIteration()
+
+    # let jupyter become master again after simulation is done
     finally:
-      # increment progress tracker iteration count
-      progressTracker.nextIteration()
+      processes.jupyterBecomeMaster()
 
   ###########################################################################
   # LAUNCH LOGIC
@@ -318,6 +345,9 @@ class FreecadDocument:
 
   def open(self):
     t0 = time.time()
+    
+    # register that this process is a jupyter process to setup logging
+    processes.setupJupyterMaster(self._path)
     io.verb(f'opening {self} instance...')
 
     # signalizing progress tracker module that it is now allows to create
@@ -375,6 +405,15 @@ class FreecadDocument:
                f'  exit()')
 
     # flush outputs with infinite timeout to make sure loading file was completely done
+    self._flushOutput(timeout=3600)
+
+    # make sure numpy is imported globally, as numpy and as np, to ensure all numpy datatypes
+    # can be constructed properly
+    self.write(f'numpy',
+               f'import numpy as np',
+               f'from numpy import *')
+
+    # flush outputs with infinite timeout to ensure this was successfully imported
     self._flushOutput(timeout=3600)
 
     # print success
@@ -435,7 +474,6 @@ class FreecadDocument:
 
   def query(self, *data, timeout=6, expect=None):
     t0 = time.time()
-    #print(f'query start: {'; '.join(data)}')
 
     # make sure output buffer of freecad is empty
     self._flushOutput(timeout=timeout/2)
@@ -487,6 +525,7 @@ class FreecadDocument:
     progress.ALLOW_PROGRESS_TACKERS = False
 
     io.verb(f'done in {time.time()-t0:.1f}s')
+    processes.unsetJupyterMaster()
 
   def isRunning(self):
     if self._isRunning:
@@ -518,6 +557,50 @@ class FreecadDocument:
         io.verb('killing FreeCAD...')
         self._iskill = True
       self._p.send_signal(signal.SIGKILL)
+
+
+@functools.wraps(FreecadDocument.__init__)
+def openFreecadGui(*args, **kwargs):
+  # create dummy-document object to detect all necessary paths 
+  document = FreecadDocument(*args, **kwargs)
+
+  # launch freecad process
+  p = subprocess.Popen([document._freecadExecutable, document._path],
+                       stdout=subprocess.DEVNULL, 
+                       stderr=subprocess.DEVNULL)
+  _didFinishPrint = False
+  def isRunning():
+    nonlocal _didFinishPrint
+    if (res:=p.poll()) is not None:
+      if not _didFinishPrint:
+        io.verb(f'FreeCAD finished (exit code {res})')
+        _didFinishPrint = True
+      return False
+    return True
+
+  # block until freecad is closed, kill freecad process if ctrl+c is caught
+  while isRunning():
+    try: 
+      # limit loop speed
+      time.sleep(1/3)
+
+    # if ctrl+c is received make sure to kill freecad
+    except KeyboardInterrupt:
+      # first gently...
+      for _ in range(5):
+        p.send_signal(signal.SIGTERM)
+        time.sleep(1/2)
+        if not isRunning():
+          break
+
+      # ..then not so gently
+      while isRunning():
+        p.send_signal(signal.SIGKILL)
+        time.sleep(1/2)
+
+      # re-raise Keyboard interrupt because absorbing a keyboard interrupt
+      # is not a good idea
+      raise
 
 
 class RawFolder:

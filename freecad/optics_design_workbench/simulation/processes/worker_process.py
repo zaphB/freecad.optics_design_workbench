@@ -14,9 +14,9 @@ import os
 import sys
 import signal
 
-from ... import io
-from .. import results_store
-from .. import processes
+from freecad.optics_design_workbench import io
+from freecad.optics_design_workbench.simulation import results_store
+from freecad.optics_design_workbench.simulation import processes
 
 _WORKER_INDEX = 0
 

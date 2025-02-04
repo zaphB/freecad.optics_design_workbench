@@ -1,10 +1,12 @@
+from numpy import *
+
 import threading
 import time
 import os
 import pickle
 import traceback
 
-from .. import io
+from freecad.optics_design_workbench import io
 
 try:
   import IPython.display
@@ -49,53 +51,71 @@ class _ProgressTacker:
     self._totalSimulations = totalSimulations
     self._isRunning = True
     self._isQuit = False
+    self._clearCallCount = 0
     self._t = threading.Thread(target=self.updateLoop)
     self._t0 = time.time()
+    self._previousProgressDict = None
     self.resultsFolder = None
     self.start()
 
   def _clear(self):
-    if hasIPython:
+    # Do not clear output on the first calls to clear, because this would
+    # erase exception stacktraces that may be raised in the very first few
+    # iterations of a simulation loop in the jupyter cell. 
+    self._clearCallCount += 1
+    if hasIPython and self._clearCallCount > 5:
       IPython.display.clear_output(True)
 
   def start(self):
     self._clear()
-    print('setting up simulation progress tracking...')
+    #print('setting up simulation progress tracking...')
     self._t.start()
     self._t0 = time.time()
 
-  def update(self):
+  def update(self, displayTiming=True):
     if self.resultsFolder:
       try:
         latest = sorted([f for f in os.listdir(f'{self.resultsFolder._path}/progress')
                                                       if f.startswith('master') ])[-1]
         with open(f'{self.resultsFolder._path}/progress/{latest}', 'rb') as _f:
           p = pickle.load(_f)
+        self._previousProgressDict = p
       except (FileNotFoundError, IndexError):
-        pass
+        p = self._previousProgressDict or dict(
+                  totalIterations=nan, endAfterIterations=nan,
+                  totalRecordedHits=nan, endAfterHits=nan,
+                  totalTracedRays=nan, endAfterRays=nan)
       except Exception:
         io.warn(traceback.format_exc())
-      else:
-        # calculate elapsed and expected remaining time
-        elapsed = time.time()-self._t0
-        simulationProg = max([ p['totalIterations']/p['endAfterIterations'],
-                               p['totalRecordedHits']/p['endAfterHits'],
-                               p['totalTracedRays']/p['endAfterRays'] ])
-        relProgress = (self._simulationNo + simulationProg)/(self._totalSimulations or 1)
-        expectedRemain = None
-        if relProgress > 0:
-          expectedRemain = elapsed/relProgress * (1-relProgress)
-        if expectedRemain > elapsed**2:
-          expectedRemain = None
 
-        # print message
-        self._clear()
-        prefix = ''
-        if self._totalSimulations:
-          prefix = f'simulation {self._simulationNo}/{self._totalSimulations}, current '
-        print(prefix+f'simulation: iter {p['totalIterations']}/{p['endAfterIterations']}, '
-              f'hits {p['totalRecordedHits']}/{p['endAfterHits']}, '
-              f'rays {p['totalTracedRays']}/{p['endAfterRays']}')
+      # calculate elapsed and expected remaining time
+      elapsed = time.time()-self._t0
+      simulationProg = max([ p['totalIterations']/p['endAfterIterations'],
+                              p['totalRecordedHits']/p['endAfterHits'],
+                              p['totalTracedRays']/p['endAfterRays'] ])
+      if not isfinite(simulationProg):
+        simulationProg = 0
+      relProgress = (self._simulationNo + simulationProg)/(self._totalSimulations or 1)
+      expectedRemain = inf
+      if relProgress > 0:
+        expectedRemain = elapsed/relProgress * (1-relProgress)
+      if expectedRemain > elapsed**2:
+        expectedRemain = None
+
+      # generate and print message
+      self._clear()
+      iterationProgress = ''
+      if self._totalSimulations:
+        iterationProgress = f'simulation {self._simulationNo}/{self._totalSimulations}'
+      simulationProgress = ''
+      if isfinite(p['totalIterations']):
+        simulationProgress = (f'simulation: iter {p['totalIterations']}/{p['endAfterIterations']}, '
+                                  f'hits {p['totalRecordedHits']}/{p['endAfterHits']}, '
+                                  f'rays {p['totalTracedRays']}/{p['endAfterRays']}')
+      message = ', '.join([s for s in (iterationProgress, simulationProgress) if s.strip()])
+      if message.strip():
+        print(message)
+      if displayTiming:
         print(f'elapsed time {io.secondsToStr(elapsed)}'
               +(f', expected remaining time {io.secondsToStr(expectedRemain)}' 
                                         if expectedRemain is not None else ''))
@@ -103,11 +123,15 @@ class _ProgressTacker:
   def updateLoop(self):
     while self._isRunning:
       self.update()
-      time.sleep(.5)
+      time.sleep(5)
+    self.update(displayTiming=False)
     print(f'simulations ended after {io.secondsToStr(time.time()-self._t0)}')
 
   def nextIteration(self):
     self._simulationNo += 1
+
+    # reset buffered progress dict to not display progress of previous iteration
+    self._previousProgressDict = None
 
     # if total iterations was never specified, quit 
     # this progress tracker such that a new one is

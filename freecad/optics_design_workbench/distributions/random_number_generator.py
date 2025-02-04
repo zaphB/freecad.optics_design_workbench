@@ -176,7 +176,7 @@ class VectorRandomVariable:
           raise ValueError('oops')
       except Exception:
         io.warn(f'not sure whether expression for probability density '
-                f'"{expr}" is always positive values; negative '
+                f'"{expr}" always yields positive values; negative '
                 f'probabilities will lead to undefined behavior')
 
       # integrate along domain for i<varI
@@ -435,6 +435,9 @@ class VectorRandomVariable:
     N : int
       Number of random numbers (vectors) to draw. This must be greater than 1, because a histogram
       is not well defined otherwise.
+
+    bins : int or list
+      Optionally pass number of bins to consider
 
     constants : dict    
       Dictionary of constants to substitute in the distribution expression.

@@ -41,12 +41,12 @@ import signal
 import itertools
 import traceback
 
-from ...detect_pyside import *
-from ... import freecad_elements
-from ... import gui_windows
-from ... import io
-from .. import results_store
-from . import worker_process
+from freecad.optics_design_workbench.detect_pyside import *
+from freecad.optics_design_workbench import freecad_elements
+from freecad.optics_design_workbench import gui_windows
+from freecad.optics_design_workbench import io
+from freecad.optics_design_workbench.simulation import results_store
+from freecad.optics_design_workbench.simulation.processes import worker_process
 
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
@@ -56,6 +56,49 @@ _ASSUME_DEAD_TIMEOUT = 15
 # process info
 def isMasterProcess():
   return _IS_MASTER_PROCESS
+
+def setupJupyterMaster(path):
+  '''
+  Call this with a path to a FCStd file or results folder to make multiprocessing
+  logic aware that this process is a jupyter process. 
+  '''
+  global _IS_MASTER_PROCESS
+  _IS_MASTER_PROCESS = True
+  # replace FCStd suffix
+  if path.endswith('.FCStd'):
+    path = path[:-6]+'.OpticsDesign'
+  io.registerJupyterLogDir(path)
+
+def jupyterBecomeSlave():
+  '''
+  Call this to change the role of this process to slave (e.g. when jupyter starts
+  another process that will behave as a master)
+  '''
+  global _IS_MASTER_PROCESS
+  if not io.isRegisteredJupyter():
+    raise ValueError(f'cannot use jupyterBecomeSlave if setupJupyterMaster was not called in advance')
+  _IS_MASTER_PROCESS = False
+  io.verb('becoming slave...')
+
+def jupyterBecomeMaster():
+  '''
+  Call this to change the role of this process to master (e.g. when jupyter has
+  started another process that behaved as a master, and that process finished)
+  '''
+  global _IS_MASTER_PROCESS
+  if not io.isRegisteredJupyter():
+    raise ValueError(f'cannot use jupyterBecomeMaster if setupJupyterMaster was not called in advance')
+  _IS_MASTER_PROCESS = True
+  io.verb('becoming master...')
+
+def unsetJupyterMaster():
+  '''
+  Call this to reset the role of this process for multiprocessing logic 
+  to 'unknown'.
+  '''
+  global _IS_MASTER_PROCESS
+  _IS_MASTER_PROCESS = None
+  io.unregisterJupyterLogDir()
 
 def isWorkerRunning():
   #print(isCanceled(), [w.isRunning() for w in _BACKGROUND_PROCESSES])
@@ -188,7 +231,8 @@ def runSimulation(action, slaveInfo={}):
     # can be started
     if isMasterProcess():
       if isRunning():
-        raise RuntimeError('another simulation seems to be running')
+        raise RuntimeError('another simulation seems to be running (or was just running and '
+                           'exited ungently, in that case just retry in a few seconds)')
       setIsRunning(True)
       setIsCanceled(False)
       setIsFinished(False)
@@ -281,7 +325,7 @@ def runSimulation(action, slaveInfo={}):
 
     # run pre-worker-launch init
     if isMasterProcess():
-      io.verb(f'doing pre-worker-lauch init of all components...')
+      io.verb(f'doing pre-worker-launch init of all components...')
       for obj in itertools.chain(freecad_elements.find.lightSources(), 
                                  freecad_elements.find.relevantOpticalObjects()):
         obj.Proxy.onInitializeSimulation(obj=obj, state='pre-worker-launch', ident='master')
