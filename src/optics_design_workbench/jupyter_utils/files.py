@@ -550,6 +550,12 @@ class FreecadDocument:
       if not self._isterminate:
         io.verb('terminating FreeCAD...')
         self._isterminate = True
+
+      # place cancel file
+      with open(f'{self._resultsPath}/simulation-is-canceled', 'w') as f:
+        pass
+
+      # close stdin and send sigterm
       try:
         self._p.stdin.close()
       except:

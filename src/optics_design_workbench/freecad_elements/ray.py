@@ -190,9 +190,10 @@ class Ray():
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
-            fbb = face.BoundBox
-            fbb.enlarge(distTol)
-            if fbb.intersect(start, direction):
+            #fbb = face.BoundBox
+            #fbb.enlarge(distTol)
+            #if fbb.intersect(start, direction):
+            if True: # face.BoundBox.intersect(start, direction):
 
               # find intersection points and loop through all of them
               if intersect := line.Curve.intersect(face.Surface):

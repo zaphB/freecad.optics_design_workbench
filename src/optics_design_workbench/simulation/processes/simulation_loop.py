@@ -49,6 +49,8 @@ from ... import io
 from .. import results_store
 from . import worker_process
 
+_TRACEMALLOC_INTERVAL = 30
+#_TRACEMALLOC_INTERVAL = inf
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
 _BACKGROUND_PROCESSES = []
@@ -362,7 +364,9 @@ def runSimulation(action, slaveInfo={}):
         io.verb(f'gui process is not lazy and runs the simulation mainloop')
       
       # start memory profiling
-      tracemalloc.start()
+      if isfinite(_TRACEMALLOC_INTERVAL):
+        tracemalloc.start()
+        lastTracemallocReport = 0
 
       while True:
         # do ray-tracing for all light sources
@@ -382,6 +386,15 @@ def runSimulation(action, slaveInfo={}):
 
           # handle GUI events and raise if simulation is done
           freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
+
+          # log top 10 biggest memory allocations
+          if time.time()-lastTracemallocReport > _TRACEMALLOC_INTERVAL:
+            lastTracemallocReport = time.time()
+            io.verb('tracemalloc: top 10 memory allocations')
+            _snapshot = tracemalloc.take_snapshot()
+            _top_stats = _snapshot.statistics('lineno')
+            for _stat in _top_stats[:10]:
+              io.verb(f'  > {_stat}')
         
         # make sure simulation is canceled if not light source exists
         if not lightSourceExists:
@@ -404,13 +417,6 @@ def runSimulation(action, slaveInfo={}):
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
         if not continuous:
           break
-
-        # log top 10 biggest memory allocations
-        io.verb('tracemallow: top 10')
-        _snapshot = tracemalloc.take_snapshot()
-        _top_stats = _snapshot.statistics('lineno')
-        for _stat in _top_stats[:10]:
-          io.verb(f'tracemalloc: {_stat}')
 
     ##########################################################################################
     # mainloop B: do not do simulation work if we are the master and draw is False, just
