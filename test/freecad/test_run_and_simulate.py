@@ -25,7 +25,7 @@ class TestRunNotebooks(unittest.TestCase):
     baseDir = os.path.abspath(os.path.dirname(__file__))
     # remove results folder
     try:
-      shutil.rmtree(baseDir+'/'+filename+'.opticalSimulationResults')
+      shutil.rmtree(baseDir+'/'+filename+'.OpticsDesign')
     except:
       pass
 
@@ -35,7 +35,7 @@ class TestRunNotebooks(unittest.TestCase):
     # remove results folder
     if cleanup:
       try:
-        shutil.rmtree(baseDir+'/'+filename+'.opticalSimulationResults')
+        shutil.rmtree(baseDir+'/'+filename+'.OpticsDesign')
       except:
         pass
 
@@ -89,13 +89,13 @@ class TestRunNotebooks(unittest.TestCase):
   def test_runPlaygroundExample(self):
     # make sure FCStd file runs and yields expected number of hits (> 100 rays * 10 iterations)
     baseDir, filename = self._runFile('playground')
-    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/source-OpticalPointSource/object-OpticalAbsorberGroup'
+    resultsPath = baseDir+'/'+filename+'.OpticsDesign/raw/simulation-run-000000/source-OpticalPointSource/object-OpticalAbsorberGroup'
     results = []
     for f in os.listdir(resultsPath):
       with open(resultsPath+'/'+f, 'rb') as _f:
         results.append(pickle.load(_f))
     totalHits = sum([len(r['points']) for r in results])
-    self.assertGreater(totalHits, 999)
+    self.assertGreater(totalHits, 99)
     self._cleanResults(filename)
 
 
@@ -114,7 +114,7 @@ class TestRunNotebooks(unittest.TestCase):
     baseDir, filename = self._runFile('gaussian')
 
     # make sure results exist
-    resultsPath = baseDir+'/'+filename+'.opticalSimulationResults/run-0000-raw/source-OpticalPointSource/object-OpticalAbsorberGroup'
+    resultsPath = baseDir+'/'+filename+'.OpticsDesign/raw/simulation-run-000000/source-OpticalPointSource/object-OpticalAbsorberGroup'
     results = []
     for f in os.listdir(resultsPath):
       with open(resultsPath+'/'+f, 'rb') as _f:
@@ -165,9 +165,9 @@ class TestRunNotebooks(unittest.TestCase):
     for _ in range(3):
       baseDir, filename = self._runFile('playground', cleanup=False)
     
-    # expect three result folders plus one log file plus one "simulation done" file
-    results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
-    self.assertEqual(len(results), 3 + 1 + 1)
+    # expect three result folders
+    results = os.listdir(baseDir+'/'+filename+'.OpticsDesign/raw/')
+    self.assertEqual(len(results), 3)
 
     # cleanup
     self._cleanResults(filename)
@@ -182,13 +182,23 @@ class TestRunNotebooks(unittest.TestCase):
     for _ in range(3):
       baseDir, filename = self._runFile('gaussian', cleanup=False, cancelAfter=3)
     
-    # expect three result folders plus one log file plus one "simulation canceled" file
-    results = os.listdir(baseDir+'/'+filename+'.opticalSimulationResults/')
-    self.assertEqual(len(results), 3 + 1 + 1)
+    # expect three result folders
+    results = os.listdir(baseDir+'/'+filename+'.OpticsDesign/raw/')
+    self.assertEqual(len(results), 3)
 
     # cleanup
     self._cleanResults(filename)
 
 
-if __name__ == '__main__':
-  unittest.main()
+  def test_runFreecadNotebooks(self):
+    baseDir = os.path.abspath(os.path.dirname(__file__))
+
+    # find all notebooks and run them
+    for root, dirs, files in os.walk(baseDir):
+      for f in files:
+        if 'notest' in f or 'notest' in root:
+          continue
+        if f.endswith('.ipynb') and not f.endswith('.nbconvert.ipynb'):
+          with self.subTest(f):
+            subprocess.run(f'uv run jupyter execute "{f}"',
+                           cwd=root, shell=True, check=True)

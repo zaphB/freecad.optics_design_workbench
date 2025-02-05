@@ -17,7 +17,7 @@ To make the Optics Design Workbench available in FreeCAD, install it using FreeC
 To be able to use the workbench as a regular python module run
 
 ```bash
-pip3 install freecad.optics_design_workbench
+pip install freecad.optics_design_workbench
 ```
 
 
@@ -58,7 +58,7 @@ In the Monte-Carlo simulation mode, rays are placed randomly in the full solid a
 ![monte-carlo mode screenshot](./examples/1-source-and-detector/screenshot-monte-carlo.png)
 
 
-## Spherical lens and parabolic mirror
+### Spherical lens and parabolic mirror
 
 [examples/2-lens-and-mirror](./examples/2-lens-and-mirror)
 
@@ -66,6 +66,12 @@ Any geometric body in FreeCAD can become member of one of the `OpticalGroup`s to
 
 ![lens and mirror screenshot](./examples/2-lens-and-mirror/screenshot.png)
 
+
+### Geometry parameter optimization
+
+[examples/3-parameter-sweeps](./examples/3-parameter-sweeps)
+
+All parameters of the FreeCAD model are accessible from an external python shell through the `jupyter_utils` submodule. The recommended workflow is to use a jupyter notebook for such edits (hence the module name). The example shows a simple spherical lens, the radius of which is optimized to minimize the spot size on a detector.
 
 
 ## Troubleshooting
@@ -80,8 +86,8 @@ freecad.optics_design_workbench.versionInfo()
 in the FreeCAD python shell and
 
 ```python
-import freecad_.optics_design_workbench
-freecad_.optics_design_workbench.versionInfo()
+import optics_design_workbench
+optics_design_workbench.versionInfo()
 ```
 
 in your regular python shell of choice.

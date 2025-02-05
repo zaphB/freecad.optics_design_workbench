@@ -25,7 +25,7 @@ def keepGuiResponsive(raiseIfSimulationDone=False):
   global _LAST_PROCESS_EVENTS_CALL
   if time.time()-_LAST_PROCESS_EVENTS_CALL > _MIN_UPDATE_INTERVAL:
     _LAST_PROCESS_EVENTS_CALL = time.time()
-  
+
     if QApplication.instance():
       # process Qt events
       QApplication.processEvents()

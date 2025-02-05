@@ -47,7 +47,7 @@ class WorkerProcess:
     elif 'freecad' in sys.executable.lower():
       freecadPath = sys.executable
     else:
-      freecadPath = 'freecad'
+      freecadPath = 'FreeCAD'
     io.verb(f'detected freecad executable "{freecadPath}"')
 
     # launch child process

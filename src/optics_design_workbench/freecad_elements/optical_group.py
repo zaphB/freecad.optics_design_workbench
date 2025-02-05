@@ -156,7 +156,8 @@ class MakeOpticalGroup:
 
     # register custom proxy and view provider proxy
     obj.Proxy = OpticalGroupProxy()
-    obj.ViewObject.Proxy = OpticalGroupViewProxy()
+    if App.GuiUp:
+      obj.ViewObject.Proxy = OpticalGroupViewProxy()
 
     # set OpticalType property again to trigger onChange handler
     obj.OpticalType = self.opticalType
@@ -167,7 +168,7 @@ class MakeOpticalGroup:
     return obj
 
   def IsActive(self):
-    return bool(App.activeDocument())
+    return True
 
   def GetResources(self):
     return dict(Pixmap=find.iconpath('add-'+self.opticalType.lower()),

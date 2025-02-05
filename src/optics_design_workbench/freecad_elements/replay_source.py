@@ -124,12 +124,13 @@ class ReplaySourceProxy(GenericSourceProxy):
               f'will not place any rays.')
       return []
 
-    # pseudo-random mode: place rays by drawing theta and phi from pseudo random distribution
-    elif mode == 'pseudo':
-      raise ValueError('not implemented')
+    # true/pseudo random mode: place rays from stored file on disk in random order until none are left
+    elif mode == 'true' or mode == 'pseudo':
 
-    # true random mode: place rays from stored file on disk in random order until none are left
-    elif mode == 'true':
+      # warn that pseudo random mode is not supported and behaves identical to true random
+      if mode == 'pseudo':
+        io.warn(f'ReplaySource does not support pseudo-random mode and behaves identical to true-random mode')
+
       rayCount = 0
       gpM, gpMi = self._makeRayCache(obj)[:2]
 
@@ -181,7 +182,8 @@ class AddReplaySource(AddGenericSource):
 
     # register custom proxy and view provider proxy
     obj.Proxy = ReplaySourceProxy()
-    obj.ViewObject.Proxy = ReplaySourceViewProxy()
+    if App.GuiUp:
+      obj.ViewObject.Proxy = ReplaySourceViewProxy()
 
     return obj
 

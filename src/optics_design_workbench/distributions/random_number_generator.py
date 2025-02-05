@@ -7,7 +7,11 @@ __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
+# make sure bool() is not overloaded by numpy import
+_bool = bool
 from numpy import *
+bool = _bool
+
 import sympy as sy
 import time
 import signal
@@ -118,11 +122,11 @@ class VectorRandomVariable:
     if self._probabilityDensityBaseExpr is None:
       self._probabilityDensityBaseExpr = sy.sympify(self._probabilityDensity)
     expr = self._probabilityDensityBaseExpr    
-    
+
     # substitute constants
     for name, val in kwargs.items():
       expr = expr.subs(name, val)
-    
+
     # set variables attribute if not set
     self._variables = list(expr.free_symbols)
 
@@ -171,12 +175,21 @@ class VectorRandomVariable:
       _setAlarm(self._deadline)
 
       # test wether expression looks positive
+      isPositive = False
       try:
-        if bool(sy.solve(expr < 0)):
-          raise ValueError('oops')
+        if not bool( expr < 0 ):
+          isPositive = True
       except Exception:
+        pass
+      if not isPositive:
+        try:
+          if not bool( sy.solve(expr < 0) ):
+            isPositive = True
+        except Exception:
+          pass
+      if not isPositive:
         io.warn(f'not sure whether expression for probability density '
-                f'"{expr}" is always positive values; negative '
+                f'"{expr}" always yields positive values; negative '
                 f'probabilities will lead to undefined behavior')
 
       # integrate along domain for i<varI
@@ -262,7 +275,11 @@ class VectorRandomVariable:
     exprLam = sy.lambdify(self._variables, expr)
     gridProbs = exprLam(*variableGrids)
 
-    # make sure no negative entries exist
+    # if gridProbs is scalar replace it with array of same shape as variable grid
+    if not hasattr(gridProbs, 'shape'):
+      gridProbs = variableGrids[0] * 0 + gridProbs
+
+    # check whether probabilities are strictly positive
     if (gridProbs < 0).any():
       raise ValueError(f'found negative probability density, '
                        f'expression: {expr}, variable: {self._variables[varI]}')
@@ -348,7 +365,7 @@ class VectorRandomVariable:
     return lambYs
 
 
-  def draw(self, N=None, constants={}):
+  def draw(self, N=None, constants=None):
     '''
     Draw random numbers (or vectors) following the distribution represented by this object.
 
@@ -365,8 +382,8 @@ class VectorRandomVariable:
 
     # compile variable first if either constants are passed or
     # if it was not yet compiled
-    if not hasattr(self, '_transformLambdas') or constants != self._constantsDict:
-      self.compile(**constants)
+    if not hasattr(self, '_transformLambdas') or (constants is not None and constants != self._constantsDict):
+      self.compile(**(constants or {}))
 
     # accept float values for N and limit to min 1
     if N is not None:
@@ -424,7 +441,7 @@ class VectorRandomVariable:
     _orderingIndex = [[str(v) for v in self._variables].index(_v) for _v in self._variableOrder]
     return result[_orderingIndex]
 
-  def drawPseudo(self, N, bins=None, overdrawFactor=0.1, overdrawIterations=50, constants={}, plotHistograms=False):
+  def drawPseudo(self, N, bins=None, overdrawFactor=0.1, overdrawIterations=50, constants=None, plotHistograms=False):
     '''
     Draw pseudo random (or vectors) almost following the distribution represented by this object.
     The histogram if the returned numbers will be close to the expected histogram, outliers are
@@ -435,6 +452,9 @@ class VectorRandomVariable:
     N : int
       Number of random numbers (vectors) to draw. This must be greater than 1, because a histogram
       is not well defined otherwise.
+
+    bins : int or list
+      Optionally pass number of bins to consider
 
     constants : dict    
       Dictionary of constants to substitute in the distribution expression.
@@ -544,14 +564,14 @@ class VectorRandomVariable:
     return result[...,-int(round(N)):]
 
 
-  def findGrid(self, N, startFrom=None, constants={}):
+  def findGrid(self, N, startFrom=None, constants=None):
     '''
     Return values whose density follows the given probability density as close as possible.
     '''
     # compile variable first if either constants are passed or
     # if it was not yet compiled
-    if not hasattr(self, '_transformLambdas') or constants != self._constantsDict:
-      self.compile(**constants)
+    if not hasattr(self, '_transformLambdas') or (constants is not None and constants != self._constantsDict):
+      self.compile(**(constants or {}))
 
     # perform 1D grid generation
     if len(self._variables) == 1:

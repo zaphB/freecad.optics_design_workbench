@@ -17,13 +17,8 @@ class TestRunNotebooks(unittest.TestCase):
 
     # find all notebooks and run them
     for root, dirs, files in os.walk(baseDir):
-      if 'freecad_tests' in root:
-        continue
       for f in files:
         if f.endswith('.ipynb') and not f.endswith('.nbconvert.ipynb'):
           with self.subTest(f):
-            subprocess.run(f'jupyter execute "{f}"',
+            subprocess.run(f'uv run jupyter execute "{f}"',
                            cwd=root, shell=True, check=True)
-
-if __name__ == '__main__':
-  unittest.main()

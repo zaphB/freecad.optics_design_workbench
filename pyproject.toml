@@ -6,22 +6,45 @@ build-backend = "setuptools.build_meta"
 enabled = true
 
 [tool.setuptools.packages.find]
-where = ["freecad"]
+where = [
+  "src/freecad", 
+  "src/optics_design_workbench"]
 
 [project]
 name = "freecad.optics_design_workbench"
 dynamic = ["version"]
 dependencies = [
-  "numpy", "scipy", "matplotlib", "sympy", "atomicwrites"
+  "numpy>1.24.4", 
+  "scipy", 
+  "matplotlib", 
+  "sympy", 
+  "atomicwrites",
+  "PySide6",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 authors = [
   {name = "Philipp Bredol", email = "philipp.bredol@rwth-aachen.de"}
 ]
-description = "Physically accurate forward ray tracing for optics simulation and optimization with FreeCAD workbench frontend"
+description = "Physically accurate forward ray tracing for optics simulation and optimization with FreeCAD workbench frontend inspired by the FreeCAD OpticsWorkbench"
 readme = "README.md"
 license = {file = "LICENSE.txt"}
 
 [project.urls]
 Homepage = "https://github.com/zaphB/freecad.optics_design_workbench"
 Repository = "https://github.com/zaphB/freecad.optics_design_workbench.git"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+    "pytest-monitor",
+    "jupyter",
+    "ipykernel",
+]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests/python",
+]
+

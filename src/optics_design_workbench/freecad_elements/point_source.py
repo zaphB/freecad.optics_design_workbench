@@ -165,16 +165,15 @@ class PointSourceProxy(GenericSourceProxy):
             # add lines corresponding to this ray to total ray list
             yield self.makeRay(obj=obj, theta=theta, phi=phi)
 
-    # pseudo-random mode: place rays by drawing theta and phi from pseudo random distribution
-    elif mode == 'pseudo':
-      # determine number of rays to place
-      raise ValueError('not implemented')
-
-    # true random mode: place rays by drawing theta and phi from true random distribution
-    elif mode == 'true':
+    # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
+    elif mode == 'true' or mode == 'pseudo':
 
       # create/get random variable for theta and phi and draw samples 
-      thetas, phis = self._getVrv(obj).draw(N=raysPerIteration)
+      if mode == 'true':
+        thetas, phis = self._getVrv(obj).draw(N=raysPerIteration)
+      elif mode == 'pseudo':
+        thetas, phis = self._getVrv(obj).drawPseudo(N=raysPerIteration)
+
       for theta, phi in zip(thetas, phis):
 
         # this loop may run for quite some time, keep GUI responsive by handling events
@@ -226,7 +225,8 @@ class AddPointSource(AddGenericSource):
 
     # register custom proxy and view provider proxy
     obj.Proxy = PointSourceProxy()
-    obj.ViewObject.Proxy = PointSourceViewProxy()
+    if App.GuiUp:
+      obj.ViewObject.Proxy = PointSourceViewProxy()
 
     # make mode readonly
     obj.setEditorMode('RandomNumberGeneratorMode', 1)

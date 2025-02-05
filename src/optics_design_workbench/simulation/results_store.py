@@ -3,7 +3,6 @@ __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
-
 try:
   import FreeCADGui as Gui
   import FreeCAD as App
@@ -16,30 +15,52 @@ import time
 import pickle
 import functools
 import threading
+import uuid
+import shutil
 from atomicwrites import atomic_write
 
 from .. import freecad_elements
 from .. import io
 from . import processes
 
+GET_PROGRESS_LOCK = threading.RLock()
+
+_README_TEXT = '''
+# Optics Design Workbench project folder
+
+This folder contains simulation results, analysis and optimizer notebooks
+interacting with the Optics Design Workbench. Feel free to edit this readme
+document your optics design project. If this readme is deleted, it will
+be restored with its default content on the next simulation run.
+
+Subfolders raw/simulation-run-xyz will be created on each simulation run
+and contain the raw ray and hit information recorded during ray tracing. 
+
+The subfolder notebooks/ contains all jupyter notebooks used to visualize,
+analyze the results and to perform sweeps and optimizations of geometry
+parameters.
+
+The optics_design_workbench.log logfile will accumulate logging messages
+generated during the ray tracing for debugging purposes.
+'''.strip()
+
 def getResultsFolderPath():
   base, fname, folderName = _getFolderBase()
   return f'{base}/{folderName}'
 
 def getLatestRunIndex():
-  folderName = getResultsFolderPath()
+  folderName = getResultsFolderPath()+'/raw'
   if os.path.exists(folderName):
     safeInt = lambda x: int(x) if x.isnumeric() else -1 
-    return max([safeInt(f[4:-4]) for f in os.listdir(folderName) 
-                                    if f.startswith('run-')
-                                          and f.endswith('-raw')]
+    return max([safeInt(f[-4:]) for f in os.listdir(folderName) 
+                                    if f.startswith('simulation-run-')]
                   +[-1])
   return -1
 
 def generateSimulationFolderName(index=None):
   if index is None:
     index = getLatestRunIndex()+1
-  return f'run-{int(index):04d}-raw'
+  return f'raw/simulation-run-{int(index):06d}'
 
 def getLatestRunFolderPath():
   index = getLatestRunIndex()
@@ -57,12 +78,15 @@ def _getFolderBase():
   base, fname = os.path.split(os.path.realpath(processes.simulatingDocument().getFileName()))
   if fname.lower().endswith('.fcstd'):
     fname = fname[:-6]
-  folderNamePattern = '{projectName}.opticalSimulationResults'
-  if settings := freecad_elements.find.activeSimulationSettings():
-    folderNamePattern = settings.SimulationDataFolder
-  folderName = time.strftime(folderNamePattern).format(
-                                    projectName=fname, 
-                                    settingsName=settings.Name if settings else 'defaultSettings')
+  folderName = f'{fname}.OpticsDesign'
+
+  # DEPRECATE: removed SimulationDataFolder property after v0.2.0
+  #folderNamePattern = '{projectName}.opticalSimulationResults'
+  #if settings := freecad_elements.find.activeSimulationSettings():
+  #  folderNamePattern = settings.SimulationDataFolder
+  #folderName = time.strftime(folderNamePattern).format(
+  #                                  projectName=fname, 
+  #                                  settingsName=settings.Name if settings else 'defaultSettings')
   # return results
   return base, fname, folderName
 
@@ -111,6 +135,8 @@ class SimulationResults:
     self._lastFlush = time.time()+self.flushEverySeconds*random.random()
     self._lastDumpedProgress = time.time()+self.dumpProgressEverySeconds*random.random()
     self._latestProgressUpdate = time.time()
+    self._lastMasterProgressDump = 0
+    self._masterProgressDumpIdx = 0
     self._lastMsg = time.time()
     self.t0 = time.time()
     
@@ -122,18 +148,16 @@ class SimulationResults:
     # set run folder name
     self.simulationRunFolder = simulationRunFolder
 
-    # check whether paths are writable
+    # check whether paths are writable and mark run folder with random id to uniquely identify it in the future
+    # if uid file already exists assume that this check can be skipped
+    _path = f'{self.basePath}/{self.simulationRunFolder}'
     try:
-      os.makedirs(f'{self.basePath}/{self.simulationRunFolder}/.permission-check', exist_ok=True)
+      os.makedirs(_path, exist_ok=True)
+      if not any([f.startswith('uid-') for f in os.listdir(_path)]):
+        with open(f'{_path}/uid-{uuid.uuid4()}', 'w') as _f: 
+          pass
     except Exception:
-      raise RuntimeError(f'it seems simulation result path is not writable: {self.basePath}/{self.simulationRunFolder}')
-    finally:
-      try:
-        os.rmdir(f'{self.basePath}/{self.simulationRunFolder}/.permission-check')
-        try:
-          os.rmdir(f'{self.basePath}/{self.simulationRunFolder}')
-        except Exception: pass
-      except Exception: pass
+      raise RuntimeError(f'it seems simulation result path is not writable: {_path}')
 
     # set limitss
     self.endAfterIterations = endAfterIterations
@@ -151,6 +175,26 @@ class SimulationResults:
     # prepare lists to store results
     self.rays = None
     self.hits = None
+
+    # flag that is set to true when the simulation corresponding to this store is done
+    self._cleanedUp = False
+
+    # make sure the default folder structure exists, create it otherwise
+    self._ensureFolderStructureExists()
+
+  def _ensureFolderStructureExists(self):
+    # create folders if not existing
+    for expectPath in ['raw', 'notebooks']:
+      os.makedirs(self.basePath+'/'+expectPath, exist_ok=True)
+
+    # create readmes if not existing
+    if not os.path.exists(self.basePath+'/README.md'):
+      with atomic_write(self.basePath+'/README.md', mode='w') as f:
+        f.write(_README_TEXT)
+
+  def _raiseIfCleanedUp(self):
+    if self._cleanedUp:
+      raise RuntimeError(f'this storage was already cleaned up, cannot run requested method')
 
   def incrementRayCount(self):
     self.totalTracedRays += 1
@@ -183,6 +227,9 @@ class SimulationResults:
     '''
     flush buffered data to disk and clear results lists
     '''
+    # make sure instance was not yet cleaned up
+    self._raiseIfCleanedUp()
+
     # reset fingerprint cache to make sure a fresh one is generated
     self._fingerprint.cache_clear()
 
@@ -248,6 +295,10 @@ class SimulationResults:
     '''
     dump pickled summary of simulation progress (use atomic_write)
     '''
+    # make sure instance was not yet cleaned up
+    self._raiseIfCleanedUp()
+
+    # write progress atomically
     with atomic_write(self._makeFilename(source='progress', kind=str(hex(int(random.random()*1e15)))[2:]), 
                       mode='wb', overwrite=True) as f:
       pickle.dump(dict(totalIterations = self.totalIterations,
@@ -264,29 +315,64 @@ class SimulationResults:
     return os.path.dirname(self._makeFilename(source='progress', kind='none'))
 
   def getProgress(self, _neverReport=False):
-    result = {}
-    for _, prog in self.getProgressByWorker().items():
-      for k, v in prog.items():
-        if k not in result:
-          result[k] = 0
-        result[k] += v
+    # if instance is cleaned up, just return latest reported progress value
+    if self._cleanedUp:
+      return getattr(self, '_lastReportedProgress', {})
 
-    # check whether simulation is done and call cancelSimulation if so
-    if (result.get('totalIterations', 0) > self.endAfterIterations
-            or result.get('totalTracedRays', 0) > self.endAfterRays
-            or result.get('totalRecordedHits', 0) > self.endAfterHits):
-      self.reachedEnd = True
-      processes.setIsFinished(True)
+    # make sure no other threads interfere
+    with GET_PROGRESS_LOCK:
+    
+      # assemble result dictionary
+      result = {}
+      for _, prog in self.getProgressByWorker().items():
+        for k, v in prog.items():
+          if k not in result:
+            result[k] = 0
+          result[k] += v
 
-    # report progress to shell from time to time
-    if time.time() - self._lastMsg > 5 and not _neverReport:
-      iteration = result.get("totalIterations", 0) or 0
-      io.info(f'{iteration} iterations done, '
-              f'{processes.isWorkerRunning()} workers are alive, '
-              f'{self.performanceDescription()}')
-      self._lastMsg = time.time()
+      # check whether simulation is done and call cancelSimulation if so
+      if (result.get('totalIterations', 0) > self.endAfterIterations
+              or result.get('totalTracedRays', 0) > self.endAfterRays
+              or result.get('totalRecordedHits', 0) > self.endAfterHits):
+        self.reachedEnd = True
+        processes.setIsFinished(True)
 
-    return result
+      # dump total progress to disk from time to time
+      if processes.isMasterProcess() and time.time() - self._lastMasterProgressDump > .5:
+        with atomic_write(f'{self.basePath}/{self.simulationRunFolder}/progress/master-{self._masterProgressDumpIdx:09d}', 
+                          mode='wb', overwrite=True) as f:
+          pickle.dump(dict(totalIterations = result.get('totalIterations', 0),
+                           totalTracedRays = result.get('totalTracedRays', 0),
+                           totalRecordedHits = result.get('totalRecordedHits', 0),
+                           totalRecordedRays = result.get('totalRecordedRays', 0),
+                           endAfterIterations = self.endAfterIterations,
+                           endAfterRays = self.endAfterRays,
+                           endAfterHits = self.endAfterHits), f)
+
+        # remove master progress files older than 10s
+        _i = 10
+        while True:
+          fname = f'{self.basePath}/{self.simulationRunFolder}/progress/master-{self._masterProgressDumpIdx-_i:09d}'
+          if not os.path.exists(fname):
+            break
+          if time.time()-os.stat(fname).st_mtime > 10:
+            os.remove(fname)
+          _i += 1
+
+        # update timer and index
+        self._masterProgressDumpIdx += 1
+        self._lastMasterProgressDump = time.time()
+
+      # report progress to shell from time to time
+      if time.time() - self._lastMsg > 5 and not _neverReport:
+        iteration = result.get("totalIterations", 0) or 0
+        io.info(f'{iteration} iterations done, '
+                f'{processes.isWorkerRunning()} workers are alive, '
+                f'{self.performanceDescription()}')
+        self._lastMsg = time.time()
+
+      self._lastReportedProgress = result
+      return result
 
   def performanceDescription(self):
     # disable reporting to prevent endless recursion
@@ -342,6 +428,9 @@ class SimulationResults:
     return self.progressByWorker
 
   def writeDiskIfNeeded(self):
+    # make sure instance was not yet cleaned up
+    self._raiseIfCleanedUp()
+
     # check if it is time to flush to disk
     if time.time()-self._lastFlush > self.flushEverySeconds:
       self.flush()
@@ -350,6 +439,11 @@ class SimulationResults:
     if time.time()-self._lastDumpedProgress > self.dumpProgressEverySeconds:
       self.dumpProgress()
 
+      # if we are the master process, make sure to collect all slave progresses
+      # from time to time
+      if processes.isMasterProcess():
+        self.getProgress()
+
   def isSimulationRunning(self):
     return processes.isRunning()
   
@@ -357,6 +451,9 @@ class SimulationResults:
     return not processes.isRunning() and self.reachedEnd
 
   def addRay(self, source):
+    # make sure instance was not yet cleaned up
+    self._raiseIfCleanedUp()
+
     if self.rays is None:
       self.rays = []
     ray = SimulationResultsSingleRay(source)
@@ -367,7 +464,24 @@ class SimulationResults:
     return ray
 
   def addRayHit(self, source, obj, point, direction, power, isEntering):
+    # make sure instance was not yet cleaned up
+    self._raiseIfCleanedUp()
+
     if self.hits is None:
       self.hits = []
     self.hits.append([source, obj, point, direction, power, isEntering])
     self.writeDiskIfNeeded()
+
+  def cleanup(self):
+    '''
+    remove temp files of the result store generated during the simulation but 
+    that are not part of the actual result 
+    '''
+    # remove progress tracking folder
+    try:
+      shutil.rmtree(self.progressMonitorPath())
+    except Exception:
+      io.warn(f'failed to cleanup progress monitoring path at "{self.progressMonitorPath()}"')
+
+    # mark as done
+    self._cleanedUp = True
