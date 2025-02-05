@@ -102,7 +102,7 @@ class _ProgressTacker:
       if expectedRemain > elapsed**2:
         expectedRemain = None
 
-      # generate and print message
+      # generate progress message
       self._clear()
       iterationProgress = ''
       if self._totalSimulations:
@@ -110,23 +110,31 @@ class _ProgressTacker:
       simulationProgress = ''
       if isfinite(p['totalIterations']):
         simulationProgress = (f'current simulation: '
-                                  f'iter {p['totalIterations']}/{p['endAfterIterations']}, '
-                                  f'hits {p['totalRecordedHits']}/{p['endAfterHits']}, '
-                                  f'rays {p['totalTracedRays']}/{p['endAfterRays']}')
+                              f"iter {p['totalIterations']}/{p['endAfterIterations']}, "
+                              f"hits {p['totalRecordedHits']}/{p['endAfterHits']}, "
+                              f"rays {p['totalTracedRays']}/{p['endAfterRays']}")
       message = ', '.join([s for s in (iterationProgress, simulationProgress) if s.strip()])
+
+      # print progress message
+      printedSomething = False
       if message.strip():
         print(message)
+        printedSomething = True
       if displayTiming:
         print(f'elapsed time {io.secondsToStr(elapsed)}'
               +(f', expected remaining time {io.secondsToStr(expectedRemain)}' 
                                         if expectedRemain is not None else ''))
+        printedSomething = True
+
+      # return whether something was printed or not
+      return printedSomething
 
   def updateLoop(self):
     while self._isRunning:
       self.update()
       time.sleep(1/3)
-    self.update(displayTiming=False)
-    print(f'simulations ended after {io.secondsToStr(time.time()-self._t0)}')
+    if self.update(displayTiming=False):
+      print(f'simulations ended after {io.secondsToStr(time.time()-self._t0)}')
 
   def nextIteration(self):
     self._simulationNo += 1

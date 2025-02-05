@@ -196,6 +196,8 @@ class TestRunNotebooks(unittest.TestCase):
     # find all notebooks and run them
     for root, dirs, files in os.walk(baseDir):
       for f in files:
+        if 'notest' in f or 'notest' in root:
+          continue
         if f.endswith('.ipynb') and not f.endswith('.nbconvert.ipynb'):
           with self.subTest(f):
             subprocess.run(f'uv run jupyter execute "{f}"',

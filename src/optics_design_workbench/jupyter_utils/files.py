@@ -402,7 +402,7 @@ class FreecadDocument:
 
     # after gui is fully loaded, load document
     self.write(f'try: ',
-               f'  App.openDocument("{self._path.replace('"', "'")}")',
+               f'  App.openDocument({repr(self._path)})',
                f'except Exception:',
                f'  exit()')
 
@@ -504,6 +504,9 @@ class FreecadDocument:
   def close(self):
     t0 = time.time()
     io.verb(f'closing {self} instance...')
+
+    # save changes
+    self.write('App.activeDocument().save()')
 
     while self.isRunning():
       # gently ask to quit
