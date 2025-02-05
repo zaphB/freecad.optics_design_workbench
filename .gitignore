@@ -11,10 +11,18 @@ __pycache__
 *.tar.gz
 *.egg-info
 *.nbconvert*
-*.OpticsDesign
+**/*.OpticsDesign/raw/*
+**/*.OpticsDesign/**/*.pdf
+**/*.OpticsDesign/**/*.png
+**/*.OpticsDesign/**/*.jpg
+**/*.OpticsDesign/**/*.md
+**/*.OpticsDesign/**/*.txt
+**/*.OpticsDesign/**/*.log
+**/*.OpticsDesign/**/simulation-*
 *.md5
 test-docker/**/container-home
 *.AppImage
+releases
 
 # include screenshots in examples
 !examples/**/*.png

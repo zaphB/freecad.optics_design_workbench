@@ -3,12 +3,6 @@
 # change parent dir to this script's location
 cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-# error and exit if setup.py not found
-if [ ! -e setup.py ]; then
-  echo "could not find setup.py"
-  exit 1
-fi
-
 # extract version info from setup.py
 ver=$(./dev/update-packagexml.py)
 major="$(echo "$ver" | grep -oP '^\d+')"
