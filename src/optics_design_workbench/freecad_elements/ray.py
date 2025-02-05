@@ -19,30 +19,31 @@ from . import find
 from .common import *
 
 
-# store all boundboxes in lut forever to cache them, because just accessing
-# the .BoundBox attribute of shapes and faces creates a new bounding box
-# and thus causes a memory leak
+# store all BoundBox, Shapes and Faces in LUTs forever to cache them, 
+# because accessing them via attribute like .BoundBox, .Shape, .Faces 
+# creates a new C++ objects, which are not freed properly and cause 
+# memory leaks. This ugly workaround can hopefully be removed one day.
 _SHAPES_LUT = {}
 _FACES_LUT = {}
 _BOUND_BOX_LUT = {}
 
-def getBoundBox(obj):
+def getShape(obj):
   # fetch and cache Shape
-  if hasattr(obj, 'Shape'):
-    if obj not in _SHAPES_LUT.keys():
-      _SHAPES_LUT[obj] = obj.Shape
-    obj = _SHAPES_LUT[obj]
-
-  # fetch and cache BoundBox
-  if obj not in _BOUND_BOX_LUT.keys():
-    _BOUND_BOX_LUT[obj] = obj.BoundBox
-  return _BOUND_BOX_LUT[obj]
+  if obj not in _SHAPES_LUT.keys():
+    _SHAPES_LUT[obj] = obj.Shape
+  return _SHAPES_LUT[obj]
 
 def getFaces(obj):
   # fetch and cache Faces
   if obj not in _FACES_LUT.keys():
     _FACES_LUT[obj] = obj.Faces
   return _FACES_LUT[obj]
+
+def getBoundBox(obj):
+  # fetch and cache BoundBox
+  if obj not in _BOUND_BOX_LUT.keys():
+    _BOUND_BOX_LUT[obj] = obj.BoundBox
+  return _BOUND_BOX_LUT[obj]
 
 def clearBoundBoxCache():
   global _SHAPES_LUT, _FACES_LUT, _BOUND_BOX_LUT
@@ -207,7 +208,7 @@ class Ray():
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
       if hasattr(group, 'Shape'):
-        sbb = getBoundBox(group)
+        sbb = getBoundBox(getShape(group))
         #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
         if ( ( not isfinite(maxRayLength)
                 or any([(sbb.getPoint(i)-start).Length
@@ -216,7 +217,7 @@ class Ray():
             and sbb.intersect(start, direction) ):
 
           # loop through all faces
-          for face in group.Shape.Faces:
+          for face in getFaces(getShape(group)):
 
             # this loop may run for quite some time, keep GUI responsive by handling events
             keepGuiResponsiveAndRaiseIfSimulationDone()
