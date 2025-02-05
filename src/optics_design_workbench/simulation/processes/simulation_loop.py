@@ -50,7 +50,7 @@ from .. import results_store
 from . import worker_process
 
 
-_TRACEMALLOC_INTERVAL = 30
+_TRACEMALLOC_INTERVAL = 600
 #_TRACEMALLOC_INTERVAL = inf
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
@@ -223,6 +223,7 @@ def runSimulation(action, slaveInfo={}):
 
   # reset bound box cache to prevent outdated stuff from prevailing
   freecad_elements.ray.clearBoundBoxCache()
+  freecad_elements.generic_source.clearViewObjectCache()
 
   # setup random seeds to ensure good randomness across all workers and threads
   setupRandomSeed()

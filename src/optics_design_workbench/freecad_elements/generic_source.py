@@ -38,6 +38,9 @@ def getViewObject(obj):
     _VIEW_OBJECT_LUT[obj] = obj.ViewObject
   return _VIEW_OBJECT_LUT[obj]
 
+def clearViewObjectCache():
+  global _VIEW_OBJECT_LUT
+  _VIEW_OBJECT_LUT = {}
 
 
 #####################################################################################################

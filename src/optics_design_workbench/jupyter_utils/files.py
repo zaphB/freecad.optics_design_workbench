@@ -632,7 +632,7 @@ def _rawFolders(basePath='.'):
 
 def rawFolders(basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)
-  return [os.path.relpath(f'{basePath}/{f}') for f in folders]
+  return sorted([os.path.relpath(f'{basePath}/{f}') for f in folders])
 
 def rawFolderByIndex(index=-1, basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)
