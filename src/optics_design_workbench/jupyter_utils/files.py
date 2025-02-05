@@ -554,6 +554,10 @@ class FreecadDocument:
       # place cancel file
       with open(f'{self._resultsPath}/simulation-is-canceled', 'w') as f:
         pass
+      try:
+        os.remove(f'{self._resultsPath}/simulation-is-running')
+      except Exception:
+        pass
 
       # close stdin and send sigterm
       try:

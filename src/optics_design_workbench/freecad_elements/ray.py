@@ -19,6 +19,38 @@ from . import find
 from .common import *
 
 
+# store all boundboxes in lut forever to cache them, because just accessing
+# the .BoundBox attribute of shapes and faces creates a new bounding box
+# and thus causes a memory leak
+_SHAPES_LUT = {}
+_FACES_LUT = {}
+_BOUND_BOX_LUT = {}
+
+def getBoundBox(obj):
+  # fetch and cache Shape
+  if hasattr(obj, 'Shape'):
+    if obj not in _SHAPES_LUT.keys():
+      _SHAPES_LUT[obj] = obj.Shape
+    obj = _SHAPES_LUT[obj]
+
+  # fetch and cache BoundBox
+  if obj not in _BOUND_BOX_LUT.keys():
+    _BOUND_BOX_LUT[obj] = obj.BoundBox
+  return _BOUND_BOX_LUT[obj]
+
+def getFaces(obj):
+  # fetch and cache Faces
+  if obj not in _FACES_LUT.keys():
+    _FACES_LUT[obj] = obj.Faces
+  return _FACES_LUT[obj]
+
+def clearBoundBoxCache():
+  global _SHAPES_LUT, _FACES_LUT, _BOUND_BOX_LUT
+  _SHAPES_LUT = {}
+  _FACES_LUT = {}
+  _BOUND_BOX_LUT = {}
+
+
 class Ray():
   '''
   Class representing an individual ray.
@@ -175,7 +207,7 @@ class Ray():
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
       if hasattr(group, 'Shape'):
-        sbb = group.Shape.BoundBox
+        sbb = getBoundBox(group)
         #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
         if ( ( not isfinite(maxRayLength)
                 or any([(sbb.getPoint(i)-start).Length
@@ -190,10 +222,9 @@ class Ray():
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
-            #fbb = face.BoundBox
-            #fbb.enlarge(distTol)
-            #if fbb.intersect(start, direction):
-            if True: # face.BoundBox.intersect(start, direction):
+            fbb = getBoundBox(face)
+            fbb.enlarge(distTol)
+            if fbb.intersect(start, direction):
 
               # find intersection points and loop through all of them
               if intersect := line.Curve.intersect(face.Surface):
