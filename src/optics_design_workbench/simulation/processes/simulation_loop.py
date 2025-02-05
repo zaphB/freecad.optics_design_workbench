@@ -41,12 +41,12 @@ import signal
 import itertools
 import traceback
 
-from freecad.optics_design_workbench.detect_pyside import *
-from freecad.optics_design_workbench import freecad_elements
-from freecad.optics_design_workbench import gui_windows
-from freecad.optics_design_workbench import io
-from freecad.optics_design_workbench.simulation import results_store
-from freecad.optics_design_workbench.simulation.processes import worker_process
+from ...detect_pyside import *
+from ... import freecad_elements
+from ... import gui_windows
+from ... import io
+from .. import results_store
+from . import worker_process
 
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None

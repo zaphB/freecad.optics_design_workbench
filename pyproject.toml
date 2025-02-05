@@ -6,7 +6,9 @@ build-backend = "setuptools.build_meta"
 enabled = true
 
 [tool.setuptools.packages.find]
-where = ["freecad"]
+where = [
+  "src/freecad", 
+  "src/optics_design_workbench"]
 
 [project]
 name = "freecad.optics_design_workbench"
@@ -16,7 +18,8 @@ dependencies = [
   "scipy", 
   "matplotlib", 
   "sympy", 
-  "atomicwrites"
+  "atomicwrites",
+  "PySide6",
 ]
 requires-python = ">=3.10"
 authors = [
@@ -33,7 +36,9 @@ Repository = "https://github.com/zaphB/freecad.optics_design_workbench.git"
 [dependency-groups]
 dev = [
     "pytest>=8.3.4",
-    "pytest-monitor"
+    "pytest-monitor",
+    "jupyter",
+    "ipykernel",
 ]
 
 [tool.pytest.ini_options]

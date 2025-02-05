@@ -30,11 +30,13 @@ def registerJupyterLogDir(path):
   global _JUPYTER_REGISTERED_LOG_DIR, _MESSAGE_PREFIX
   _JUPYTER_REGISTERED_LOG_DIR = path
   _MESSAGE_PREFIX = '(jupyter) '
+  _init(forceReInit=True)
 
 def unregisterJupyterLogDir():
   global _JUPYTER_REGISTERED_LOG_DIR, _MESSAGE_PREFIX
   _JUPYTER_REGISTERED_LOG_DIR = None
   _MESSAGE_PREFIX = ''
+  _init(forceReInit=True)
 
 def isRegisteredJupyter():
   return bool(_JUPYTER_REGISTERED_LOG_DIR)
@@ -45,17 +47,18 @@ def _getLogDir():
   try:
     from .simulation import results_store
     return results_store.getResultsFolderPath()
-  # runtime error is raised if no FCStd file is opened, AttributeError is
-  # raised if module is not fully initialized yet. In both cases no logging
-  # is yet desired.
-  except (RuntimeError, AttributeError):
+  # runtime error is raised if no FCStd file is opened, name error is raised
+  # if we are running from an freecad-external python shell, AttributeError 
+  # is raised if module is not fully initialized yet. 
+  # In either cases no logging is yet desired.
+  except (RuntimeError, NameError, AttributeError):
     return None
 
-def _init():
+def _init(forceReInit=False):
   from .simulation import processes
   global _IS_INIT, _LOG_DIR
 
-  if _LOG_DIR != _getLogDir():
+  if forceReInit or os.path.realpath(_LOG_DIR or '') != os.path.realpath(_getLogDir() or ''):
     # isMasterProcess() returns None => situation is unclear so far, do not open log
     if processes.isMasterProcess() is None:
       return
@@ -111,6 +114,8 @@ def setLogfile(name):
   _LOGFILE_NAME = name
   if baseDir is not None:
     _LOG_DIR = baseDir
+  if _LOG_DIR is None:
+    _LOG_DIR = '.'
   _init()
 
 def gatherSlaveFiles():

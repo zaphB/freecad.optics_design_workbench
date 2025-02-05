@@ -10,9 +10,9 @@ import functools
 import glob
 import pickle
 
-from freecad.optics_design_workbench import io
-from freecad.optics_design_workbench.simulation import processes
-from freecad.optics_design_workbench.jupyter_utils import progress
+from .. import io
+from ..simulation import processes
+from . import progress
 
 # signal handler that kills all running freecad processes
 # in case this process is killed
@@ -240,8 +240,10 @@ class FreecadDocument:
       # subfunction to detect new results folder
       def newFolder(allowEmpty=True):
         # find and return newly appeared folder in results dir
-        newFolders = [d for d in os.listdir(self._resultsPath+'/raw') 
-                                              if d not in rawFoldersBefore]
+        newFolders = []
+        if os.path.exists(self._resultsPath+'/raw'):
+          newFolders = [d for d in os.listdir(self._resultsPath+'/raw')
+                                                if d not in rawFoldersBefore]
 
         # check plausibility of result
         if len(newFolders) == 0 and not allowEmpty:

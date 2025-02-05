@@ -6,7 +6,7 @@ import os
 import pickle
 import traceback
 
-from freecad.optics_design_workbench import io
+from .. import io
 
 try:
   import IPython.display
@@ -23,7 +23,7 @@ def setupProgressTracker(**kwargs):
   '''
   global _GLOBAL_PROGRESS_TRACKER
 
-  # raise if progress tracker creation is not allows (=we are not in a FreecadDocument context)
+  # raise if progress tracker creation is not allowed (=we are not in a FreecadDocument context)
   if not ALLOW_PROGRESS_TACKERS:
     raise ValueError(f'progress tracking can only be setup within FreecadDocument(..) contexts')
 
@@ -106,10 +106,11 @@ class _ProgressTacker:
       self._clear()
       iterationProgress = ''
       if self._totalSimulations:
-        iterationProgress = f'simulation {self._simulationNo}/{self._totalSimulations}'
+        iterationProgress = f'simulations done {self._simulationNo}/{self._totalSimulations}'
       simulationProgress = ''
       if isfinite(p['totalIterations']):
-        simulationProgress = (f'simulation: iter {p['totalIterations']}/{p['endAfterIterations']}, '
+        simulationProgress = (f'current simulation: '
+                                  f'iter {p['totalIterations']}/{p['endAfterIterations']}, '
                                   f'hits {p['totalRecordedHits']}/{p['endAfterHits']}, '
                                   f'rays {p['totalTracedRays']}/{p['endAfterRays']}')
       message = ', '.join([s for s in (iterationProgress, simulationProgress) if s.strip()])
@@ -123,7 +124,7 @@ class _ProgressTacker:
   def updateLoop(self):
     while self._isRunning:
       self.update()
-      time.sleep(5)
+      time.sleep(1/3)
     self.update(displayTiming=False)
     print(f'simulations ended after {io.secondsToStr(time.time()-self._t0)}')
 

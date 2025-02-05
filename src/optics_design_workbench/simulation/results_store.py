@@ -25,6 +25,25 @@ from . import processes
 
 GET_PROGRESS_LOCK = threading.RLock()
 
+_README_TEXT = '''
+# Optics Design Workbench project folder
+
+This folder contains simulation results, analysis and optimizer notebooks
+interacting with the Optics Design Workbench. Feel free to edit this readme
+document your optics design project. If this readme is deleted, it will
+be restored with its default content on the next simulation run.
+
+Subfolders raw/simulation-run-xyz will be created on each simulation run
+and contain the raw ray and hit information recorded during ray tracing. 
+
+The subfolder notebooks/ contains all jupyter notebooks used to visualize,
+analyze the results and to perform sweeps and optimizations of geometry
+parameters.
+
+The optics_design_workbench.log logfile will accumulate logging messages
+generated during the ray tracing for debugging purposes.
+'''.strip()
+
 def getResultsFolderPath():
   base, fname, folderName = _getFolderBase()
   return f'{base}/{folderName}'
@@ -159,6 +178,19 @@ class SimulationResults:
 
     # flag that is set to true when the simulation corresponding to this store is done
     self._cleanedUp = False
+
+    # make sure the default folder structure exists, create it otherwise
+    self._ensureFolderStructureExists()
+
+  def _ensureFolderStructureExists(self):
+    # create folders if not existing
+    for expectPath in ['raw', 'notebooks']:
+      os.makedirs(self.basePath+'/'+expectPath, exist_ok=True)
+
+    # create readmes if not existing
+    if not os.path.exists(self.basePath+'/README.md'):
+      with atomic_write(self.basePath+'/README.md', mode='w') as f:
+        f.write(_README_TEXT)
 
   def _raiseIfCleanedUp(self):
     if self._cleanedUp:
