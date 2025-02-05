@@ -25,6 +25,24 @@ from .. import io
 # objects whenever the FreeCAD project is saved.
 NON_SERIALIZABLE_STORE = {}
 
+
+# store all BoundBox, Shapes and Faces in LUTs forever to cache them, 
+# because accessing them via attribute like .BoundBox, .Shape, .Faces 
+# creates a new C++ objects, which are not freed properly and cause 
+# memory leaks. This ugly workaround can hopefully be removed one day.
+_VIEW_OBJECT_LUT = {}
+
+def getViewObject(obj):
+  # fetch and cache ViewObject
+  if obj not in _VIEW_OBJECT_LUT.keys():
+    _VIEW_OBJECT_LUT[obj] = obj.ViewObject
+  return _VIEW_OBJECT_LUT[obj]
+
+def clearViewObjectCache():
+  global _VIEW_OBJECT_LUT
+  _VIEW_OBJECT_LUT = {}
+
+
 #####################################################################################################
 class GenericSourceProxy():
   '''
@@ -45,7 +63,6 @@ class GenericSourceProxy():
     else:
       raise RuntimeError(f'light source object {obj.Name} does not have ElementList property. Older project? Recreate the source.')
 
-  
   @functools.cache
   def _makeRayCache(self, obj):
     '''
@@ -98,8 +115,8 @@ class GenericSourceProxy():
       # set starting color to diffuse color of light source at begin of tracing
       # the diffuse color is the first one visible in the view settings, so it
       # is most intuitive to use this
-      if obj.ViewObject:
-        color = obj.ViewObject.ShapeMaterial.DiffuseColor
+      if _vobj:=getViewObject(obj):
+        color = _vobj.ShapeMaterial.DiffuseColor
 
       # trace ray through project
       for (p1,p2), power, medium, colorChange in ray.traceRay(store=store, **kwargs):
@@ -130,9 +147,9 @@ class GenericSourceProxy():
             # first to avoid rays being shown with wrong placement for a very short moment
             _obj = simulation.simulatingDocument().addObject('Part::Feature', f'RaySegment')
             _obj.Visibility = False
-            if _obj.ViewObject:
+            if getViewObject(_obj):
               _obj.ViewObject.ShowInTree = False
-              _obj.ViewObject.LineWidth = obj.ViewObject.LineWidth
+              _obj.ViewObject.LineWidth = getViewObject(obj).LineWidth
               _obj.ViewObject.LineColor = color
 
             # make sure to create a compound with one member, instead of setting the line directly as Shape

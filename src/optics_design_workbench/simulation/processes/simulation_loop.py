@@ -40,6 +40,7 @@ import threading
 import signal
 import itertools
 import traceback
+import tracemalloc
 
 from ...detect_pyside import *
 from ... import freecad_elements
@@ -48,6 +49,9 @@ from ... import io
 from .. import results_store
 from . import worker_process
 
+
+_TRACEMALLOC_INTERVAL = 600
+#_TRACEMALLOC_INTERVAL = inf
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
 _BACKGROUND_PROCESSES = []
@@ -217,6 +221,10 @@ def runSimulation(action, slaveInfo={}):
   _IS_MASTER_PROCESS = not bool(slaveInfo)
   t0 = time.time()
 
+  # reset bound box cache to prevent outdated stuff from prevailing
+  freecad_elements.ray.clearBoundBoxCache()
+  freecad_elements.generic_source.clearViewObjectCache()
+
   # setup random seeds to ensure good randomness across all workers and threads
   setupRandomSeed()
 
@@ -360,6 +368,11 @@ def runSimulation(action, slaveInfo={}):
       if isMasterProcess():
         io.verb(f'gui process is not lazy and runs the simulation mainloop')
       
+      # start memory profiling
+      if isfinite(_TRACEMALLOC_INTERVAL):
+        tracemalloc.start()
+        lastTracemallocReport = 0
+
       while True:
         # do ray-tracing for all light sources
         lightSourceExists = False
@@ -378,6 +391,15 @@ def runSimulation(action, slaveInfo={}):
 
           # handle GUI events and raise if simulation is done
           freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
+
+          # log top 10 biggest memory allocations
+          if time.time()-lastTracemallocReport > _TRACEMALLOC_INTERVAL:
+            lastTracemallocReport = time.time()
+            io.verb('tracemalloc: top 10 memory allocations')
+            _snapshot = tracemalloc.take_snapshot()
+            _top_stats = _snapshot.statistics('lineno')
+            for _stat in _top_stats[:10]:
+              io.verb(f'  > {_stat}')
         
         # make sure simulation is canceled if not light source exists
         if not lightSourceExists:
