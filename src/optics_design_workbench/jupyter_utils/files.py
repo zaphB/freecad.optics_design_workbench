@@ -607,6 +607,38 @@ def openFreecadGui(*args, **kwargs):
       # is not a good idea
       raise
 
+def _rawFolders(basePath='.'):
+  # descent path until 'raw' folder is found
+  while not os.path.exists(f'{basePath}/raw') and basePath != '/':
+    basePath = os.path.realpath(f'{basePath}/..')
+  basePath = f'{basePath}/raw'
+  if not os.path.exists(basePath):
+    raise ValueError(f'failed to find "raw" folder in any parent directory of {basePath=}')
+
+  # get all simulation run folders
+  folders = [d for d in os.listdir(basePath) if d.startswith('simulation-run-')]
+  indices = [int(d[len('simulation-run-'):]) for d in folders]
+  return basePath, folders, indices
+
+def rawFolders(basePath='.'):
+  basePath, folders, indices = _rawFolders(basePath=basePath)
+  return [os.path.relpath(f'{basePath}/{f}') for f in folders]
+
+def rawFolderByIndex(index=-1, basePath='.'):
+  basePath, folders, indices = _rawFolders(basePath=basePath)
+
+  # interpret positive indices just like number in the directory name
+  if index >= 0:
+    if index not in indices:
+      raise ValueError(f'simulation-run folder with index {index} does not exist')
+    return RawFolder(f'{basePath}/{folders[indices.index(index)]}')
+
+  # interpret negative indices as counting from the end (ignoring directory name)
+  return RawFolder(f'{basePath}/{folders[index]}')
+
+@functools.wraps(rawFolderByIndex)
+def latestRawFolder(**kwargs):
+  return rawFolderByIndex(index=-1, **kwargs)
 
 class RawFolder:
   '''
@@ -640,8 +672,8 @@ class RawFolder:
     if _path is None:
       _path = self._path
     result = {}
+    folderContents = []
     for d in os.scandir(_path):
-      folderContents = []
       # add subdirectory as subdictionary
       if d.is_dir():
         result[d.name] = self.tree(_path=d.path)
@@ -656,9 +688,9 @@ class RawFolder:
       else:
         folderContents.append('unknown')
 
-      # add simple string entries in dictionary for detected files
-      for found in set(folderContents):
-        result[f'<{folderContents.count(found)} {found} files>'] = None
+    # add simple string entries in dictionary for detected files
+    for found in set(folderContents):
+      result[f'<{folderContents.count(found)} {found} files>'] = None
     return result
 
   def printTree(self, _node=None, _prefix='  '):

@@ -45,7 +45,6 @@ class GenericSourceProxy():
     else:
       raise RuntimeError(f'light source object {obj.Name} does not have ElementList property. Older project? Recreate the source.')
 
-  
   @functools.cache
   def _makeRayCache(self, obj):
     '''

@@ -40,6 +40,7 @@ import threading
 import signal
 import itertools
 import traceback
+import tracemalloc
 
 from ...detect_pyside import *
 from ... import freecad_elements
@@ -360,6 +361,9 @@ def runSimulation(action, slaveInfo={}):
       if isMasterProcess():
         io.verb(f'gui process is not lazy and runs the simulation mainloop')
       
+      # start memory profiling
+      tracemalloc.start()
+
       while True:
         # do ray-tracing for all light sources
         lightSourceExists = False
@@ -400,6 +404,13 @@ def runSimulation(action, slaveInfo={}):
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
         if not continuous:
           break
+
+        # log top 10 biggest memory allocations
+        io.verb('tracemallow: top 10')
+        _snapshot = tracemalloc.take_snapshot()
+        _top_stats = _snapshot.statistics('lineno')
+        for _stat in _top_stats[:10]:
+          io.verb(f'tracemalloc: {_stat}')
 
     ##########################################################################################
     # mainloop B: do not do simulation work if we are the master and draw is False, just

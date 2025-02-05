@@ -364,7 +364,7 @@ class SimulationResults:
         self._lastMasterProgressDump = time.time()
 
       # report progress to shell from time to time
-      if time.time() - self._lastMsg > 5 and not _neverReport:
+      if time.time() - self._lastMsg > 60 and not _neverReport:
         iteration = result.get("totalIterations", 0) or 0
         io.info(f'{iteration} iterations done, '
                 f'{processes.isWorkerRunning()} workers are alive, '
