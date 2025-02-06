@@ -92,6 +92,42 @@ class SimulationSettingsProxy():
         if val < 1e-12:
           setattr(obj, prop, '1e-12')
 
+    # if sequential mode objects are altered, make sure empties are removed
+    if 'SequentialMode' in prop:
+      self.getTracingSequence(obj)
+
+
+  def getTracingSequence(self, obj):
+    if not obj.SequentialMode:
+      return []
+    sequence = []
+    onlyUnsetSoFar = True
+    hasEmpty = False
+    lastUnset = 100
+    for i in reversed(range(100)):
+      attr = getattr(obj, f'SequentialModeElement{i:02d}', 'unset')
+      if not len(attr):
+        hasEmpty = True
+      else:
+        # find last unset index
+        if attr == 'unset' and onlyUnsetSoFar:
+          lastUnset = i
+        else:
+          onlyUnsetSoFar = False
+        # assemble sequence
+        if attr and attr != 'unset':
+          sequence.append(attr)
+    
+    # add property for last unset
+    if not hasEmpty and lastUnset < 100:
+      obj.addProperty('App::PropertyLinkList', f'SequentialModeElement{lastUnset:02d}', 
+                      'OpticalSimulationPerformanceSettings', 
+                      f'List to specify order of optical elements to '
+                      f'consider during ray tracing. Rays will not collide with anything but the next object '
+                      f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
+                      f'sequential mode, i.e. rays can collide with any optical object in the project.')
+
+    return list(reversed(sequence))
 
 #####################################################################################################
 class SimulationSettingsViewProxy():
@@ -151,6 +187,14 @@ class MakeSimulationSettings:
               'continuous simulation modes to speed up the calculation.'),
         ('WorkerProcessCount', 'num_cpus', 'String', 'Number of worker processes to spawn for continuous '
               f'simulation modes. Should be an integer or "num_cpus" ( = {simulation.cpuCount()} ).'),
+        ('SequentialMode', False, 'Bool', 'Enable/disable sequential ray-tracing mode. In '
+              f'sequential mode, rays will not collide with anything but the next object '
+              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
+              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
+        ('SequentialModeElement00', None, 'LinkList', 'List to specify order of optical elements to '
+              f'consider during ray tracing. Rays will not collide with anything but the next object '
+              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
+              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
       ])
     ]:
       for name, default, kind, tooltip in entries:

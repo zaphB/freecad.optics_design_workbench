@@ -10,7 +10,7 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 from .processes import *
 from .results_store import *
-
+from . import tracing_cache
 
 def makeGoodRandomSeed():
   '''

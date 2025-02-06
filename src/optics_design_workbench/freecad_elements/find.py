@@ -43,17 +43,31 @@ def lightSources():
       yield obj
 
 
-def relevantOpticalObjects(lightSource=None):
+def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
   '''
   yield all optical objects in project
   '''
+  # prepare sequential mode element lists
+  _sett = activeSimulationSettings()
+  sequentialModeList = _sett.Proxy.getTracingSequence(_sett)
+  sequentialModeEnable = _sett.SequentialMode
+  currentObjectsOfSequence = []
+  if sequenceIndex is not None and sequenceIndex < len(sequentialModeList):
+    currentObjectsOfSequence = sequentialModeList[sequenceIndex]
+
+  # prepare ignore lists
   ignoreList = []
   if lightSource:
     ignoreList = lightSource.IgnoredOpticalElements
+
+  # loop trough all objects and yield suitable objects
   for obj in _allObjects():
     if ( obj.TypeId == 'App::LinkGroupPython'
           and isinstance(obj.Proxy, optical_group.OpticalGroupProxy)
-          and obj not in ignoreList):
+          and obj not in ignoreList
+          and (not sequentialModeEnable
+                or sequenceIndex is None
+                or obj in currentObjectsOfSequence)):
       yield obj
 
 

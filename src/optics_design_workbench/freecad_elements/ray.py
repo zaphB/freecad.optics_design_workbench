@@ -16,40 +16,8 @@ from numpy import *
 import time
 
 from . import find
+from ..simulation.tracing_cache import *
 from .common import *
-
-
-# store all BoundBox, Shapes and Faces in LUTs forever to cache them, 
-# because accessing them via attribute like .BoundBox, .Shape, .Faces 
-# creates a new C++ objects, which are not freed properly and cause 
-# memory leaks. This ugly workaround can hopefully be removed one day.
-_SHAPES_LUT = {}
-_FACES_LUT = {}
-_BOUND_BOX_LUT = {}
-
-def getShape(obj):
-  # fetch and cache Shape
-  if obj not in _SHAPES_LUT.keys():
-    _SHAPES_LUT[obj] = obj.Shape
-  return _SHAPES_LUT[obj]
-
-def getFaces(obj):
-  # fetch and cache Faces
-  if obj not in _FACES_LUT.keys():
-    _FACES_LUT[obj] = obj.Faces
-  return _FACES_LUT[obj]
-
-def getBoundBox(obj):
-  # fetch and cache BoundBox
-  if obj not in _BOUND_BOX_LUT.keys():
-    _BOUND_BOX_LUT[obj] = obj.BoundBox
-  return _BOUND_BOX_LUT[obj]
-
-def clearBoundBoxCache():
-  global _SHAPES_LUT, _FACES_LUT, _BOUND_BOX_LUT
-  _SHAPES_LUT = {}
-  _FACES_LUT = {}
-  _BOUND_BOX_LUT = {}
 
 
 class Ray():
@@ -94,6 +62,7 @@ class Ray():
     prevMedium, currentMedium = None, None
     prevPower, currentPower = self.initPower, self.initPower
     colorChange = None
+    sequenceIndex = 0
     while True:
       # this loop may run for quite some time, keep GUI responsive by handling events
       keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -104,7 +73,9 @@ class Ray():
       numIntersections += 1
 
       # find next intersection
-      intersect = self.findNearestIntersection(currentPoint, currentDirection, maxRayLength=maxRayLength)
+      intersect = self.findNearestIntersection(currentPoint, currentDirection, 
+                                               maxRayLength=maxRayLength, 
+                                               sequenceIndex=sequenceIndex)
       if intersect is None:
         # if no intersection is found yield segment with maxLength and exit loop
         yield ((currentPoint, currentPoint + currentDirection/currentDirection.Length*maxRayLength), 
@@ -138,6 +109,9 @@ class Ray():
       if obj.OpticalType == 'Mirror':
         currentDirection = self.mirror(currentDirection, normal)
         currentPower *= obj.Reflectivity
+
+        # mirrors have exactly one reflection in sequential mode
+        sequenceIndex += 1
            
       # hit lens: direction is altered according to Snells law,
       # medium is changed depending on whether left or entered the lens
@@ -168,14 +142,19 @@ class Ray():
         # set current medium to vacuum
         if not isEntering and not isTotalReflection:
           currentMedium = None
-            
+
+          # increment sequence index only after ray left lens 
+          # (without internal reflection)
+          sequenceIndex += 1
+
       # hit absorber: intensity is changed / ray is ended if intensity below min
       elif obj.OpticalType == 'Absorber':
         currentPower = 0
+        sequenceIndex += 1
 
       # hit vacuum: do nothing at all to direction / intensity
       elif obj.OpticalType == 'Vacuum':
-        pass
+        sequenceIndex += 1
             
       # end if beam died
       if currentPower < powerTol:
@@ -188,7 +167,7 @@ class Ray():
         distTol = float(settings.DistanceTolerance)
     return max([distTol, 1e-6])
 
-  def findNearestIntersection(self, start, direction, maxRayLength, distTol=None):
+  def findNearestIntersection(self, start, direction, maxRayLength, distTol=None, sequenceIndex=None):
     '''
     Find the closest relevant optical object intersecting with the ray
     of given start and direction. Start and direction are expected to be
@@ -200,7 +179,7 @@ class Ray():
     intersects = []
     
     # loop through all relevant optical groups
-    for group in find.relevantOpticalObjects(self.lightSource):
+    for group in find.relevantOpticalObjects(self.lightSource, sequenceIndex=sequenceIndex):
 
       # this loop may run for quite some time, keep GUI responsive by handling events
       keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -208,7 +187,7 @@ class Ray():
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
       if hasattr(group, 'Shape'):
-        sbb = getBoundBox(getShape(group))
+        sbb = cachedBoundBox(cachedShape(group))
         #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
         if ( ( not isfinite(maxRayLength)
                 or any([(sbb.getPoint(i)-start).Length
@@ -217,13 +196,13 @@ class Ray():
             and sbb.intersect(start, direction) ):
 
           # loop through all faces
-          for face in getFaces(getShape(group)):
+          for face in cachedFaces(cachedShape(group)):
 
             # this loop may run for quite some time, keep GUI responsive by handling events
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
-            fbb = getBoundBox(face)
+            fbb = cachedBoundBox(face)
             fbb.enlarge(distTol)
             if fbb.intersect(start, direction):
 
