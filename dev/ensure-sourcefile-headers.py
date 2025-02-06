@@ -13,7 +13,7 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 """.strip()
 
 FILENAME_BLACKLIST = ('setup.py',)
-DIRNAME_BLACKLIST  = ('.git', 'dev', 'build', 'releases', 'container-home')
+DIRNAME_BLACKLIST  = ('.venv', 'site-packages', '.git', 'dev', 'build', 'releases', 'container-home')
 SRC_SUFFIXES       = ('.py',)
 
 def conf(msg, default=None):

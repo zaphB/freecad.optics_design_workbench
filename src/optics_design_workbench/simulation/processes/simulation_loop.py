@@ -47,11 +47,11 @@ from ... import freecad_elements
 from ... import gui_windows
 from ... import io
 from .. import results_store
+from .. import tracing_cache
 from . import worker_process
 
 
-_TRACEMALLOC_INTERVAL = 600
-#_TRACEMALLOC_INTERVAL = inf
+_TRACEMALLOC_INTERVAL = 60*60
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
 _BACKGROUND_PROCESSES = []
@@ -222,8 +222,7 @@ def runSimulation(action, slaveInfo={}):
   t0 = time.time()
 
   # reset bound box cache to prevent outdated stuff from prevailing
-  freecad_elements.ray.clearBoundBoxCache()
-  freecad_elements.generic_source.clearViewObjectCache()
+  tracing_cache.cacheClear()
 
   # setup random seeds to ensure good randomness across all workers and threads
   setupRandomSeed()
@@ -371,7 +370,7 @@ def runSimulation(action, slaveInfo={}):
       # start memory profiling
       if isfinite(_TRACEMALLOC_INTERVAL):
         tracemalloc.start()
-        lastTracemallocReport = 0
+        lastTracemallocReport = time.time()
 
       while True:
         # do ray-tracing for all light sources
