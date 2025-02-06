@@ -632,7 +632,7 @@ def _rawFolders(basePath='.'):
 
 def rawFolders(basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)
-  return sorted([os.path.relpath(f'{basePath}/{f}') for f in folders])
+  return RawFolderRange( sorted([os.path.relpath(f'{basePath}/{f}') for f in folders]) )
 
 def rawFolderByIndex(index=-1, basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)
@@ -649,6 +649,35 @@ def rawFolderByIndex(index=-1, basePath='.'):
 @functools.wraps(rawFolderByIndex)
 def latestRawFolder(**kwargs):
   return rawFolderByIndex(index=-1, **kwargs)
+
+def _updateResultEntry(result, key, value):
+  v = value
+  k = key
+
+  # key not yet existing: just save
+  if k not in result.keys():
+    result[k] = v
+
+  # string + string = string if identical, else list of two strings
+  elif type(v) in (str, str_) and type(result) in (str, str_):
+    if v == result[k]:
+      pass
+    else:
+      result[k] = [result[k], v]
+
+  # string + list = add string to list if not existing yet
+  elif type(v) in (str, str_) and type(result) not in (str, str_) and hasattr(result[k], '__iter__'):
+    if v not in result[k]:
+      result[k] = list(result[k]) + [v]
+
+  # list/array + list/array = concatenate
+  elif len(result[k]) == 0:
+    result[k] = v
+  elif len(v) == 0:
+    pass
+  else:
+    result[k] = concatenate([result[k], v], axis=0)
+
 
 class RawFolder:
   '''
@@ -670,6 +699,9 @@ class RawFolder:
 
   def __str__(self):
     return f'<RawFolder {os.path.basename(self._path)}/ UID={self._uid}>'
+
+  def path(self):
+    return os.path.relpath(self._path)
 
   def reload():
     self.tree.cache_clear()
@@ -738,28 +770,41 @@ class RawFolder:
       else:
         # merge hitData content with result dict
         for k, v in hitData.items():
+          _updateResultEntry(result, k, v)
 
-          # key not yet existing: just save
-          if k not in result.keys():
-            result[k] = v
+    return result
 
-          # string + string = string if identical, else list of two strings
-          elif type(v) in (str, str_) and type(result) in (str, str_):
-            if v == result[k]:
-              pass
-            else:
-              result[k] = [result[k], v]
+class RawFolderRange:
+  def __init__(self, paths):
+    self._paths = [p.path() if isinstance(p, RawFolder) else p for p in paths]
+  
+  def __iter__(self):
+    return [RawFolder(p) for p in self._paths].__iter__()
 
-          # string + list = add string to list if not existing yet
-          elif type(v) in (str, str_) and type(result) not in (str, str_) and hasattr(result[k], '__iter__'):
-            if v not in result[k]:
-              result[k] = list(result[k]) + [v]
+  def __len__(self):
+    return len(self._paths)
 
-          # list/array + list/array = concatenate
-          elif len(result[k]) == 0:
-            result[k] = v
-          elif len(v) == 0:
-            pass
-          else:
-            result[k] = concatenate([result[k], v], axis=0)
+  def __getitem__(self, i):
+    selectedPaths = self._paths[i]
+    if type(selectedPaths) in (str, str_):
+      return RawFolder(selectedPaths)
+    return RawFolderRange(selectedPaths)
+
+  def paths(self):
+    return [os.path.relpath(p) for p in self._paths]
+
+  @functools.wraps(RawFolder.loadHits)
+  def loadHits(self, *args, **kwargs):
+    result = {}
+    for res in [r.loadHits(*args, **kwargs) for r in self]:
+      for k, v in res.items():
+        _updateResultEntry(result, k, v)
+    return result
+
+  @functools.wraps(RawFolder.loadRays)
+  def loadRays(self, *args, **kwargs):
+    result = {}
+    for res in [r.loadHits(*args, **kwargs) for r in self]:
+      for k, v in res.items():
+        _updateResultEntry(result, k, v)
     return result
