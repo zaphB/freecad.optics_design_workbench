@@ -56,7 +56,7 @@ class FreecadProperty:
     return self.__str__()
 
   def __str__(self):
-    return f'<FreecadProperty {os.path.basename(self._doc._path)}: {self._obj}.{self._path}>'
+    return f'<FreecadProperty {self._obj}.{self._path}, value: {self.getStr()}>'
 
   def _freecadShellRepr(self):
     return f'App.activeDocument().getObject("{self._obj}").{self._path}'
@@ -73,7 +73,11 @@ class FreecadProperty:
         )) != 'success'):
       raise ValueError(f'property {self} does not exist')
 
+  # ----------------------------------
+  # ITEM AND ATTRIBUTE ACCESS
+
   def __setattr__(self, key, value):
+    print(f'  {self._freecadShellRepr()}.{key} = {value}')
     if ((out:=self._doc.query(
             f'try: ',
             f'  {self._freecadShellRepr()}.{key} = {value}',
@@ -88,6 +92,27 @@ class FreecadProperty:
   def __getattr__(self, key):
     return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}')
 
+  def __setitem__(self, key, value):
+    if ((out:=self._doc.query(
+            f'try: ',
+            f'  {self._freecadShellRepr()}[{repr(key)}] = {value}',
+            f'except Exception: ',
+            f'  print("failed") ',
+            f'else: ',
+            f'  print("success")', 
+            expect=['failed', 'success']
+        )) != 'success'):
+      raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
+
+  def __getitem__(self, key):
+    return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]')
+
+  def __len__(self):
+    return int( self._doc.query( f'len( {self._freecadShellRepr()} )' ) )
+
+  def __iter__(self):
+    return iter([self[i] for i in range(len(self))])
+
   def __call__(self, *args, **kwargs):
     argsStr = ''
     if len(args):
@@ -98,11 +123,29 @@ class FreecadProperty:
       argsStr += f'**{kwargs}'
     return FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})')
 
-  def get(self):
+  def getStr(self):
     return self._doc.query(self._freecadShellRepr())
 
+  def getFloat(self):
+    return float(self.getStr())
+  
+  def getInt(self):
+    return float(self.getStr())
 
-class FreecadObject:
+  def get(self):
+    _str = self.getStr()
+    try:
+      return eval(_str)
+    except Exception:
+      return _str
+
+  # ----------------------------------
+  # CUSTOM ATTRIBUTES AND METHODS
+  def getConstraintsByName(self):
+    return { c.Name.get(): c for i, c in enumerate(self.Constraints) if c.Name.strip() }
+
+
+class FreecadObject(FreecadProperty):
   '''
   FreecadObject represents an object from the document tree and can be created from
   normal python shells without any connection to FreeCAD. It can be read from and
@@ -113,9 +156,6 @@ class FreecadObject:
     self.__dict__['_doc'] = doc
     self.__dict__['_obj'] = obj
     self._ensureExists()
-
-  def __repr__(self):
-    return self.__str__()
 
   def __str__(self):
     return f'<FreecadObject {os.path.basename(self._doc._path)}: {self._obj}>'
@@ -141,9 +181,6 @@ class FreecadObject:
 
   def __getattr__(self, key):
     return FreecadProperty(self._doc, self._obj, key)
-
-  def get(self):
-    return self._doc.query(self._freecadShellRepr())
 
 
 class FreecadDocument:
