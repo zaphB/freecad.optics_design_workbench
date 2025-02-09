@@ -48,10 +48,12 @@ def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
   yield all optical objects in project
   '''
   # prepare sequential mode element lists
-  _sett = activeSimulationSettings()
-  sequentialModeList = _sett.Proxy.getTracingSequence(_sett)
-  sequentialModeEnable = _sett.SequentialMode
+  sequentialModeEnable = False
+  sequentialModeList = []
   currentObjectsOfSequence = []
+  if _sett := activeSimulationSettings():
+    sequentialModeEnable = _sett.SequentialMode
+    sequentialModeList = _sett.Proxy.getTracingSequence(_sett)
   if sequenceIndex is not None and sequenceIndex < len(sequentialModeList):
     currentObjectsOfSequence = sequentialModeList[sequenceIndex]
 

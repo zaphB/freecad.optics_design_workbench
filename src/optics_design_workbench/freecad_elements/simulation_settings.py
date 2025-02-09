@@ -195,6 +195,28 @@ class MakeSimulationSettings:
               f'consider during ray tracing. Rays will not collide with anything but the next object '
               f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
               f'sequential mode, i.e. rays can collide with any optical object in the project.'),
+      ]),
+      ('OpticalSimulationMetadataSettings', [
+        ('StoreHitInitPoint', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitDirection', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitPower', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitWavelength', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitPhi', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitTheta', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitRayIndex', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitFanIndex', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitTotalFanCount', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitTotalRaysInFan', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
       ])
     ]:
       for name, default, kind, tooltip in entries:

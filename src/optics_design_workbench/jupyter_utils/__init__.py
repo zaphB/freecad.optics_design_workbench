@@ -10,4 +10,5 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 from .files import *
 from .progress import *
-from .histograms import *
+from .point_clouds import *
+from .fan_math import *

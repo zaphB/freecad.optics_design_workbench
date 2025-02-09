@@ -17,8 +17,9 @@ dynamic = ["version"]
 dependencies = [
   "numpy>1.24.4", 
   "scipy", 
-  "matplotlib", 
   "sympy", 
+  "matplotlib", 
+  "seaborn",
   "atomicwrites",
   "PySide6",
 ]

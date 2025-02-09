@@ -40,10 +40,19 @@ def setupProgressTracker(**kwargs):
   # quit existing progress tracker if any
   if _GLOBAL_PROGRESS_TRACKER is not None and not _GLOBAL_PROGRESS_TRACKER._isQuit:
     _GLOBAL_PROGRESS_TRACKER.quit()
+  
+  # make sure new progress tracker is silent if older one was silent
+  if _GLOBAL_PROGRESS_TRACKER is not None and _GLOBAL_PROGRESS_TRACKER._silent:
+    kwargs.update(dict(silent=True))
+
+  # create new progress tracker
   _GLOBAL_PROGRESS_TRACKER = _ProgressTacker(**kwargs)
 
   # return global instance
   return _GLOBAL_PROGRESS_TRACKER
+
+def silenceProgressTracker():
+  setupProgressTracker(silent=True)
 
 def progressTrackerInstance(**kwargs):
   '''
@@ -54,8 +63,12 @@ def progressTrackerInstance(**kwargs):
   return _GLOBAL_PROGRESS_TRACKER
 
 
+def clearCellOutput():
+  IPython.display.clear_output(True)
+
+
 class _ProgressTacker:
-  def __init__(self, doc=None, totalSimulations=None):
+  def __init__(self, doc=None, totalSimulations=None, silent=False):
     self._doc = doc
     self._simulationNo = 0
     self._totalSimulations = totalSimulations
@@ -65,6 +78,7 @@ class _ProgressTacker:
     self._t = threading.Thread(target=self.updateLoop)
     self._t0 = time.time()
     self._previousProgressDict = None
+    self._silent = silent
     self.resultsFolder = None
     self.start()
 
@@ -73,7 +87,7 @@ class _ProgressTacker:
     # erase exception stacktraces that may be raised in the very first few
     # iterations of a simulation loop in the jupyter cell. 
     self._clearCallCount += 1
-    if hasIPython and self._clearCallCount > 5:
+    if not self._silent and hasIPython and self._clearCallCount > 5:
       IPython.display.clear_output(True)
 
   def start(self):
@@ -83,6 +97,9 @@ class _ProgressTacker:
     self._t0 = time.time()
 
   def update(self, displayTiming=True):
+    if self._silent:
+      return
+
     if self.resultsFolder:
       try:
         latest = sorted([f for f in os.listdir(f'{self.resultsFolder._path}/progress')

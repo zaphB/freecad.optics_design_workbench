@@ -39,6 +39,36 @@ for sig in (signal.SIGHUP, signal.SIGTERM):
 _ALL_DOCUMENTS = []
 
 
+class FreecadPropertyDict:
+  def __init__(self, d):
+    self._d = d
+
+  def __str__(self):
+    return repr(self)
+
+  def __repr__(self):
+    return f'<FreecadPropertyDict {repr(self._d)} >'
+
+  def __getattr__(self, k):
+    return getattr(self._d, k)
+
+  def __getitem__(self, k):
+    return self._d[k]
+
+  def __setitem__(self, k, v):
+    self._d[k]._set(v)
+
+
+class FreecadConstraintDict(FreecadPropertyDict):
+  def __init__(self, constraintDict, indexDict, sketch):
+    self._d = constraintDict
+    self._indexDict = indexDict
+    self._sketch = sketch
+
+  def __setitem__(self, k, v):
+    self._sketch.setDatum(self._indexDict[k], v)
+
+
 class FreecadProperty:
   '''
   FreecadProperty represents a property of an object in the document tree and can 
@@ -56,7 +86,7 @@ class FreecadProperty:
     return self.__str__()
 
   def __str__(self):
-    return f'<FreecadProperty {os.path.basename(self._doc._path)}: {self._obj}.{self._path}>'
+    return f'<FreecadProperty {self._obj}.{self._path}, value: {self.getStr()}>'
 
   def _freecadShellRepr(self):
     return f'App.activeDocument().getObject("{self._obj}").{self._path}'
@@ -73,20 +103,40 @@ class FreecadProperty:
         )) != 'success'):
       raise ValueError(f'property {self} does not exist')
 
-  def __setattr__(self, key, value):
+  # ----------------------------------
+  # ITEM AND ATTRIBUTE ACCESS
+
+  def _set(self, value, lvalSuffix=''):
+    setterLine = f'  {self._freecadShellRepr()}{lvalSuffix} = {value}'
+    #print(f'running setter line: {setterLine.strip()}')
     if ((out:=self._doc.query(
             f'try: ',
-            f'  {self._freecadShellRepr()}.{key} = {value}',
+            setterLine,
             f'except Exception: ',
             f'  print("failed") ',
             f'else: ',
             f'  print("success")', 
             expect=['failed', 'success']
         )) != 'success'):
-      raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
+      raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
+
+  def __setattr__(self, key, value):
+    self._set(value, lvalSuffix=f'.{key}')
 
   def __getattr__(self, key):
     return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}')
+
+  def __setitem__(self, key, value):
+    self._set(value, lvalSuffix=f'[{repr(key)}]')
+
+  def __getitem__(self, key):
+    return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]')
+
+  def __len__(self):
+    return int( self._doc.query( f'len( {self._freecadShellRepr()} )' ) )
+
+  def __iter__(self):
+    return iter([self[i] for i in range(len(self))])
 
   def __call__(self, *args, **kwargs):
     argsStr = ''
@@ -98,11 +148,34 @@ class FreecadProperty:
       argsStr += f'**{kwargs}'
     return FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})')
 
-  def get(self):
+  def getStr(self):
     return self._doc.query(self._freecadShellRepr())
 
+  def getFloat(self):
+    return float(self.getStr())
+  
+  def getInt(self):
+    return float(self.getStr())
 
-class FreecadObject:
+  def get(self):
+    _str = self.getStr()
+    try:
+      return eval(_str)
+    except Exception:
+      return _str
+
+  # ----------------------------------
+  # CUSTOM ATTRIBUTES AND METHODS
+  def getConstraintsByName(self):
+    indexAndConstraints = { c.Name.get(): (i, c)
+                                for i, c in enumerate(self.Constraints)
+                                                    if c.Name.strip() }
+    return FreecadConstraintDict(constraintDict={k:v[1] for k,v in indexAndConstraints.items()},
+                                 indexDict={k:v[0] for k,v in indexAndConstraints.items()},
+                                 sketch=self)
+
+
+class FreecadObject(FreecadProperty):
   '''
   FreecadObject represents an object from the document tree and can be created from
   normal python shells without any connection to FreeCAD. It can be read from and
@@ -113,9 +186,6 @@ class FreecadObject:
     self.__dict__['_doc'] = doc
     self.__dict__['_obj'] = obj
     self._ensureExists()
-
-  def __repr__(self):
-    return self.__str__()
 
   def __str__(self):
     return f'<FreecadObject {os.path.basename(self._doc._path)}: {self._obj}>'
@@ -141,9 +211,6 @@ class FreecadObject:
 
   def __getattr__(self, key):
     return FreecadProperty(self._doc, self._obj, key)
-
-  def get(self):
-    return self._doc.query(self._freecadShellRepr())
 
 
 class FreecadDocument:
@@ -277,7 +344,7 @@ class FreecadDocument:
 
       # write command
       self.write(f'from freecad.optics_design_workbench import simulation',
-                f'simulation.runSimulation(action="{action}")')
+                 f'simulation.runSimulation(action="{action}")')
 
       # start progress tracker background thread
       progressTracker = progress.progressTrackerInstance(doc=self)
@@ -311,7 +378,7 @@ class FreecadDocument:
               if endIf(_newFolder):
                 with open(f'{self._resultsPath}/simulation-is-done', 'w') as _:
                   pass
-              endIfDuration = time.time()-t0
+              endIfDuration = time.time()-_t0
 
           # if random number appears in output the simulation must be done
           for l in self.read():
@@ -329,7 +396,7 @@ class FreecadDocument:
         # presence of simulation-canceled file or absence of simulation-is-done file indicates
         # that simulation was ended by an exception: raise this exception
         if (os.path.exists(f'{self._resultsPath}/simulation-is-canceled') 
-            or not os.path.exists(f'{self._resultsPath}/simulation-is-done')):
+                or not os.path.exists(f'{self._resultsPath}/simulation-is-done')):
           stacktraceGuess = ''
           if len((''.join(possibleStacktrace)).strip()):
             stacktraceGuess = f'; I guess it has something to do with this output:\n\n'+'\n'.join(possibleStacktrace)
@@ -636,13 +703,13 @@ def _rawFolders(basePath='.'):
     raise ValueError(f'failed to find "raw" folder in any parent directory of {basePath=}')
 
   # get all simulation run folders
-  folders = [d for d in os.listdir(basePath) if d.startswith('simulation-run-')]
+  folders = sorted([d for d in os.listdir(basePath) if d.startswith('simulation-run-')])
   indices = [int(d[len('simulation-run-'):]) for d in folders]
   return basePath, folders, indices
 
 def rawFolders(basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)
-  return RawFolderRange( sorted([os.path.relpath(f'{basePath}/{f}') for f in folders]) )
+  return RawFolderRange( [os.path.relpath(f'{basePath}/{f}') for f in folders] )
 
 def rawFolderByIndex(index=-1, basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)

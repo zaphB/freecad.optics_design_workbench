@@ -44,11 +44,16 @@ import tracemalloc
 
 from ...detect_pyside import *
 from ... import freecad_elements
-from ... import gui_windows
 from ... import io
 from .. import results_store
 from .. import tracing_cache
 from . import worker_process
+
+# fail gently if gui_windows module cannot imported
+try:
+  from ... import gui_windows
+except Exception:
+  gui_windows = None  
 
 
 _TRACEMALLOC_INTERVAL = 60*60
@@ -323,7 +328,7 @@ def runSimulation(action, slaveInfo={}):
                                               endAfterRays=endAfterRays, endAfterHits=endAfterHits)
       
       # connect progress window to this store if more than one iteration is requested
-      if isMasterProcess() and continuous:
+      if isMasterProcess() and continuous and gui_windows:
         gui_windows.showProgressWindow(store)
 
     ##########################################################################################
@@ -420,7 +425,10 @@ def runSimulation(action, slaveInfo={}):
 
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
         if not continuous:
-          break
+          raise freecad_elements.SimulationEnded()
+ 
+      # this point should never be reached under normal conditions
+      raise RuntimeError('simulation loop ended unexpectedly')
 
     ##########################################################################################
     # mainloop B: do not do simulation work if we are the master and draw is False, just
@@ -458,7 +466,7 @@ def runSimulation(action, slaveInfo={}):
   except freecad_elements.SimulationEnded:
     pass
 
-  # any other error cancels simulation and is reraised
+  # any other error cancels simulation and is re-raised
   except Exception:
     setIsCanceled(True)
     io.err(traceback.format_exc())
