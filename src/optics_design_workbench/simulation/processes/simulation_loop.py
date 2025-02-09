@@ -44,11 +44,16 @@ import tracemalloc
 
 from ...detect_pyside import *
 from ... import freecad_elements
-from ... import gui_windows
 from ... import io
 from .. import results_store
 from .. import tracing_cache
 from . import worker_process
+
+# fail gently if gui_windows module cannot imported
+try:
+  from ... import gui_windows
+except Exception:
+  gui_windows = None  
 
 
 _TRACEMALLOC_INTERVAL = 60*60
@@ -323,7 +328,7 @@ def runSimulation(action, slaveInfo={}):
                                               endAfterRays=endAfterRays, endAfterHits=endAfterHits)
       
       # connect progress window to this store if more than one iteration is requested
-      if isMasterProcess() and continuous:
+      if isMasterProcess() and continuous and gui_windows:
         gui_windows.showProgressWindow(store)
 
     ##########################################################################################
