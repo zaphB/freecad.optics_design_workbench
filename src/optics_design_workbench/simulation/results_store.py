@@ -263,7 +263,7 @@ class SimulationResults:
     if self.hits is not None:
       # assemble dictionaries to dump
       results = {}
-      for source, obj, p, d, power, isEntering in self.hits:
+      for source, obj, p, d, power, isEntering, metadata in self.hits:
         # create entry in results dict if needed
         fname = self._makeFilename(kind='hits', source=source, obj=obj)
         if fname not in results.keys():
@@ -272,16 +272,41 @@ class SimulationResults:
                                 powers=[], isEntering=[])
 
         # append data to entry
-        results[fname]['points'].append(list(p))
-        results[fname]['directions'].append(list(d))
+        results[fname]['points'].append(p)
+        results[fname]['directions'].append(d)
         results[fname]['powers'].append(power)
         results[fname]['isEntering'].append(int(isEntering))
+
+        # extend metadata entries, make sure length matches main data arrays
+        currentLen = len(results[fname]['points'])-1
+        for k, v in metadata.items():
+          if k not in results[fname].keys():
+            results[fname][k] = [nan]*currentLen
+          if len(results[fname][k]) < currentLen:
+            results[fname][k].extend([nan]*(currentLen-len(results[fname][k])))
+          results[fname][k].append(v)
 
       # loop through create fnames, convert to numpy arrays and dump
       for fname, res in results.items():
         with open(fname, 'wb') as f:
-          for k in 'points directions powers isEntering'.split():
-            res[k] = array(res[k]) 
+          for k in res.keys():
+            if type(res[k]) is list:
+              # if nans exist, try to find a non-nan element. If that element has a 
+              # shape, make sure nans are replaced by nan-arrays of the same shape
+              if nan in res[k]:
+                for _v in res[k]:
+                  if not isnan(_v):
+                    break
+                if not isnan(_v) and len(shape(_v)):
+                  for i in range(len(res[k])):
+                    if isnan(res[k]):
+                      res[k] = ones(shape(_v))*nan
+
+              # try to convert to array and warn if it failed
+              try:
+                res[k] = array(res[k]) 
+              except Exception:
+                io.warn(f'failed to convert key {k} to array: {res[k]}')
           pickle.dump(res, f)
 
       # clear list
@@ -463,13 +488,13 @@ class SimulationResults:
     # return single ray results instance
     return ray
 
-  def addRayHit(self, source, obj, point, direction, power, isEntering):
+  def addRayHit(self, source, obj, point, direction, power, isEntering, metadata):
     # make sure instance was not yet cleaned up
     self._raiseIfCleanedUp()
 
     if self.hits is None:
       self.hits = []
-    self.hits.append([source, obj, point, direction, power, isEntering])
+    self.hits.append([source, obj, point, direction, power, isEntering, metadata])
     self.writeDiskIfNeeded()
 
   def cleanup(self):

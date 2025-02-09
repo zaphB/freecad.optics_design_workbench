@@ -420,7 +420,10 @@ def runSimulation(action, slaveInfo={}):
 
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
         if not continuous:
-          break
+          raise freecad_elements.SimulationEnded()
+ 
+      # this point should never be reached under normal conditions
+      raise RuntimeError('simulation loop ended unexpectedly')
 
     ##########################################################################################
     # mainloop B: do not do simulation work if we are the master and draw is False, just
@@ -458,7 +461,7 @@ def runSimulation(action, slaveInfo={}):
   except freecad_elements.SimulationEnded:
     pass
 
-  # any other error cancels simulation and is reraised
+  # any other error cancels simulation and is re-raised
   except Exception:
     setIsCanceled(True)
     io.err(traceback.format_exc())

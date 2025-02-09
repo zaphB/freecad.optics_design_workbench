@@ -24,16 +24,19 @@ class Ray():
   '''
   Class representing an individual ray.
   '''
-  def __init__(self, lightSource, startingPoint, direction, initPower=1, wavelength=1):
+  def __init__(self, lightSource, initPoint, initDirection, 
+               initPower=1, wavelength=1, metadata={}):
     self.lightSource = lightSource
-    self.startingPoint = startingPoint
-    self.direction = direction
+    self.initPoint = initPoint
+    self.initDirection = initDirection
     self.initPower = initPower
     self.initWavelength = wavelength
+    self.metadata = metadata
   
      
   def traceRay(self, powerTol=1e-6, maxRayLength=None,
-               maxIntersections=None, store=False):
+               maxIntersections=None, store=False,
+               metadata={}):
     '''
     Find all reflection/refraction/detection points of this ray. Returns a
     generator that yields (p1,p2), power, medium tuples. p1, p2 are two
@@ -41,28 +44,51 @@ class Ray():
     is None for vacuum or the FreeCAD object if the ray is traveling through
     and optical object.
     '''
-    # calc limits
-    if find.activeSimulationSettings():
+    if _sett := find.activeSimulationSettings():
+      # calc ray length and intersection limits from settings
       if maxRayLength is None:
         maxRayLength = ( self.lightSource.MaxRayLengthScale 
-                          * find.activeSimulationSettings().MaxRayLength )
+                          * _sett.MaxRayLength )
       if maxIntersections is None:
         maxIntersections = (self.lightSource.MaxIntersectionsScale
-                              *find.activeSimulationSettings().MaxIntersections )
+                              *_sett.MaxIntersections )
+
+      # construct ray metadata dictionary according to selected properties
+      # in simulation settings
+      _enabledKeys = [k.lower()[8:] for k in _sett.__dict__.keys() 
+                          if k.startswith('StoreHit') and getattr(_sett, k)]
+      rayMetadata = dict(self.metadata)
+      rayMetadata.update(metadata)
+      rayMetadata.update(self.__dict__)
+      #print('full metadata:', rayMetadata)
+      #print('enabled keys:', _enabledKeys)
+      rayMetadata = {k:v for k,v in rayMetadata.items() 
+                                    if k.lower() in _enabledKeys }
+      #print('filtered metadata:', rayMetadata)
+
     else:
+      # setup defaults if no settings object exists
       if maxRayLength is None:
         maxRayLength = 100 * self.lightSource.MaxRayLengthScale
       if maxIntersections is None:
         maxIntersections = 10 * self.lightSource.MaxIntersectionsScale
+      
+      # default to empty metadata
+      rayMetadata = {}
+
+    # counters for total ray intersections and index of active optical 
+    # element in sequential mode
+    sequenceIndex = 0
     numIntersections = 0
-    
+
     # variables to store current state during intersection finder loop
-    prevPoint, currentPoint = self.startingPoint, self.startingPoint
-    currentDirection = self.direction
+    prevPoint, currentPoint = self.initPoint, self.initPoint
+    currentDirection = self.initDirection
     prevMedium, currentMedium = None, None
     prevPower, currentPower = self.initPower, self.initPower
     colorChange = None
-    sequenceIndex = 0
+
+    # trace loop
     while True:
       # this loop may run for quite some time, keep GUI responsive by handling events
       keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -96,7 +122,8 @@ class Ray():
       # run onHit handler of object that caused intersection
       obj.Proxy.onRayHit(source=self.lightSource, obj=obj, 
                          point=currentPoint, direction=currentDirection, 
-                         power=currentPower, isEntering=isEntering, store=store)
+                         power=currentPower, isEntering=isEntering, 
+                         metadata=rayMetadata, store=store)
 
       # set colorChange to value requested by the hit object
       if obj.ViewObject is not None and obj.ViewObject.Weight != 0:

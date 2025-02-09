@@ -39,6 +39,36 @@ for sig in (signal.SIGHUP, signal.SIGTERM):
 _ALL_DOCUMENTS = []
 
 
+class FreecadPropertyDict:
+  def __init__(self, d):
+    self._d = d
+
+  def __str__(self):
+    return repr(self)
+
+  def __repr__(self):
+    return f'<FreecadPropertyDict {repr(self._d)} >'
+
+  def __getattr__(self, k):
+    return getattr(self._d, k)
+
+  def __getitem__(self, k):
+    return self._d[k]
+
+  def __setitem__(self, k, v):
+    self._d[k]._set(v)
+
+
+class FreecadConstraintDict(FreecadPropertyDict):
+  def __init__(self, constraintDict, indexDict, sketch):
+    self._d = constraintDict
+    self._indexDict = indexDict
+    self._sketch = sketch
+
+  def __setitem__(self, k, v):
+    self._sketch.setDatum(self._indexDict[k], v)
+
+
 class FreecadProperty:
   '''
   FreecadProperty represents a property of an object in the document tree and can 
@@ -76,33 +106,28 @@ class FreecadProperty:
   # ----------------------------------
   # ITEM AND ATTRIBUTE ACCESS
 
-  def __setattr__(self, key, value):
-    print(f'  {self._freecadShellRepr()}.{key} = {value}')
+  def _set(self, value, lvalSuffix=''):
+    setterLine = f'  {self._freecadShellRepr()}{lvalSuffix} = {value}'
+    #print(f'running setter line: {setterLine.strip()}')
     if ((out:=self._doc.query(
             f'try: ',
-            f'  {self._freecadShellRepr()}.{key} = {value}',
+            setterLine,
             f'except Exception: ',
             f'  print("failed") ',
             f'else: ',
             f'  print("success")', 
             expect=['failed', 'success']
         )) != 'success'):
-      raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
+      raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
+
+  def __setattr__(self, key, value):
+    self._set(value, lvalSuffix=f'.{key}')
 
   def __getattr__(self, key):
     return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}')
 
   def __setitem__(self, key, value):
-    if ((out:=self._doc.query(
-            f'try: ',
-            f'  {self._freecadShellRepr()}[{repr(key)}] = {value}',
-            f'except Exception: ',
-            f'  print("failed") ',
-            f'else: ',
-            f'  print("success")', 
-            expect=['failed', 'success']
-        )) != 'success'):
-      raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
+    self._set(value, lvalSuffix=f'[{repr(key)}]')
 
   def __getitem__(self, key):
     return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]')
@@ -142,7 +167,12 @@ class FreecadProperty:
   # ----------------------------------
   # CUSTOM ATTRIBUTES AND METHODS
   def getConstraintsByName(self):
-    return { c.Name.get(): c for i, c in enumerate(self.Constraints) if c.Name.strip() }
+    indexAndConstraints = { c.Name.get(): (i, c)
+                                for i, c in enumerate(self.Constraints)
+                                                    if c.Name.strip() }
+    return FreecadConstraintDict(constraintDict={k:v[1] for k,v in indexAndConstraints.items()},
+                                 indexDict={k:v[0] for k,v in indexAndConstraints.items()},
+                                 sketch=self)
 
 
 class FreecadObject(FreecadProperty):
@@ -348,7 +378,7 @@ class FreecadDocument:
               if endIf(_newFolder):
                 with open(f'{self._resultsPath}/simulation-is-done', 'w') as _:
                   pass
-              endIfDuration = time.time()-t0
+              endIfDuration = time.time()-_t0
 
           # if random number appears in output the simulation must be done
           for l in self.read():
@@ -366,7 +396,7 @@ class FreecadDocument:
         # presence of simulation-canceled file or absence of simulation-is-done file indicates
         # that simulation was ended by an exception: raise this exception
         if (os.path.exists(f'{self._resultsPath}/simulation-is-canceled') 
-            or not os.path.exists(f'{self._resultsPath}/simulation-is-done')):
+                or not os.path.exists(f'{self._resultsPath}/simulation-is-done')):
           stacktraceGuess = ''
           if len((''.join(possibleStacktrace)).strip()):
             stacktraceGuess = f'; I guess it has something to do with this output:\n\n'+'\n'.join(possibleStacktrace)
@@ -673,13 +703,13 @@ def _rawFolders(basePath='.'):
     raise ValueError(f'failed to find "raw" folder in any parent directory of {basePath=}')
 
   # get all simulation run folders
-  folders = [d for d in os.listdir(basePath) if d.startswith('simulation-run-')]
+  folders = sorted([d for d in os.listdir(basePath) if d.startswith('simulation-run-')])
   indices = [int(d[len('simulation-run-'):]) for d in folders]
   return basePath, folders, indices
 
 def rawFolders(basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)
-  return RawFolderRange( sorted([os.path.relpath(f'{basePath}/{f}') for f in folders]) )
+  return RawFolderRange( [os.path.relpath(f'{basePath}/{f}') for f in folders] )
 
 def rawFolderByIndex(index=-1, basePath='.'):
   basePath, folders, indices = _rawFolders(basePath=basePath)

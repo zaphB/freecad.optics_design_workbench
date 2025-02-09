@@ -102,7 +102,7 @@ class PointSourceProxy(GenericSourceProxy):
     return parsed
 
 
-  def makeRay(self, obj, theta, phi, power=1):
+  def makeRay(self, obj, theta, phi, power=1, metadata={}):
     '''
     Create new ray object with origin and direction given in global coordinates
     '''
@@ -120,7 +120,13 @@ class PointSourceProxy(GenericSourceProxy):
     p1, p2 = lorigin, lorigin+ldirection/ldirection.Length
     p1, p2 = gpM*p1, gpM*p2
     gorigin, gdirection = p1, (p2-p1)/(p2-p1).Length
-    return ray.Ray(obj, gorigin, gdirection, initPower=power)
+
+    # build metadata dict
+    rayMetadata = dict(initPhi=phi, initTheta=theta)
+    rayMetadata.update(metadata)
+
+    # return actual ray object
+    return ray.Ray(obj, gorigin, gdirection, initPower=power, metadata=rayMetadata)
 
 
   def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
@@ -143,8 +149,9 @@ class PointSourceProxy(GenericSourceProxy):
       raysPerIteration = min([obj.RaysPerFan, maxRaysPerFan])
 
       # create obj.Fans ray fans oriented in phi0
-      for _phi in linspace(0, pi, int(min([obj.Fans, maxFanCount])+1))[:-1]:
-        for phi in (_phi, _phi+pi):
+      totalFanCount = int(min([obj.Fans, maxFanCount]))
+      for fanIndex, _phi in enumerate(obj.FanPhi0 + linspace(0, pi, totalFanCount+1)[:-1]):
+        for rayIndexSign, phi in ([1, _phi], [-1, _phi+pi]):
 
           # this loop may run for quite some time, keep GUI responsive by handling events
           keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -157,13 +164,24 @@ class PointSourceProxy(GenericSourceProxy):
                       variableDomain=self.parsedThetaDomain(obj), 
                       numericalResolution=obj.ThetaResolutionNumericMode)
           vrv.compile(phi=phi)
-          for theta in vrv.findGrid(N=raysPerIteration):
+
+          _thetas = vrv.findGrid(N=raysPerIteration)
+          totalRaysInFan = 2*len(_thetas)
+          for rayIndex, theta in enumerate(_thetas):
+
+            # skip rayIndex zero in one half of fan
+            if rayIndexSign == -1 and rayIndex == 0:
+              continue
 
             # this loop may run for quite some time, keep GUI responsive by handling events
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # add lines corresponding to this ray to total ray list
-            yield self.makeRay(obj=obj, theta=theta, phi=phi)
+            yield self.makeRay(obj=obj, theta=theta, phi=phi, 
+                               metadata=dict(fanIndex=fanIndex, 
+                                             rayIndex=rayIndex*rayIndexSign,
+                                             totalFanCount=totalFanCount,
+                                             totalRaysInFan=totalRaysInFan))
 
     # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
     elif mode == 'true' or mode == 'pseudo':
@@ -216,6 +234,7 @@ class AddPointSource(AddGenericSource):
         ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
         ('PhiResolutionNumericMode', 3, 'Integer', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
+        ('FanPhi0', 0, 'Float', 'Change this to rotate fans around optical axis.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
        ]),
     ]:
