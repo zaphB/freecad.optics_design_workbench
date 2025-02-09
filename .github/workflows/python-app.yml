@@ -22,9 +22,9 @@ jobs:
     - name: Install dependencies
       run: |
         uv venv --python=3.11
-        uv run uv pip install pytest
-        uv run uv pip install jupyter nbconvert
-        uv run uv pip install .
+        uv pip install pytest
+        uv pip install jupyter nbconvert
+        uv sync --all-extras --dev
     - name: Test with pytest
       run: |
         uv run pytest
