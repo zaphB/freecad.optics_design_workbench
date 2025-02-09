@@ -344,7 +344,7 @@ class FreecadDocument:
 
       # write command
       self.write(f'from freecad.optics_design_workbench import simulation',
-                f'simulation.runSimulation(action="{action}")')
+                 f'simulation.runSimulation(action="{action}")')
 
       # start progress tracker background thread
       progressTracker = progress.progressTrackerInstance(doc=self)

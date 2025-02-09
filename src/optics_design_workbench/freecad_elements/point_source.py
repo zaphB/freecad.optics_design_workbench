@@ -166,7 +166,7 @@ class PointSourceProxy(GenericSourceProxy):
           vrv.compile(phi=phi)
 
           _thetas = vrv.findGrid(N=raysPerIteration)
-          totalRaysInFan = 2*len(_thetas)
+          totalRaysInFan = 2*len(_thetas)-1
           for rayIndex, theta in enumerate(_thetas):
 
             # skip rayIndex zero in one half of fan

@@ -38,15 +38,18 @@ def planeProject3dPoints(points, planeNormal=None, returnZ=False):
   return array([X, Y]).T
 
 
-def detectPlaneNormal(points, maxPointCountConsidered=300, angleTol=1e-6):
+def detectPlaneNormal(points, maxPointCountConsidered=300, angleTol=1e-9):
   '''
   Find the best possible plane normal vector to project the 3D point cloud
   points to a 2D point cloud spanning a maximal area.
   '''
   checkPoints = points[::1+int(points.shape[0]/maxPointCountConsidered)]
-  phis = linspace(0, pi/2, 10)
+
+  # cover only half the unit sphere because every plane has two normal
+  # vectors (sign is ambiguous)
+  phis = linspace(0, pi, 30)
   dphi = phis[1]-phis[0]
-  thetas = linspace(0, pi/2, 10)
+  thetas = linspace(-pi/2, pi/2, 30)
   dtheta = thetas[1]-thetas[0]
   while True:
     # check all phi theta candidates and calculate expected span for them

@@ -11,7 +11,7 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 from .point_clouds import *
 
 
-def calcFanPolarHitPositions(hits):
+def calcFanPolarHitPositions(hits, **kwargs):
   # extract used arrays
   try:
     rI, fI, p, trf = hits['rayIndex'], hits['fanIndex'], hits['points'], hits['totalRaysInFan']
@@ -20,8 +20,7 @@ def calcFanPolarHitPositions(hits):
                      f'make sure you '
                      f'simulated in fan mode and enabled storing the respective metadata keys '
                      f'in the active SimulationSettings')
-
-  pXY = planeProject3dPoints(p)
+  pXY = planeProject3dPoints(p, **kwargs)
 
   # loop trough fans/rays and calculate distance, curvature etc.
   fans, rays, centerDists, missingRays, skippedRays = [], [], [], 0, 0
@@ -52,7 +51,7 @@ def calcFanPolarHitPositions(hits):
               missingRays=missingRays, skippedRays=skippedRays)
 
 
-def calcFanDensity(hits):
+def calcFanDensity(hits, **kwargs):
   # extract used arrays
   try:
     rI, fI, p, trf = hits['rayIndex'], hits['fanIndex'], hits['points'], hits['totalRaysInFan']
@@ -61,7 +60,7 @@ def calcFanDensity(hits):
                      f'make sure you '
                      f'simulated in fan mode and enabled storing the respective metadata keys '
                      f'in the active SimulationSettings')
-  pXY = planeProject3dPoints(p)
+  pXY = planeProject3dPoints(p, **kwargs)
 
   # loop trough fans/rays and calculate distance, curvature etc.
   fans, rays, neighborDists, centerDists, curvs, missingRays, skippedRays = [], [], [], [], [], 0, 0
@@ -105,7 +104,7 @@ def plotFanDensity(density):
                 columns=['fan #', 'ray #', 'distance from center',
                           'hit neighbor distance', 'hit neighbor curvature'])
   d = d.melt(id_vars=['fan #', 'ray #'])
-  g = sns.relplot(d, x='ray #', y='value', hue='fan #', palette='hls', col='variable', facet_kws=dict(sharey=False), height=3)
+  g = sns.relplot(d, x='ray #', y='value', hue='fan #', col='variable', facet_kws=dict(sharey=False), height=3)
   for ax, t in zip(g.axes.flatten(), ['distance from center', 'hit neighbor distance', 'hit neighbor curvature']):
       ax.set(title='', ylabel=t)
   g.tight_layout()
