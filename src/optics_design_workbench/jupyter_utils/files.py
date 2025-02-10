@@ -434,7 +434,7 @@ class FreecadDocument:
     progress.ALLOW_PROGRESS_TACKERS = True
 
     # launch child process - DONT load file here or it will be loaded without 
-    #                        ViewProvider objects becausee GUI is not yet up
+    #                        ViewProvider objects because GUI is not yet up
     self._p = subprocess.Popen([self._freecadExecutable, '-c'],
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL,

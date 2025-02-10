@@ -39,7 +39,7 @@ class WorkerProcess:
     self.simulationRunFolder = simulationRunFolder
     self._isRunning = True
 
-    # try to extract freecad executable path: first check APPIMAGE evironment variable,
+    # try to extract freecad executable path: first check APPIMAGE environment variable,
     # to find out if running appimage, then try executable found in sys.executable,
     # if that does not look like a freecad executable let shell decide
     if freecadPath := os.environ.get('APPIMAGE', None):

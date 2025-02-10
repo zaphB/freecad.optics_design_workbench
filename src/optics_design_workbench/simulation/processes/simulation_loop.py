@@ -490,7 +490,7 @@ def runSimulation(action, slaveInfo={}):
       lastPrint = time.time()
       while isWorkerRunning():
 
-        # keep GUI repsonsive and limit loop speed
+        # keep GUI responsive and limit loop speed
         time.sleep(1e-2)
         freecad_elements.keepGuiResponsive()
 
