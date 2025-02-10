@@ -23,6 +23,7 @@ import pickle
 from .. import io
 from ..simulation import processes
 from . import progress
+from . import hits
 
 # signal handler that kills all running freecad processes
 # in case this process is killed
@@ -91,24 +92,31 @@ class FreecadProperty:
   def _freecadShellRepr(self):
     return f'App.activeDocument().getObject("{self._obj}").{self._path}'
 
-  def _ensureExists(self):
-    if ((out:=self._doc.query(
-            f'try: ',
-            f'  {self._freecadShellRepr()}',
-            f'except Exception: ',
-            f'  print("failed") ',
-            f'else: ',
-            f'  print("success")',
-            expect=['failed', 'success']
-        )) != 'success'):
-      raise ValueError(f'property {self} does not exist')
+  def _ensureExists(self, isCall=False):
+    if isCall:
+      io.verb(f'running call line: {self._freecadShellRepr()}')
+    try:
+      if ((out:=self._doc.query(
+              f'try: ',
+              f'  {self._freecadShellRepr()}',
+              f'except Exception: ',
+              f'  print("failed") ',
+              f'else: ',
+              f'  print("success")',
+              expect=['failed', 'success']
+          )) != 'success'):
+        raise ValueError(f'property {self} does not exist')
+        
+    except Exception:
+      io.warn(f'running ensureExists line failed: {self._freecadShellRepr()}')
+      raise
 
   # ----------------------------------
   # ITEM AND ATTRIBUTE ACCESS
 
   def _set(self, value, lvalSuffix=''):
     setterLine = f'  {self._freecadShellRepr()}{lvalSuffix} = {value}'
-    #print(f'running setter line: {setterLine.strip()}')
+    io.verb(f'running setter line: {setterLine.strip()}')
     if ((out:=self._doc.query(
             f'try: ',
             setterLine,
@@ -146,7 +154,8 @@ class FreecadProperty:
       if len(argsStr):
         argsStr += ', '
       argsStr += f'**{kwargs}'
-    return FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})')
+    p = FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})')
+    p._ensureExists(isCall=True)
 
   def getStr(self):
     return self._doc.query(self._freecadShellRepr())
@@ -167,9 +176,9 @@ class FreecadProperty:
   # ----------------------------------
   # CUSTOM ATTRIBUTES AND METHODS
   def getConstraintsByName(self):
-    indexAndConstraints = { c.Name.get(): (i, c)
+    indexAndConstraints = { c.Name.get().strip(): (i, c)
                                 for i, c in enumerate(self.Constraints)
-                                                    if c.Name.strip() }
+                                                    if c.Name.get().strip() }
     return FreecadConstraintDict(constraintDict={k:v[1] for k,v in indexAndConstraints.items()},
                                  indexDict={k:v[0] for k,v in indexAndConstraints.items()},
                                  sketch=self)
@@ -829,7 +838,7 @@ class RawFolder:
         raise ValueError(f'invalid tree node {_node}')
 
   def loadHits(self, pattern):
-    return self._load(pattern=pattern, kind='hits')
+    return hits.Hits(self._load(pattern=pattern, kind='hits'))
 
   def loadRays(self, pattern):
     return self._load(pattern=pattern, kind='rays')

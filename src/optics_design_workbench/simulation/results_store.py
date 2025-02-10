@@ -52,7 +52,8 @@ def getLatestRunIndex():
   folderName = getResultsFolderPath()+'/raw'
   if os.path.exists(folderName):
     safeInt = lambda x: int(x) if x.isnumeric() else -1 
-    return max([safeInt(f[-4:]) for f in os.listdir(folderName) 
+    return max([safeInt(f[len('simulation-run-'):])
+                            for f in os.listdir(folderName) 
                                     if f.startswith('simulation-run-')]
                   +[-1])
   return -1
