@@ -77,11 +77,11 @@ class FreecadProperty:
   be read from and written to as if it was the real freecad property. All 
   read/writes will be forwarded to the running Freecad child process.
   '''
-  def __init__(self, doc, obj, path):
+  def __init__(self, doc, obj, path, isCall=False):
     self.__dict__['_doc'] = doc
     self.__dict__['_obj'] = obj
     self.__dict__['_path'] = path
-    self._ensureExists()
+    self._ensureExists(isCall=isCall)
 
   def __repr__(self):
     return self.__str__()
@@ -154,8 +154,7 @@ class FreecadProperty:
       if len(argsStr):
         argsStr += ', '
       argsStr += f'**{kwargs}'
-    p = FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})')
-    p._ensureExists(isCall=True)
+    p = FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})', isCall=True)
 
   def getStr(self):
     return self._doc.query(self._freecadShellRepr())
