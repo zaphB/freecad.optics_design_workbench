@@ -62,7 +62,7 @@ def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
   if lightSource:
     ignoreList = lightSource.IgnoredOpticalElements
 
-  # loop trough all objects and yield suitable objects
+  # loop through all objects and yield suitable objects
   for obj in _allObjects():
     if ( obj.TypeId == 'App::LinkGroupPython'
           and isinstance(obj.Proxy, optical_group.OpticalGroupProxy)

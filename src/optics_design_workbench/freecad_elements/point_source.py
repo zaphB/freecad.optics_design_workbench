@@ -52,7 +52,7 @@ class PointSourceProxy(GenericSourceProxy):
       NON_SERIALIZABLE_STORE[self] = {}
     
     if NON_SERIALIZABLE_STORE[self].get('vrv', None) is None:
-      # attach to obj and not to self, because attrbutes of self should be serializable
+      # attach to obj and not to self, because attributes of self should be serializable
       NON_SERIALIZABLE_STORE[self]['vrv'] = (
             distributions.VectorRandomVariable(
                     obj.PowerDensity+'*abs(sin(theta))', # add correction for spherical coordinate area element size 

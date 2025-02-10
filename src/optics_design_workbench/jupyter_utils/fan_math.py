@@ -22,7 +22,7 @@ def calcFanPolarHitPositions(hits, **kwargs):
                      f'in the active SimulationSettings')
   pXY = planeProject3dPoints(p, **kwargs)
 
-  # loop trough fans/rays and calculate distance, curvature etc.
+  # loop through fans/rays and calculate distance, curvature etc.
   fans, rays, centerDists, missingRays, skippedRays = [], [], [], 0, 0
   for fanI in sorted(list(set(fI))):
       prevPrevPos = None
@@ -37,7 +37,7 @@ def calcFanPolarHitPositions(hits, **kwargs):
       missingRays += mean(trf[fI==fanI])-len(rayIs)
       skippedRays += sum(rayIs[1:]-rayIs[:-1] - 1)
 
-      # loop trough ray-trios to calculate neighbor dists and curvs
+      # loop through ray-trios to calculate neighbor dists and curvs
       for i0 in rayIs:
           fans.append(fanI)
           rays.append(i0)
@@ -62,7 +62,7 @@ def calcFanDensity(hits, **kwargs):
                      f'in the active SimulationSettings')
   pXY = planeProject3dPoints(p, **kwargs)
 
-  # loop trough fans/rays and calculate distance, curvature etc.
+  # loop through fans/rays and calculate distance, curvature etc.
   fans, rays, neighborDists, centerDists, curvs, missingRays, skippedRays = [], [], [], [], [], 0, 0
   for fanI in sorted(list(set(fI))):
       prevPrevPos = None
@@ -77,7 +77,7 @@ def calcFanDensity(hits, **kwargs):
       missingRays += mean(trf[fI==fanI])-len(rayIs)
       skippedRays += sum(rayIs[1:]-rayIs[:-1] - 1)
 
-      # loop trough ray-trios to calculate neighbor dists and curvs
+      # loop through ray-trios to calculate neighbor dists and curvs
       for i1, i0, i2 in zip(rayIs[:-2], rayIs[1:-1], rayIs[2:]):        
           fans.append(fanI)
           rays.append(i0)
