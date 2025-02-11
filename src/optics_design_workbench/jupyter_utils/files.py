@@ -836,10 +836,10 @@ class RawFolder:
       else:
         raise ValueError(f'invalid tree node {_node}')
 
-  def loadHits(self, pattern):
+  def loadHits(self, pattern='*'):
     return hits.Hits(self._load(pattern=pattern, kind='hits'))
 
-  def loadRays(self, pattern):
+  def loadRays(self, pattern='*'):
     return self._load(pattern=pattern, kind='rays')
 
   def _load(self, pattern, kind):
