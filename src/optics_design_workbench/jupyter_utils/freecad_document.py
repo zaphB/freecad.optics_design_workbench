@@ -103,28 +103,23 @@ class FreecadProperty:
   def _ensureExists(self, isCall=False):
     # log in case of function call
     if isCall:
-      #io.verb(f'running call line: {self._freecadShellRepr()}')
+      io.verb(f'running call line: {self._freecadShellRepr()}')
       pass
     
-    # if not a function call and fast mode is enabled, skip check
-    if not isCall and self._doc._fastModeEnabled():
-      return
+    # if fast mode is enabled, skip any existCheck and run calls without waiting for response
+    if self._doc._fastModeEnabled():
+      if isCall:
+        self._doc.write(self._freecadShellRepr())
 
-    try:
-      if ((out:=self._doc.query(
-              f'try: ',
-              f'  {self._freecadShellRepr()}',
-              f'except Exception: ',
-              f'  print("failed") ',
-              f'else: ',
-              f'  print("success")',
-              expect=['failed', 'success']
-          )) != 'success'):
-        raise ValueError(f'property {self} does not exist')
-        
-    except Exception:
-      io.warn(f'running ensureExists line failed: {self._freecadShellRepr()}')
-      raise
+    # run proper query and error checking if not in fast mode
+    else:
+      try:
+        if ( (out:=self._doc.query(f'{self._freecadShellRepr()}; print("success")', 
+                                  expect='success:')) != 'success' ):
+          raise ValueError(f'property {self} does not exist')    
+      except Exception:
+        io.warn(f'running {"call" if isCall else "ensureExists"} line failed: {self._freecadShellRepr()}')
+        raise
 
   # ----------------------------------
   # ITEM AND ATTRIBUTE ACCESS
@@ -132,20 +127,19 @@ class FreecadProperty:
   def set(self, value, lvalSuffix=''):
     if self._isConstraint:
       return self._sketchObjReference.setDatum(self._constraintIndex, value)
-
     else:
-      setterLine = f'  {self._freecadShellRepr()}{lvalSuffix} = {value}'
-      #io.verb(f'running setter line: {setterLine.strip()}')
-      if ((out:=self._doc.query(
-              f'try: ',
-              setterLine,
-              f'except Exception: ',
-              f'  print("failed") ',
-              f'else: ',
-              f'  print("success")', 
-              expect=['failed', 'success']
-          )) != 'success'):
-        raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
+      setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {value}'
+      io.verb(f'running setter line: {setterLine.strip()}')
+
+      # if fast mode is enabled run setter line without waiting for response
+      if self._doc._fastModeEnabled():
+        self._doc.write(setterLine)
+
+      # run proper query and error checking if not in fast mode
+      else:
+        if ( (out:=self._doc.query(f'{setterLine}; print("success")', 
+                                  expect='success')) != 'success'  ):
+          raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
 
   def __setattr__(self, key, value):
     self._set(value, lvalSuffix=f'.{key}')
@@ -519,7 +513,7 @@ class FreecadDocument:
             line = line[:-1]
           #print(f'received line {line}')
           self._q.put(line)
-        time.sleep(1e-6)
+        #time.sleep(1e-6)
       self._p.stdout.close()
     self._t = threading.Thread(target=readOutput)
     self._t.daemon = True # thread dies with the program
@@ -613,7 +607,7 @@ class FreecadDocument:
 
   def write(self, *data):
     self._updateInteractionTime()
-    cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*5 # add plenty of newlines at the and to
+    cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*2 # add plenty of newlines at the and to
                                                # make sure command is complete also 
                                                # if indented a few levels
     if _PRINT_FREECAD_COMMUNICATION:
@@ -672,12 +666,16 @@ class FreecadDocument:
           result.append(self._qe.get_nowait())
           lastLineReceived = time.time()
       except queue.Empty:
-        time.sleep(1e-3)
+        pass
 
       # if a line was received once only exit after
       # no line was seen for 500ms
       if time.time()-lastLineReceived > .5:
         break
+
+      # limit loop seed
+      time.sleep(1e-3)
+
     return '\n'.join(result)
 
   def readline(self):
