@@ -20,11 +20,14 @@ class Hits:
   def __init__(self, hits):
     self.hits = hits
 
-  def items(self):
-    return self.hits.items()
-
   def __iter__(self):
     return self.hits.keys()
+
+  def __len__(self):
+    return len(self.points())
+
+  def items(self):
+    return self.hits.items()
 
   def keys(self):
     return self.hits.keys()
@@ -40,14 +43,14 @@ class Hits:
   # ====================================================
   # POINT CLOUD MATH
 
-  def planeProject3dPoints(points=None, planeNormal=None, returnZ=False):
+  def planeProject3dPoints(self, points=None, planeNormal=None, returnZ=False):
     '''
     Turn a 3D point cloud of shape (N,3) into a 2D point cloud (N,2) 
     '''
     # detect plane normal if none is given explicitly
     points = self.points()
     if planeNormal is None:
-      planeNormal = detectPlaneNormal(points)
+      planeNormal = self.detectPlaneNormal()
 
     # select projection vectors by cross products of normal with 
     # nx, ny and nz with highest norm 
@@ -62,12 +65,13 @@ class Hits:
       return array([X, Y, Z]).T
     return array([X, Y]).T
 
-  def detectPlaneNormal(maxPointCountConsidered=300, angleTol=1e-9):
+  def detectPlaneNormal(self, points=None, maxPointCountConsidered=300, angleTol=1e-9):
     '''
     Find the best possible plane normal vector to project the 3D point cloud
     points to a 2D point cloud spanning a maximal area.
     '''
-    points = self.points()
+    if points is None:
+      points = self.points()
     checkPoints = points[::1+int(points.shape[0]/maxPointCountConsidered)]
 
     # cover only half the unit sphere because every plane has two normal
@@ -99,7 +103,7 @@ class Hits:
     # set plane normal to optimal normal found so far
     return array([cos(phiOpt)*sin(thetaOpt), sin(phiOpt)*sin(thetaOpt), cos(thetaOpt)])
 
-  def planarHistogram(XY='centers', key='points', planeNormal=None, **kwargs):
+  def planarHistogram(self, XY='centers', key='points', planeNormal=None, **kwargs):
     '''
     Return the histogram of a 3D-point-cloud projected to a planeNormal. If planeNormal
     is not passed, a normal orthogonal to the two largest extents of the point could
@@ -111,10 +115,10 @@ class Hits:
 
     # if project vector is not given, set it to the direction of minimum span
     if planeNormal is None:
-      planeNormal = detectPlaneNormal(points)
+      planeNormal = self.detectPlaneNormal()
 
     # perform projection of full dataset
-    projPoints = planeProject3dPoints(points, planeNormal)
+    projPoints = self.planeProject3dPoints(points, planeNormal)
     X, Y = projPoints.T
 
     # get histogram
@@ -131,11 +135,11 @@ class Hits:
     # return results
     return hist, binX, binY
 
-  def plot(hueKey=None, hueLabel=None, planeNormal=None, plotKey='points', **kwargs):
+  def plot(self, hueKey=None, hueLabel=None, planeNormal=None, plotKey='points', **kwargs):
     hits
     if planeNormal is None:
-      planeNormal = detectPlaneNormal(self.hits[plotKey])
-    X, Y = planeProject3dPoints(self.hits[plotKey], planeNormal=planeNormal).T
+      planeNormal = self.detectPlaneNormal(self.hits[plotKey])
+    X, Y = self.planeProject3dPoints(self.hits[plotKey], planeNormal=planeNormal).T
     data = {'projected x':X, 'projected y':Y}
     if hueKey is not None:
       if hueLabel is None:
@@ -175,7 +179,7 @@ class Hits:
     self._raiseIfNotFanMath()
 
     rI, fI, p, trf = self.hits['rayIndex'], self.hits['fanIndex'], self.hits['points'], self.hits['totalRaysInFan']
-    pXY = planeProject3dPoints(p, **kwargs)
+    pXY = self.planeProject3dPoints(p, **kwargs)
 
     # loop trough fans/rays and calculate distance, curvature etc.
     centerDists, neighborDists = [], []
@@ -186,7 +190,7 @@ class Hits:
       rayIs = sorted(list(set(rI[fI==fanI])))
 
       # find most central ray
-      centerI = rayIs[argmin(abs(rayIs))]
+      centerI = rayIs[argmin(abs(array(rayIs)))]
       pCenter = mean(pXY[logical_and(fI==fanI, rI==centerI)], axis=0)
 
       # increment missing rays
@@ -217,17 +221,17 @@ class Hits:
     return dict(centerDists=array(centerDists), neighborDists=array(neighborDists), 
                 curvs=array(curvs), missingRays=missingRays, skippedRays=skippedRays)
 
-  def fanMissingRays():
-    return _calcFanDensityEtc()['missingRays']
+  def fanMissingRays(self):
+    return self._calcFanDensityEtc()['missingRays']
 
-  def fanSkippedRays():
-    return _calcFanDensityEtc()['skippedRays']
+  def fanSkippedRays(self):
+    return self._calcFanDensityEtc()['skippedRays']
 
-  def fanCenterDists():
-    return _calcFanDensityEtc()['centerDists'].T
+  def fanCenterDists(self):
+    return self._calcFanDensityEtc()['centerDists'].T
 
-  def fanNeighborDists():
-    return _calcFanDensityEtc()['neighborDists'].T
+  def fanNeighborDists(self):
+    return self._calcFanDensityEtc()['neighborDists'].T
 
-  def fanCurvs():
-    return _calcFanDensityEtc()['curvs'].T
+  def fanCurvs(self):
+    return self._calcFanDensityEtc()['curvs'].T

@@ -26,7 +26,7 @@ from . import progress
 from . import hits
 
 _PRINT_FREECAD_COMMUNICATION = False
-
+_PRINT_SETTER_AND_CALL_LINES = False
 
 # signal handler that kills all running freecad processes
 # in case this process is killed
@@ -103,7 +103,8 @@ class FreecadProperty:
   def _ensureExists(self, isCall=False):
     # log in case of function call
     if isCall:
-      io.verb(f'running call line: {self._freecadShellRepr()}')
+      if _PRINT_SETTER_AND_CALL_LINES:
+        io.verb(f'running call line: {self._freecadShellRepr()}')
       pass
     
     # if fast mode is enabled, skip any existCheck and run calls without waiting for response
@@ -129,7 +130,8 @@ class FreecadProperty:
       return self._sketchObjReference.setDatum(self._constraintIndex, value)
     else:
       setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {value}'
-      io.verb(f'running setter line: {setterLine.strip()}')
+      if _PRINT_SETTER_AND_CALL_LINES:
+        io.verb(f'running setter line: {setterLine.strip()}')
 
       # if fast mode is enabled run setter line without waiting for response
       if self._doc._fastModeEnabled():
