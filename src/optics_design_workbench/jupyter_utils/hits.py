@@ -38,7 +38,7 @@ class Hits:
   def points(self):
     if 'points' in self.hits:
       return self.hits['points']
-    return array()
+    return array([])
 
   # ====================================================
   # POINT CLOUD MATH
@@ -136,7 +136,10 @@ class Hits:
     return hist, binX, binY
 
   def plot(self, hueKey=None, hueLabel=None, planeNormal=None, plotKey='points', **kwargs):
-    hits
+    # just return if no hits exist
+    if plotKey not in self.hits.keys():
+      return
+
     if planeNormal is None:
       planeNormal = self.detectPlaneNormal(self.hits[plotKey])
     X, Y = self.planeProject3dPoints(self.hits[plotKey], planeNormal=planeNormal).T
@@ -146,10 +149,9 @@ class Hits:
         hueLabel = hueKey
       data[hueLabel] = self.hits[hueKey]
     nx, ny, nz = planeNormal
-    sns.relplot(pd.DataFrame(data),
-                x='projected x', y='projected y', 
-                **(dict(hue=hueLabel, palette='hls') if hueLabel else {}),
-                height=4)
+    sns.scatterplot(pd.DataFrame(data),
+                    x='projected x', y='projected y', 
+                    **(dict(hue=hueLabel, palette='hls') if hueLabel else {}))
     title(f'plane normal = [{nx:.2f}, {ny:.2f}, {nz:.2f}]', fontsize=10) 
     gca().axis('equal')
     gca().set_aspect('equal')

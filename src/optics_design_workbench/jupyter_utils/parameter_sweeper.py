@@ -1,5 +1,7 @@
 from numpy import *
 from matplotlib.pyplot import *
+import seaborn as sns
+import pandas as pd
 import matplotlib.ticker
 import seaborn as sns
 import scipy.optimize
@@ -14,7 +16,11 @@ from . import freecad_document
 from . import progress
 
 CLOSE_FREECAD_TIMEOUT = 30
+_ALL_SWEEPERS = []
 
+def closeAllSweepers():
+  for s in _ALL_SWEEPERS:
+    s.close()
 
 class ParameterSweeper:
   '''
@@ -55,8 +61,12 @@ class ParameterSweeper:
 
   def close(self):
     with self._freecadDocumentLock:
-      self._freecadDocument.close()
+      if self._freecadDocument:
+        self._freecadDocument.close()
       self._freecadDocument = None
+
+      # remove self from global list
+      _ALL_SWEEPERS[:] = [s for s in _ALL_SWEEPERS if s != self]
 
       # clear parameter cache if file was closed
       self.parameters.cache_clear()
@@ -64,6 +74,9 @@ class ParameterSweeper:
   def open(self):
     with self._freecadDocumentLock:
       if self._freecadDocument is None:
+        # append self to global sweeper list
+        _ALL_SWEEPERS.append(self)
+
         # create instance and open freecad document
         self._freecadDocument = freecad_document.FreecadDocument(**self._freecadDocumentKwargs)
         self._freecadDocument.open()
@@ -123,7 +136,7 @@ class ParameterSweeper:
       self.parameters.cache_clear()
 
   def setBounds(self, **kwargs):
-    paramNames = self._parameters().keys()
+    paramNames = self.parameters().keys()
     # make sure keys exist and bounds are well formed
     for k, v in kwargs.items():
       if k not in paramNames:
@@ -145,7 +158,7 @@ class ParameterSweeper:
   def optimize(self, minimizeFunc, parameters, simulationMode, 
                prepareSimulation=None, simulationKwargs={},
                minimizeKwargs={}, progressPlotInterval=30, 
-               **kwargs):
+               method=None, **kwargs):
 
     # setup progress and timing vars
     t0 = time.time()
@@ -183,17 +196,19 @@ class ParameterSweeper:
               progress.clearCellOutput()
 
               # plot history of optimization and hits of best result so far
-              fig, (ax1, ax2) = subplots(1, 2, figsize=(4,7))
+              fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
               sca(ax1)
               sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
-                              style=2, markers=['.', '*'],
+                              style=2, markers=['.', '*'], sizes=[3, 19], legend=False,
                                   ).set(xlabel='time', ylabel='penalty', yscale='log')
               gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                                 lambda x, p: io.secondsToStr(x-t0, length=1) ))
+              gca().set_title(f'penalty history', fontsize=10) 
 
               # plot hits
               sca(ax2)
-              plotHits(bestResultSoFar.loadHits('*'), *(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
+              bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
+              gca().set_title(f'best result so far', fontsize=10) 
               tight_layout()
               show()
 
@@ -208,6 +223,7 @@ class ParameterSweeper:
               io.verb(f'found new optimum: {penalty=}, {paramDict=}')
               allParamsHist.append([time.time(), penalty, True, paramDict])
               bestPenaltySoFar = penalty
+              bestResultSoFar = resultFolder
             else:
               allParamsHist.append([time.time(), penalty, False, paramDict])
             if len(allParamsHist) > 1e4:
@@ -237,4 +253,11 @@ class ParameterSweeper:
               f'{simulationKwargs=}, {kwargs=}, {x0=}, {bounds=}')
 
       # run actual minimizer
+      if method == 'annealing':
+        return scipy.optimize.dual_annealing(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+      elif method == 'evolution':
+        return scipy.optimize.differential_evolution(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+        
+      if method:
+        minimizeKwargs['method'] = method
       return scipy.optimize.minimize(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 

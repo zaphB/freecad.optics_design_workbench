@@ -24,6 +24,7 @@ from .. import io
 from ..simulation import processes
 from . import progress
 from . import hits
+from . import parameter_sweeper
 
 _PRINT_FREECAD_COMMUNICATION = False
 _PRINT_SETTER_AND_CALL_LINES = False
@@ -798,6 +799,9 @@ class FreecadDocument:
 
 @functools.wraps(FreecadDocument.__init__)
 def openFreecadGui(*args, **kwargs):
+  # close all sweepers that may have opened the file
+  parameter_sweeper.closeAllSweepers()
+
   # create dummy-document object to detect all necessary paths 
   document = FreecadDocument(*args, **kwargs)
 
