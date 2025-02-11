@@ -8,6 +8,7 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 
-from .files import *
+from .freecad_document import *
 from .progress import *
 from .hits import *
+from .parameter_sweeper import *

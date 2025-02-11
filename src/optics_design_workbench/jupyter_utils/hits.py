@@ -20,6 +20,18 @@ class Hits:
   def __init__(self, hits):
     self.hits = hits
 
+  def items(self):
+    return self.hits.items()
+
+  def __iter__(self):
+    return self.hits.keys()
+
+  def keys(self):
+    return self.hits.keys()
+
+  def values(self):
+    return self.hits.values()
+
   def points(self):
     if 'points' in self.hits:
       return self.hits['points']

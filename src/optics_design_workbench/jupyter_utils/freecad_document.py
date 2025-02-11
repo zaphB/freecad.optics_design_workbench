@@ -25,6 +25,9 @@ from ..simulation import processes
 from . import progress
 from . import hits
 
+_PRINT_FREECAD_COMMUNICATION = False
+
+
 # signal handler that kills all running freecad processes
 # in case this process is killed
 def handler(signum, frame):
@@ -77,10 +80,13 @@ class FreecadProperty:
   be read from and written to as if it was the real freecad property. All 
   read/writes will be forwarded to the running Freecad child process.
   '''
-  def __init__(self, doc, obj, path, isCall=False):
+  def __init__(self, doc, obj, path, isCall=False, internalObjectName=False):
     self.__dict__['_doc'] = doc
     self.__dict__['_obj'] = obj
     self.__dict__['_path'] = path
+    self.__dict__['_internalObjectName'] = internalObjectName
+    self.__dict__['_isConstraint'] = False
+    self.__dict__['_sketchObjReference'] = None
     self._ensureExists(isCall=isCall)
 
   def __repr__(self):
@@ -90,11 +96,20 @@ class FreecadProperty:
     return f'<FreecadProperty {self._obj}.{self._path}, value: {self.getStr()}>'
 
   def _freecadShellRepr(self):
-    return f'App.activeDocument().getObject("{self._obj}").{self._path}'
+    if self._internalObjectName:
+      return f'App.activeDocument().getObject("{self._obj}").{self._path}'    
+    return f'App.activeDocument().getObjectsByLabel("{self._obj}")[0].{self._path}'
 
   def _ensureExists(self, isCall=False):
+    # log in case of function call
     if isCall:
-      io.verb(f'running call line: {self._freecadShellRepr()}')
+      #io.verb(f'running call line: {self._freecadShellRepr()}')
+      pass
+    
+    # if not a function call and fast mode is enabled, skip check
+    if not isCall and self._doc._fastModeEnabled():
+      return
+
     try:
       if ((out:=self._doc.query(
               f'try: ',
@@ -114,31 +129,37 @@ class FreecadProperty:
   # ----------------------------------
   # ITEM AND ATTRIBUTE ACCESS
 
-  def _set(self, value, lvalSuffix=''):
-    setterLine = f'  {self._freecadShellRepr()}{lvalSuffix} = {value}'
-    io.verb(f'running setter line: {setterLine.strip()}')
-    if ((out:=self._doc.query(
-            f'try: ',
-            setterLine,
-            f'except Exception: ',
-            f'  print("failed") ',
-            f'else: ',
-            f'  print("success")', 
-            expect=['failed', 'success']
-        )) != 'success'):
-      raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
+  def set(self, value, lvalSuffix=''):
+    if self._isConstraint:
+      return self._sketchObjReference.setDatum(self._constraintIndex, value)
+
+    else:
+      setterLine = f'  {self._freecadShellRepr()}{lvalSuffix} = {value}'
+      #io.verb(f'running setter line: {setterLine.strip()}')
+      if ((out:=self._doc.query(
+              f'try: ',
+              setterLine,
+              f'except Exception: ',
+              f'  print("failed") ',
+              f'else: ',
+              f'  print("success")', 
+              expect=['failed', 'success']
+          )) != 'success'):
+        raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
 
   def __setattr__(self, key, value):
     self._set(value, lvalSuffix=f'.{key}')
 
   def __getattr__(self, key):
-    return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}')
+    return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}', 
+                           internalObjectName=self._internalObjectName)
 
   def __setitem__(self, key, value):
     self._set(value, lvalSuffix=f'[{repr(key)}]')
 
   def __getitem__(self, key):
-    return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]')
+    return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]', 
+                           internalObjectName=self._internalObjectName)
 
   def __len__(self):
     return int( self._doc.query( f'len( {self._freecadShellRepr()} )' ) )
@@ -154,9 +175,12 @@ class FreecadProperty:
       if len(argsStr):
         argsStr += ', '
       argsStr += f'**{kwargs}'
-    p = FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})', isCall=True)
+    p = FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})', isCall=True, 
+                        internalObjectName=self._internalObjectName)
 
   def getStr(self):
+    if self._isConstraint:
+      return self.Value.getStr()
     return self._doc.query(self._freecadShellRepr())
 
   def getFloat(self):
@@ -174,10 +198,16 @@ class FreecadProperty:
 
   # ----------------------------------
   # CUSTOM ATTRIBUTES AND METHODS
+  def markAsConstraint(self, sketchObj, sketchIndex):
+    self.__dict__['_isConstraint'] = True
+    self.__dict__['_sketchObjReference'] = sketchObj
+    self.__dict__['_constraintIndex'] = sketchIndex
+    return self
+
   def getConstraintsByName(self):
-    indexAndConstraints = { c.Name.get().strip(): (i, c)
-                                for i, c in enumerate(self.Constraints)
-                                                    if c.Name.get().strip() }
+    indexAndConstraints = { c.Name.get().strip(): (i, c.markAsConstraint(self, i))
+                                            for i, c in enumerate(self.Constraints)
+                                                              if c.Name.get().strip() }
     return FreecadConstraintDict(constraintDict={k:v[1] for k,v in indexAndConstraints.items()},
                                  indexDict={k:v[0] for k,v in indexAndConstraints.items()},
                                  sketch=self)
@@ -190,20 +220,46 @@ class FreecadObject(FreecadProperty):
   written to as if it was the real freecad object. All read/writes will be forwarded
   to the running Freecad child process.
   '''
-  def __init__(self, doc, obj):
+  def __init__(self, doc, obj, internalObjectName=False):
     self.__dict__['_doc'] = doc
     self.__dict__['_obj'] = obj
+    self.__dict__['_internalObjectName'] = internalObjectName
     self._ensureExists()
 
   def __str__(self):
     return f'<FreecadObject {os.path.basename(self._doc._path)}: {self._obj}>'
 
   def _freecadShellRepr(self):
-    return f'App.activeDocument().getObject("{self._obj}")'
+    if self._internalObjectName:
+      return f'App.activeDocument().getObject("{self._obj}")'
+    return f'App.activeDocument().getObjectsByLabel("{self._obj}")[0]'
 
   def _ensureExists(self):
-    if self._doc.query(f'print({self._freecadShellRepr()})') == 'None':
-      raise ValueError(f'object {self} does not exist')
+    # ensure at exactly one object exists
+    if not self._internalObjectName:
+      try:
+        objectCount = int(self._doc.query(f'print(len( App.activeDocument().getObjectsByLabel("{self._obj}") ))'))
+        # zero objects with given label exist -> fail
+        if objectCount == 0:
+          raise ValueError(f'object with label {self._obj} does not exist.')
+        # more than one object with given label exist -> fail
+        if objectCount != 1:
+          raise ValueError(f'object label {self._obj} is not unique, consider to rename it '
+                           f'or to use the internal name instead.')
+
+      # handle value errors by retrying with "internal name" style instead of label
+      except ValueError:
+        self.__dict__['_internalObjectName'] = True
+        self._ensureExists()
+
+    # make sure self._freecadShellRepr() evaluates fine
+    try:
+      queryResponse = self._doc.query(f'print({self._freecadShellRepr()})')
+      if queryResponse == 'None':
+        raise ValueError(f'expected freecad object, found None')
+    except Exception:
+      raise ValueError(f'object with {"internal name" if self._internalObjectName else "label"} {self._obj} does '
+                       f'not exist in freecad document (see exceptions above for detailed reason)')
   
   def __setattr__(self, key, value):
     if (out:=self._doc.query(
@@ -218,7 +274,8 @@ class FreecadObject(FreecadProperty):
       raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
 
   def __getattr__(self, key):
-    return FreecadProperty(self._doc, self._obj, key)
+    return FreecadProperty(self._doc, self._obj, key, 
+                           internalObjectName=self._internalObjectName)
 
 
 class FreecadDocument:
@@ -237,7 +294,7 @@ class FreecadDocument:
     # autodetect path is none is given
     if path is None:
       _path = os.path.realpath(os.getcwd())
-      while _path.count('/') > 1:
+      while _path.count('/') != 1:
         if _path.endswith('.OpticsDesign'):
           candidate = _path[:-13]+'.FCStd'
           if os.path.exists(candidate):
@@ -271,6 +328,8 @@ class FreecadDocument:
     self._isterminate = False
     self._iskill = False
     self._isRunning = False
+    self._freecadInteractionTimesList = [time.time()]
+    self._previousFastModeEnabled = False
 
   def __repr__(self):
     return self.__str__()
@@ -287,8 +346,10 @@ class FreecadDocument:
   def getObject(self, name):
     return FreecadObject(self, name)
 
-  def objects(self):
-    return eval(self.query(f'[o.Name for o in App.activeDocument().Objects]'))
+  def objects(self, internalNames=False):
+    if internalNames:
+      return sorted(list(set(eval(self.query(f'[o.Name for o in App.activeDocument().Objects]')))))
+    return sorted(list(set(eval(self.query(f'[o.Label for o in App.activeDocument().Objects]')))))
 
   def runSimulation(self, action='true', endIf=None, endIfMaxLoad=.5):
     '''
@@ -343,10 +404,6 @@ class FreecadDocument:
           raise RuntimeError(f'somehow more than one result folder was created '
                             f'during {action} simulation, this should not be '
                             f'possible...')
-        elif len(newFolders) > 1:
-          raise RuntimeError(f'somehow more than one result folder was created '
-                            f'during {action} simulation, this should not be '
-                            f'possible...')
         # return result
         return RawFolder(f'{self._resultsPath}/raw/{newFolders[0]}') if len(newFolders) else None 
 
@@ -377,7 +434,7 @@ class FreecadDocument:
 
           # check custom simulation-end criterion with ~50% dutycycle
           if ( endIf is not None 
-                and time.time()-lastEndIfCheck 
+                and time.time()-lastEndIfCheck
                       > min([60*60, max([1, 1/max([0.01, endIfMaxLoad]) * endIfDuration ]) ]) ):
             lastEndIfCheck = time.time()
             if _newFolder is not None:
@@ -431,6 +488,7 @@ class FreecadDocument:
     return self
 
   def open(self):
+    self._updateInteractionTime()
     t0 = time.time()
     
     # register that this process is a jupyter process to setup logging
@@ -445,25 +503,46 @@ class FreecadDocument:
     #                        ViewProvider objects becausee GUI is not yet up
     self._p = subprocess.Popen([self._freecadExecutable, '-c'],
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE,
                                 stdin=subprocess.PIPE, 
                                 text=True, bufsize=-1)
     self._isRunning = True
 
     # start thread the continuously reads stdout and adds results to queue
     self._q = queue.Queue()
+    self._qe = queue.Queue()
     def readOutput():
       for line in iter(self._p.stdout.readline, ''):
         if line.strip():
+          # remove line ending characters
           while line.endswith('\r') or line.endswith('\n'):
             line = line[:-1]
           #print(f'received line {line}')
           self._q.put(line)
-        time.sleep(1e-3)
+        time.sleep(1e-6)
       self._p.stdout.close()
     self._t = threading.Thread(target=readOutput)
     self._t.daemon = True # thread dies with the program
     self._t.start()
+
+    def readError():
+      for line in iter(self._p.stderr.readline, ''):
+        # remove prompt characters from beginning of line
+        while line.lstrip().startswith('>>>') or line.lstrip().startswith('...'):
+          line = line.lstrip()[4:]
+         
+        if line.strip():
+          # remove line ending characters
+          while line.endswith('\r') or line.endswith('\n'):
+            line = line[:-1]
+          # ignore prompt lines
+          io.warn(f'received error line {repr(line)}', logOnly=True)
+          self._qe.put(line)
+        time.sleep(1e-3)
+      self._p.stdout.close()
+    self._te = threading.Thread(target=readError)
+    self._te.daemon = True # thread dies with the program
+    self._te.start()
 
     # Send python snippet to load GUI and immediately hide window, this allows to run
     # in a "headless-like" mode but still loads all ViewProvider objects. In true headless
@@ -483,6 +562,7 @@ class FreecadDocument:
                f'  exit()')
 
     # flush outputs with infinite timeout to make sure startup was completely done
+    self._freecadInteractionTimesList.clear()
     self._flushOutput(timeout=3600)
 
     # after gui is fully loaded, load document
@@ -492,15 +572,17 @@ class FreecadDocument:
                f'  exit()')
 
     # flush outputs with infinite timeout to make sure loading file was completely done
+    self._freecadInteractionTimesList.clear()
     self._flushOutput(timeout=3600)
 
     # make sure numpy is imported globally, as numpy and as np, to ensure all numpy datatypes
     # can be constructed properly
-    self.write(f'numpy',
+    self.write(f'import numpy',
                f'import numpy as np',
                f'from numpy import *')
 
     # flush outputs with infinite timeout to ensure this was successfully imported
+    self._freecadInteractionTimesList.clear()
     self._flushOutput(timeout=3600)
 
     # print success
@@ -509,41 +591,68 @@ class FreecadDocument:
   ###########################################################################
   # SUBPROCESS IO LOGIC
 
+  def lastInteractionTime(self):
+    return self._freecadInteractionTimesList[-1]
+
+  def _updateInteractionTime(self):
+    self._freecadInteractionTimesList.append(time.time())
+    T = array(self._freecadInteractionTimesList)
+    self._freecadInteractionTimesList[:] = T[time.time()-T < 30]
+
+  def _fastModeEnabled(self):
+    T = array(self._freecadInteractionTimesList)
+
+    # enable fast mode if more than 10 freecad interactions
+    # within last 3 seconds
+    #io.verb(f'{sum( time.time()-T < 5 )=}')
+    enable = sum( time.time()-T < 5 ) > 100
+    if enable != self._previousFastModeEnabled:
+      io.verb(f'{"enabled" if enable else "disabled"} freecad communication fast mode')
+      self._previousFastModeEnabled = enable
+    return enable
+
   def write(self, *data):
+    self._updateInteractionTime()
     cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*5 # add plenty of newlines at the and to
-                                               # make sure command is complete
-    #print(f'sending python:')
-    #print(cmdStr)
+                                               # make sure command is complete also 
+                                               # if indented a few levels
+    if _PRINT_FREECAD_COMMUNICATION:
+      io.verb('> '+cmdStr.replace('\r', '').strip('\n'))
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
 
   def _flushOutput(self, timeout=3):
+    self._updateInteractionTime()
     t0 = time.time()
 
     # throw away any previous content
+    self.readErr()
     self.read()
 
-    # ask to print random number
-    rn = f'{random.random():.8f}'
-    self.write(f'print("{rn}")')
+    # skip carful flush if fastMode is avtive
+    if not self._fastModeEnabled():
+      # ask to print random number
+      rn = f'{random.random():.8f}'
+      self.write(f'print("{rn}")')
 
-    # wait until random number appears in output
-    while True:
-      out = self.read()
-      #print(f'waiting for {rn}, dropping {out}')
+      # wait until random number appears in output
+      while True:
+        out = self.read()
+        #print(f'waiting for {rn}, dropping {out}')
 
-      # if random number appears in output: success
-      if rn in out:
-        return
+        # if random number appears in output: success
+        if rn in out:
+          return
 
-      # if time is up: raise timeout error
-      if time.time()-t0 > timeout:
-        raise RuntimeError(f'failed to flush output buffer of FreeCAD, '
-                           f'is a process featuring heavy output printing '
-                           f'running?')
-      time.sleep(1e-3)
+        # if time is up: raise timeout error
+        if time.time()-t0 > timeout:
+          raise RuntimeError(f'failed to flush output buffer of FreeCAD, '
+                            f'is a process featuring heavy output printing '
+                            f'running?')
+        time.sleep(1e-3)
 
   def read(self):
+    self._updateInteractionTime()
     result = []
     try:
       while True:
@@ -552,7 +661,27 @@ class FreecadDocument:
       pass
     return result
 
+  def readErr(self):
+    self._updateInteractionTime()
+    result = []
+    lastLineReceived = 0
+    while True:
+      # fetch lines until queue.Empty is raised
+      try:
+        while True:
+          result.append(self._qe.get_nowait())
+          lastLineReceived = time.time()
+      except queue.Empty:
+        time.sleep(1e-3)
+
+      # if a line was received once only exit after
+      # no line was seen for 500ms
+      if time.time()-lastLineReceived > .5:
+        break
+    return '\n'.join(result)
+
   def readline(self):
+    self._updateInteractionTime()
     try:
       return self._q.get_nowait()
     except queue.Empty:
@@ -560,6 +689,7 @@ class FreecadDocument:
     return None
 
   def query(self, *data, timeout=6, expect=None):
+    self._updateInteractionTime()
     t0 = time.time()
 
     # make sure output buffer of freecad is empty
@@ -570,13 +700,20 @@ class FreecadDocument:
 
     # wait for single line response
     while True:
+      if error:=self.readErr():
+        raise RuntimeError(f'exception was raised while handling '
+                           f'command(s) {data}:\n\n'+error)
+
+      # check for result line
       if line:=self.readline():
         if expect is not None and line not in expect:
           continue
-        #print(f'query complete: {line}')
+        if _PRINT_FREECAD_COMMUNICATION:
+          io.verb(f'< {line}')
         return line
+
       if time.time()-t0 > timeout:
-        raise RuntimeError(f'failed to fetch response to command(s) "{data}", '
+        raise RuntimeError(f'failed to fetch any response to command(s) {data}, '
                            f'is a process featuring heavy output printing running?')
       time.sleep(1e-3)
 
@@ -884,12 +1021,12 @@ class RawFolderRange:
     for res in [r.loadHits(*args, **kwargs) for r in self]:
       for k, v in res.items():
         _updateResultEntry(result, k, v)
-    return result
+    return hits.Hits(result)
 
   @functools.wraps(RawFolder.loadRays)
   def loadRays(self, *args, **kwargs):
     result = {}
-    for res in [r.loadHits(*args, **kwargs) for r in self]:
+    for res in [r.loadRays(*args, **kwargs) for r in self]:
       for k, v in res.items():
         _updateResultEntry(result, k, v)
     return result

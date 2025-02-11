@@ -56,7 +56,8 @@ def cachedProperty(obj, prop):
   if time.time()-_LAST_SIZE_REPORT > _SIZE_REPORT_INTERVAL:
     io.verb(f'tracing_cache: {len(_CACHE_LUT)} different properties '
             f'cached, {", ".join([str(len(e)) for e in _CACHE_LUT.values()])} '
-            f'elements cached for each property respectively, {1e-6*_CACHED_PROPERTY_CALLS:.0f}M '
+            f'elements cached for each property respectively, '
+            f'stats since last trace_cache log: {1e-6*_CACHED_PROPERTY_CALLS:.0f}M '
             f'({_CACHED_PROPERTY_CALLS/(time.time()-_LAST_SIZE_REPORT):.1e}/s) properties requested, '
             f'{1e2*(_CACHED_PROPERTY_CALLS-_ADDED_TO_CACHE_CALLS)/_CACHED_PROPERTY_CALLS:.2f}'
             f'% cached responses')

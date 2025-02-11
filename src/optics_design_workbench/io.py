@@ -192,11 +192,11 @@ def warn(*msg, logOnly=False):
   msg = _indentMsg(msg)
   if _logger():
     _logger().warning(msg)
-  warnings.warn(msg)
   if not logOnly:
-    print(_prefix('warning')+msg)
-    if '\n' in msg:
-      print()
+    warnings.warn(msg)
+    #print(_prefix('warning')+msg)
+    #if '\n' in msg:
+    #  print()
 
 def info(*msg, logOnly=None, noNewLine=False):
   # enable logOnly by default for info() and verb() in jupyter environment
