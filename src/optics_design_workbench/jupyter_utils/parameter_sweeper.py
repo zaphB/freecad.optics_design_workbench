@@ -90,6 +90,11 @@ class ParameterSweeper:
         # setup background thread that closes document after some inactivity
         self._closeDocumentAfterInactivityThread = threading.Thread(target=self._closeOnInactivity)
         self._closeDocumentAfterInactivityThread.start()
+
+  def freecadDocument(self):
+    with self._freecadDocumentLock:
+      self.open()
+      return self._freecadDocument
   
   def _parameterNodeDict(self):
     with self._freecadDocumentLock:
@@ -165,7 +170,7 @@ class ParameterSweeper:
     lastProgressPlot = 0
     minimizeFuncHist = []
     allParamsHist = []
-    bestPenaltySoFar, bestResultSoFar = inf, None
+    bestPenaltySoFar, bestParametersSoFar, bestResultSoFar = inf, None, None
 
     parameters = list(parameters)
     with self._freecadDocumentLock:
@@ -173,7 +178,7 @@ class ParameterSweeper:
 
       # wrap minimize func, run simulation before and pass additional args
       def _simulateAndMinimizeFunc(args):
-        nonlocal bestPenaltySoFar, bestResultSoFar, lastProgressPlot
+        nonlocal bestPenaltySoFar, bestParametersSoFar, bestResultSoFar, lastProgressPlot
 
         # retry up to five times if exception is raised in the loop
         for retryNo in range(999):
@@ -199,8 +204,8 @@ class ParameterSweeper:
               fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
               sca(ax1)
               sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
-                              style=2, markers=['.', '*'], sizes=[3, 19], legend=False,
-                                  ).set(xlabel='time', ylabel='penalty', yscale='log')
+                              style=2, size=2, markers=['.', '*'], sizes=[30, 90], legend=False,
+                                          ).set(xlabel='time', ylabel='penalty')
               gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                                 lambda x, p: io.secondsToStr(x-t0, length=1) ))
               gca().set_title(f'penalty history', fontsize=10) 
@@ -222,6 +227,7 @@ class ParameterSweeper:
             if penalty < bestPenaltySoFar:
               io.verb(f'found new optimum: {penalty=}, {paramDict=}')
               allParamsHist.append([time.time(), penalty, True, paramDict])
+              bestParametersSoFar = dict(paramDict)
               bestPenaltySoFar = penalty
               bestResultSoFar = resultFolder
             else:
@@ -253,11 +259,16 @@ class ParameterSweeper:
               f'{simulationKwargs=}, {kwargs=}, {x0=}, {bounds=}')
 
       # run actual minimizer
-      if method == 'annealing':
-        return scipy.optimize.dual_annealing(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
-      elif method == 'evolution':
-        return scipy.optimize.differential_evolution(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
-        
-      if method:
-        minimizeKwargs['method'] = method
-      return scipy.optimize.minimize(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+      try:
+        if method == 'annealing':
+          return scipy.optimize.dual_annealing(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+        elif method == 'evolution':
+          return scipy.optimize.differential_evolution(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+        if method:
+          minimizeKwargs['method'] = method
+        return scipy.optimize.minimize(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+
+      # before returning, make sure parameters for global optimum are set
+      finally:
+        if bestParametersSoFar:
+          self.set(**bestParametersSoFar)

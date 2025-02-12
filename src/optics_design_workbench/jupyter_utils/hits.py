@@ -135,7 +135,7 @@ class Hits:
     # return results
     return hist, binX, binY
 
-  def plot(self, hueKey=None, hueLabel=None, planeNormal=None, plotKey='points', **kwargs):
+  def plot(self, hueKey=None, hueLabel=None, planeNormal=None, plotKey='points', figsize=None, **kwargs):
     # just return if no hits exist
     if plotKey not in self.hits.keys():
       return
@@ -149,6 +149,8 @@ class Hits:
         hueLabel = hueKey
       data[hueLabel] = self.hits[hueKey]
     nx, ny, nz = planeNormal
+    if figsize is not None:
+      figure(figsize=figsize)
     sns.scatterplot(pd.DataFrame(data),
                     x='projected x', y='projected y', 
                     **(dict(hue=hueLabel, palette='hls') if hueLabel else {}))
