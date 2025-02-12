@@ -32,7 +32,21 @@ class PointSourceProxy(GenericSourceProxy):
     # make sure domains are valid
     if prop in ('PhiDomain', 'ThetaDomain'):
       raw = getattr(obj, prop)
-      parsed, _ = self._parsedDomain(raw, {'PhiDomain': '0, 2*pi', 'ThetaDomain': '0, pi'}[prop])
+
+      # select defaults and limits depending on property
+      if prop == 'PhiDomain':
+        default = '0,2*pi'
+        limits = ['-2*pi', '2*pi']
+        spanLimits = [0, '2*pi']
+      elif prop == 'ThetaDomain':
+        default = '0,pi'
+        limits = ['0','pi']
+        spanLimits = [0, 'pi']
+
+      # parse range and replace value in case parsing changed it
+      parsed, _ = self._parsedDomain(raw, default=default, 
+                                     limits=limits, 
+                                     spanLimits=spanLimits)
       if raw != parsed:
         setattr(obj, prop, parsed)
 
@@ -77,18 +91,56 @@ class PointSourceProxy(GenericSourceProxy):
     obj.RandomNumberGeneratorMode = '?'
 
 
-  def _parsedDomain(self, domain, default=None):
+  def _parsedDomain(self, domain, default=None, limits=None, spanLimits=None, isRecursive=False):
     # try to parse
     try:
       _domain = [float(sy.sympify(d).evalf()) for d in domain.split(',')]
     except Exception as e:
-      io.err(f'invalid domain {domain}, {e.__class__.__name__}: {e}')
+      if not isRecursive:
+        io.err(f'invalid domain {domain}, {e.__class__.__name__}: {e}')
       return default, self._parsedDomain(default, None)[1]
 
     # make sure length is exactly two
     if _domain is not None and len(_domain) != 2:
-      io.err(f'invalid domain {domain}, expect two numbers or inf separated by a ","')
+      if not isRecursive:
+        io.err(f'invalid domain {domain}, expect two numbers or inf separated by a ","')
       return default, self._parsedDomain(default, None)[1]
+
+    # check if limits are in right order
+    l1, l2 = _domain
+    if l1 > l2:
+      if not isRecursive:
+        io.err(f'invalid domain {domain}, expect second value to be larger than first one.')
+      flipped = ', '.join([s.strip() for s in reversed(domain.split(','))])
+      return flipped, self._parsedDomain(flipped, None)[1]
+
+    # check if limits are fulfilled
+    if limits:
+      _limits = [float(sy.sympify(l).evalf()) for l in limits]
+      if l1 < _limits[0] or l2 > _limits[1]:
+        if not isRecursive:
+          io.err(f'domain {domain} out of bounds, expect both boundaries to be within {limits}.')
+        orig1, orig2 = [s.strip() for domain.split(',')]
+        limited = f'{limits[0] if l1 < _limits[0] else orig1}, {limits[1] if l2 > _limits[1] else orig2}'
+        return limited, self._parsedDomain(limited, None)[1]
+
+    # check if span limits are fulfilled
+    if spanLimits and not isRecursive:
+      _spanLimits = [float(sy.sympify(l).evalf()) for l in spanLimits]
+      if l2-l1 < _spanLimits[0] or l2-l1 > _spanLimits[1]:
+        # if this is a recursive call just return default to avoid possibility of endless recursion
+        if isRecursive:
+          return default, self._parsedDomain(default, None)[1]
+
+        # if silence error is not set let's do our best to suggest a good domain
+        else:
+          io.err(f'domain span of {domain} out of bounds, expect {spanLimits[0]} <= domain span <= {spanLimits[1]} .')
+          orig1, orig2 = [s.strip() for domain.split(',')]
+          limited = f'{orig1}, {spanLimits[1] if l1==0 else {_spanLimits[1]}}'
+          # silence errors and pass all limits etc. to recursive call here, because we might violate limits
+          # with our enforced span limit
+          return limited, self._parsedDomain(limited, defailt=default, limits=limits, 
+                                             spanLimits=spanLimits, isRecursive=True)[1]
 
     # return original string and parsed domain
     return domain, _domain
@@ -146,26 +198,29 @@ class PointSourceProxy(GenericSourceProxy):
 
     # fan-mode: generate fans of rays in spherical coordinates
     if mode == 'fans':
-      raysPerIteration = min([obj.RaysPerFan, maxRaysPerFan])
+      raysPerFan = min([obj.RaysPerFan, maxRaysPerFan])
 
       # create obj.Fans ray fans oriented in phi0
       totalFanCount = int(min([obj.Fans, maxFanCount]))
       for fanIndex, _phi in enumerate(obj.FanPhi0 + linspace(0, pi, totalFanCount+1)[:-1]):
+
+          # generate the required thetas to place beams
+          # calc the phi+pi part of the fan using using positive and negative 
+          # thetas here (sorry, a little hacky...)
+          l1, l2 = self.parsedThetaDomain(obj)
+          vrv = distributions.ScalarRandomVariable(
+                      obj.PowerDensity, # no sin(theta) correction here because fans are 2D
+                      variable='theta',
+                      variableDomain=(-l2,l2), 
+                      numericalResolution=obj.ThetaResolutionNumericMode)
+          vrv.compile(phi=phi)
+          _posNegThetas = vrv.findGrid(N=raysPerFan)
+
         for rayIndexSign, phi in ([1, _phi], [-1, _phi+pi]):
 
           # this loop may run for quite some time, keep GUI responsive by handling events
           keepGuiResponsiveAndRaiseIfSimulationDone()
 
-          # generate the required thetas to place beams at and create beams
-          # create a scalar random variable here, treat Phi as a constant
-          vrv = distributions.ScalarRandomVariable(
-                      obj.PowerDensity, # no sin(theta) correction here because fans are 2D
-                      variable='theta',
-                      variableDomain=self.parsedThetaDomain(obj), 
-                      numericalResolution=obj.ThetaResolutionNumericMode)
-          vrv.compile(phi=phi)
-
-          _thetas = vrv.findGrid(N=raysPerIteration)
           totalRaysInFan = 2*len(_thetas)-1
           for rayIndex, theta in enumerate(_thetas):
 
