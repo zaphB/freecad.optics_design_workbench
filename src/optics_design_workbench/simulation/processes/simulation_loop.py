@@ -242,6 +242,10 @@ def runSimulation(action, slaveInfo={}):
     # prepare simulation, assemble simulation parameters from the various sources (settings,
     # defaults, mutual conditions, ...)
 
+    # save active document and recompute
+    _SIMULATING_DOCUMENT = App.activeDocument()
+    _SIMULATING_DOCUMENT.recompute()
+
     # make sure other simulations have stopped and no other simulation
     # can be started
     if isMasterProcess():
@@ -257,19 +261,6 @@ def runSimulation(action, slaveInfo={}):
       if not isRunning():
         raise RuntimeError('slave was launched but no simulation seems to be running')
         
-    # save active document and recompute
-    _SIMULATING_DOCUMENT = App.activeDocument()
-    _SIMULATING_DOCUMENT.recompute()
-
-    # Save document so background workers will work on the exact state of the project,
-    # but make sure to save only if GUI exists, otherwise all ViewProvider objects will
-    # break and loose their info. This implies that a master running in headless mode
-    # will not save before spawning the workers, because nothing can change in the document
-    # in headless mode.
-    io.verb(f'{isMasterProcess()=} and {App.GuiUp=}')
-    if isMasterProcess() and App.GuiUp:
-      _SIMULATING_DOCUMENT.save()
-
     # determine simulation mode
     mode = action
     continuous = True
@@ -333,6 +324,15 @@ def runSimulation(action, slaveInfo={}):
       # connect progress window to this store if more than one iteration is requested
       if isMasterProcess() and continuous and gui_windows:
         gui_windows.showProgressWindow(store)
+
+    # Save document so background workers will work on the exact state of the project,
+    # but make sure to save only if GUI exists, otherwise all ViewProvider objects will
+    # break and loose their info. This implies that a master running in headless mode
+    # will not save before spawning the workers, because nothing can change in the document
+    # in headless mode.
+    io.verb(f'{isMasterProcess()=} and {App.GuiUp=}')
+    if isMasterProcess() and App.GuiUp:
+      _SIMULATING_DOCUMENT.save()
 
     ##########################################################################################
     # do pre-worker launched init and post-worker launched init of each light source

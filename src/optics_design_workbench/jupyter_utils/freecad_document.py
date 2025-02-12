@@ -348,7 +348,7 @@ class FreecadDocument:
   def __str__(self):
     return f'<FreecadDocument {os.path.basename(self._path)}>'
 
-  def _getTempFolder(self):
+  def _getTempFolder(self, create=False):
     basename, fname = os.path.split(self._originalPath)
     tempDirName = f'{basename}/temp-{fname[:-6]}.OpticsDesign'
     os.makedirs(tempDirName, exist_ok=True)
@@ -357,8 +357,10 @@ class FreecadDocument:
   def _sanitizeTempFolder(self):
     # remove files that did not change for a long time, import logs to
     # original folder
-    for e in os.scandir(self._getTempFolder()):
-      pass
+    _tmp = self._getTempFolder(create=False)
+    if os.path.exists(_tmp):
+      for e in os.scandir(_tmp):
+        pass
 
 
   ###########################################################################

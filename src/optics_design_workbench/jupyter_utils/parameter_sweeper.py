@@ -36,27 +36,58 @@ class SweeperOptimizeWorker:
     self._optimizeArgs = optimizeArgs
     self._sweeperInstance = sweeper
 
-    # setup history dump path
+    # setup history dump path and randomize historyDumpInterval to
+    # avoid synchronization
     self._optimizeArgs['historyDumpPath'] = self.historyDumpPath()
+    self._optimizeArgs['historyDumpInterval'] = 30+30*random.random()
 
     # make sure background worker will never plot anything on his own
     self._optimizeArgs['progressPlotInterval'] = inf
 
+    # set run in fresh copy to true to prevent any worker from every
+    # touching the main FCStd file
+    self._optimizeArgs['openFreshCopy'] = True
+
+    # set path to dump history to
+    self._historyDumpPath = os.path.realpath(f'temp-optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
+
     # make sure sweeper sweeper document is closed to avoid inheriting
     # the opened FreecadDocument attributes to the child process
     self._sweeperInstance.close()
+
+    # setup history attrs
+    self._history = []
 
     # setup and start child process
     self._process = _mpCtx().Process(target=self._work)
     self._process.start()
 
   def historyDumpPath(self):
-    pass
+    return self._historyDumpPath
+
+  def fetchHistory(self):
+    # try to load history to update cached history
+    try:
+      with open(self.historyDumpPath, 'rb') as f:
+        self._history = pickle.load(f)
+      os.remove(self.historyDumpPath)
+    except Exception:
+      pass
+
+    # return history
+    return self._history
+
+  def isRunning(self):
+    return self._process.is_alive()
+
+  def terminate(self):
+    return self._process.terminate()
+
+  def kill(self):
+    return self._process.kill()
 
   def _work(self):
     self._sweeperInstance.optimize(**self._optimizeArgs)
-
-
 
 
 class ParameterSweeper:
@@ -84,6 +115,7 @@ class ParameterSweeper:
     self._freecadDocumentLock = threading.RLock()
     self._closeDocumentAfterInactivityThread = None
     self._bounds = {}
+    self._optimizeStepsArgCache = {}
 
   def _closeOnInactivity(self):
     while self._freecadDocument:
@@ -200,10 +232,10 @@ class ParameterSweeper:
   def bounds(self):
     return {k: self._bounds.get(k, (-inf, inf)) for k in self.parameters().keys()}
 
-  def optimizeStrategy(*args, relWaitForParallel=0.1):
+  def optimizeStrategyStep(*args, relWaitForParallel=1/3, progressPlotInterval=30):
     '''
-    Pass a (nested) list of dictionaries with optimize args to run a sequence of
-    optimization steps with varied free parameters, methods, etc.
+    Pass one or more dictionaries with optimize args to run
+    optimization steps with varied free parameters, methods, etc. in parallel
 
     Passing dictionaries only will cause a sequence of optimize-calls with parameters
     given by the dictionary. All dictionaries inherit keys from prededing arg-dict.
@@ -211,37 +243,138 @@ class ParameterSweeper:
     with default method and the remaining args given in the first dict. The second 
     optimize run will use the same arguments as the first, except for method='evolution'. 
     
-    optimizer.optimizeStrategy(
+    optimizer.optimizeStrategyStep(
       dict(method=None, minimizeFunc=...),
+    )
+    optimizer.optimizeStrategyStep(
       dict(method='evolution') 
     )
 
-    If a list if dictionaries is passed instead of a dictionary, two optimize calls
+    If a list of dictionaries is passed instead of a dictionary, two optimize calls
     will be run in parallel. Again later dicts in the list inherit from previous dicts.
     The following example will first run the default method and a Nelder-Mead optimizer
     in parallel. After one of them finished, we will wait relWaitForParallel*runtime 
-    for the other optimize run and then proceed with a method=evolution run:
+    for the other optimize run and then proceed with a method=evolution run, which itself
+    will start with the best result obtained before:
 
-    optimizer.optimizeStrategy(
-      [ dict(method=None, minimizeFunc=...),
-        dict(method='Nelder-Mead') 
-      ],
+    optimizer.optimizeStrategyStep(
+      dict(method=None, minimizeFunc=...),
+      dict(method='Nelder-Mead') 
+    )
+    optimizer.optimizeStrategyStep(
       dict(method='evolution') 
     )
     '''
     # check validity of strategy
-    descriptionStr = ''
     if not len(args):
       raise ValueError('no steps for optimization strategy given')
-    for step in args:
-      raise ValueError('not implemented')
+
+    # add cache contents to all arg dicts
+    for kwargs in args:
+      self._optimizeStepsArgCache.update(kwargs)
+      kwargs.update(self._optimizeStepsArgCache)
+
+    # do work in this process, no workers launched
+    if len(args) == 1:
+      io.verb(f'running single process optimize with kwargs={args[0]}')
+      self.optimize(**args[0])
+
+    # launch workers to do work, this process just monitors
+    else:
+      io.verb(f'running multi process optimize with args={args}')
+      t0 = time.time()
+      lastProgressPlot = 0
+
+      # create worker objects
+      workers = []
+      for kwargs in args:
+        workers.append(SweeperOptimizeWorker(self, kwargs))
+
+      bestParamsDict = None
+      try:
+        # monitor workers until happy
+        lastWorkerFinished = None
+        runningWorkers = []
+        bestPenalty = inf
+        lastPenaltyImprovement = 0
+        tryToEndWorkersSince = inf
+        while True:
+          # fetch history of all worker progresses
+          allParamsHist = []
+          for w in workers:
+            allParamsHist.extend(w.fetchHistory())
+          allParamsHist = sorted(allParamsHist, key=lambda e: e[0])
+
+          # check if global best-penalty improved
+          if (_newBest:=min([h[1] for h in allParamsHist])) < bestPenalty:
+            bestPenalty = _newBest
+            lastPenaltyImprovement = time.time()
+            bestParamsDict = allParamsHist[argmin([h[1] for h in allParamsHist])][4]
+
+          # plot history of optimization and hits of best result so far
+          if len(allParamsHist) > 5 and time.time()-lastProgressPlot > progressPlotInterval:
+            lastProgressPlot = time.time()
+            progress.clearCellOutput()
+
+            fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
+            sca(ax1)
+            sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
+                            style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
+                                        ).set(xlabel='time', ylabel='penalty')
+            gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+                                              lambda x, p: io.secondsToStr(x-t0, length=1) ))
+            gca().set_title(f'penalty history', fontsize=10) 
+
+            # plot hits
+            sca(ax2)
+            bestResultSoFar = freecad_document.RawFolder(allParamsHist[argmin([h[1] for h in allParamsHist])][3])
+            bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
+            gca().set_title(f'best result so far', fontsize=10)
+            tight_layout()
+            show()
+
+            # print status
+            io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}')
+
+          # update running workers list
+          for w in runningWorkers:
+            if not w.isRunning():
+              lastWorkerFinished = time.time()
+          runningWorkers = [w for w in runningWorkers if w.isRunning()]
+
+          # end loop if all workers finished
+          if not len(runningWorkers):
+            break
+
+          # if at least one worker finished and none of the other workers managed
+          # to improve the penalty since relWaitForParallel*runtime, exit all remaining
+          # workers
+          if ( time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
+                and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0) ):
+            tryToEndWorkersSince = time.time()
+          
+          # send kill/terminate signals depending on wait time
+          if time.time()-tryToEndWorkersSince > 10:
+            for w in runningWorkers:
+              w.kill()
+          elif time.time()-tryToEndWorkersSince > 0:
+            for w in runningWorkers:
+              w.terminate()
+
+          # limit loop speed
+          time.sleep(3)
+        
+      # make sure to apply best result to current FCStd file if loop ends
+      finally:
+        if bestParamsDict:
+          self.set(bestParamsDict)
 
 
   def optimize(self, minimizeFunc, parameters, simulationMode, 
                prepareSimulation=None, simulationKwargs={},
                minimizeKwargs={}, progressPlotInterval=30, 
                method=None, historyDumpPath=None, 
-               historyDumpInterval=60, **kwargs):
+               historyDumpInterval=inf, **kwargs):
 
     # setup progress and timing vars
     t0 = time.time()
@@ -283,7 +416,7 @@ class ParameterSweeper:
               fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
               sca(ax1)
               sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
-                              style=2, size=2, markers=['.', '*'], sizes=[30, 90], legend=False,
+                              style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
                                           ).set(xlabel='time', ylabel='penalty')
               gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                                 lambda x, p: io.secondsToStr(x-t0, length=1) ))
@@ -305,13 +438,15 @@ class ParameterSweeper:
             # update history lists and shorten if necessary
             if penalty < bestPenaltySoFar:
               io.verb(f'found new optimum: {penalty=}, {paramDict=}')
-              allParamsHist.append([time.time(), penalty, True, paramDict])
+              allParamsHist.append([time.time(), penalty, True, 
+                                    os.path.realpath(resultFolder.path()), paramDict])
               bestParametersSoFar = dict(paramDict)
               bestPenaltySoFar = penalty
               bestResultSoFar = resultFolder
             else:
-              allParamsHist.append([time.time(), penalty, False, paramDict])
-            if len(allParamsHist) > 1e4:
+              allParamsHist.append([time.time(), penalty, False, 
+                                    os.path.realpath(resultFolder.path()), paramDict])
+            if len(allParamsHist) > 1e3:
               allParamsHist[:] = allParamsHist[::2]
             
             # dump entire history to file if enabled

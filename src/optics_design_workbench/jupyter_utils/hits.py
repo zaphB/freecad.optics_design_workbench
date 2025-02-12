@@ -48,7 +48,8 @@ class Hits:
     Turn a 3D point cloud of shape (N,3) into a 2D point cloud (N,2) 
     '''
     # detect plane normal if none is given explicitly
-    points = self.points()
+    if points is None:
+      points = self.points()
     if planeNormal is None:
       planeNormal = self.detectPlaneNormal()
 
@@ -103,7 +104,7 @@ class Hits:
     # set plane normal to optimal normal found so far
     return array([cos(phiOpt)*sin(thetaOpt), sin(phiOpt)*sin(thetaOpt), cos(thetaOpt)])
 
-  def planarHistogram(self, XY='centers', key='points', planeNormal=None, **kwargs):
+  def planarHistogram(self, XY='centers', key='points', planeNormal=None, comRadius=None, **kwargs):
     '''
     Return the histogram of a 3D-point-cloud projected to a planeNormal. If planeNormal
     is not passed, a normal orthogonal to the two largest extents of the point could
@@ -120,6 +121,18 @@ class Hits:
     # perform projection of full dataset
     projPoints = self.planeProject3dPoints(points, planeNormal)
     X, Y = projPoints.T
+
+    # calculate bins if comRadius is given
+    if comRadius is not None:
+      bins = kwargs.pop('bins', 50)
+      if hasattr(bins, '__len__'):
+        bins = len(bins)
+
+      # find center of mass
+      comX, comY = median(X), median(Y)
+      bins = [comX+linspace(-comRadius, comRadius, bins),
+              comY+linspace(-comRadius, comRadius, bins)]
+      kwargs['bins'] = bins
 
     # get histogram
     hist, binX, binY = histogram2d(X, Y, **kwargs)
