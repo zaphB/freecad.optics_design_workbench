@@ -73,6 +73,9 @@ def setupJupyterMaster(path):
   '''
   global _IS_MASTER_PROCESS
   _IS_MASTER_PROCESS = True
+  # complain if already registered
+  if io.isRegisteredJupyter():
+    raise ValueError(f'cannot setup jupyterMaster state if already in jupyter master state')
   # replace FCStd suffix
   if path.endswith('.FCStd'):
     path = path[:-6]+'.OpticsDesign'
