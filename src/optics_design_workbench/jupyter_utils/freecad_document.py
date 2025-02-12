@@ -117,7 +117,7 @@ class FreecadProperty:
     else:
       try:
         if ( (out:=self._doc.query(f'{self._freecadShellRepr()}; print("success")', 
-                                  expect='success:')) != 'success' ):
+                                  expect='success')) != 'success' ):
           raise ValueError(f'property {self} does not exist')    
       except Exception:
         io.warn(f'running {"call" if isCall else "ensureExists"} line failed: {self._freecadShellRepr()}')
@@ -130,7 +130,7 @@ class FreecadProperty:
     if self._isConstraint:
       return self._sketchObjReference.setDatum(self._constraintIndex, value)
     else:
-      setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {value}'
+      setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {repr(value)}'
       if _PRINT_SETTER_AND_CALL_LINES:
         io.verb(f'running setter line: {setterLine.strip()}')
 
@@ -237,7 +237,6 @@ class FreecadObject(FreecadProperty):
       try:
         # force careful flushing because we need the exact response to object count also in fastMode
         self._doc._flushOutput(forceCareful=True)
-
         objectCount = int(self._doc.query(f'print(len( App.activeDocument().getObjectsByLabel("{self._obj}") ))'))
         # zero objects with given label exist -> fail
         if objectCount == 0:
@@ -262,16 +261,7 @@ class FreecadObject(FreecadProperty):
                        f'not exist in freecad document (see exceptions above for detailed reason)')
   
   def __setattr__(self, key, value):
-    if (out:=self._doc.query(
-            f'try: ',
-            f'  {self._freecadShellRepr()}.{key} = {value}',
-            f'except Exception: ',
-            f'  print("failed") ',
-            f'else: ',
-            f'  print("success")', 
-            expect=['failed', 'success']
-         ) != 'success'):
-      raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
+    self.__getattr__(key).set(value)
 
   def __getattr__(self, key):
     return FreecadProperty(self._doc, self._obj, key, 
@@ -759,7 +749,7 @@ class FreecadDocument:
 
       # check for result line
       if line:=self.readline():
-        if expect is not None and line not in expect:
+        if expect is not None and expect not in line:
           continue
         if _PRINT_FREECAD_COMMUNICATION:
           io.verb(f'< {line}')

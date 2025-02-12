@@ -10,6 +10,9 @@ import threading
 import time
 import traceback
 import functools
+import multiprocessing
+import pickle
+from atomicwrites import atomic_write
 
 from .. import io
 from . import freecad_document
@@ -21,6 +24,40 @@ _ALL_SWEEPERS = []
 def closeAllSweepers():
   for s in _ALL_SWEEPERS:
     s.close()
+
+@functools.cache
+def _mpCtx():
+  # use safest method='spawn' even if it is rather slow, but SweeperWorkers
+  # will live many minutes usually, so the overhead does not matter
+  return multiprocessing.get_context('spawn')
+
+class SweeperOptimizeWorker:
+  def __init__(self, sweeper, optimizeArgs):
+    self._optimizeArgs = optimizeArgs
+    self._sweeperInstance = sweeper
+
+    # setup history dump path
+    self._optimizeArgs['historyDumpPath'] = self.historyDumpPath()
+
+    # make sure background worker will never plot anything on his own
+    self._optimizeArgs['progressPlotInterval'] = inf
+
+    # make sure sweeper sweeper document is closed to avoid inheriting
+    # the opened FreecadDocument attributes to the child process
+    self._sweeperInstance.close()
+
+    # setup and start child process
+    self._process = _mpCtx().Process(target=self._work)
+    self._process.start()
+
+  def historyDumpPath(self):
+    pass
+
+  def _work(self):
+    self._sweeperInstance.optimize(**self._optimizeArgs)
+
+
+
 
 class ParameterSweeper:
   '''
@@ -203,11 +240,13 @@ class ParameterSweeper:
   def optimize(self, minimizeFunc, parameters, simulationMode, 
                prepareSimulation=None, simulationKwargs={},
                minimizeKwargs={}, progressPlotInterval=30, 
-               method=None, **kwargs):
+               method=None, historyDumpPath=None, 
+               historyDumpInterval=60, **kwargs):
 
     # setup progress and timing vars
     t0 = time.time()
     lastProgressPlot = 0
+    lastHistoryDump = time.time()
     minimizeFuncHist = []
     allParamsHist = []
     bestPenaltySoFar, bestParametersSoFar, bestResultSoFar = inf, None, None
@@ -275,6 +314,13 @@ class ParameterSweeper:
             if len(allParamsHist) > 1e4:
               allParamsHist[:] = allParamsHist[::2]
             
+            # dump entire history to file if enabled
+            if historyDumpPath:
+              if time.time()-lastHistoryDump > historyDumpInterval:
+                lastHistoryDump = time.time()
+                with atomic_write(historyDumpPath, mode='wb', overwrite=True) as f:
+                  pickle.dump(allParamsHist, f)
+
             # return the penalty value
             return penalty
 
