@@ -235,6 +235,9 @@ class FreecadObject(FreecadProperty):
     # ensure at exactly one object exists
     if not self._internalObjectName:
       try:
+        # force careful flushing because we need the exact response to object count also in fastMode
+        self._doc._flushOutput(forceCareful=True)
+
         objectCount = int(self._doc.query(f'print(len( App.activeDocument().getObjectsByLabel("{self._obj}") ))'))
         # zero objects with given label exist -> fail
         if objectCount == 0:
