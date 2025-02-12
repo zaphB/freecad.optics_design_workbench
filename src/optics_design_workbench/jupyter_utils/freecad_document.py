@@ -284,7 +284,7 @@ class FreecadDocument:
   
   The document is intended to be used as a context manager to clean up after itself.
   '''
-  def __init__(self, path=None, freecadExecutable=None):
+  def __init__(self, path=None, freecadExecutable=None, openFreshCopy=False):
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
@@ -313,6 +313,24 @@ class FreecadDocument:
     else:
       freecadExecutable = 'FreeCAD'
 
+    # if openFreshCopy is True, create temp folder and copy freecad file in there, 
+    # and modify path attributes accordingly
+    self._openFreshCopy = openFreshCopy
+    self._originalPath = path
+    if openFreshCopy:
+      # find unique filename for FCStd file
+      tempDirName = self._getTempFolder()
+      while True:
+        uniqueName = f'{dirname[:-6]}-{int(time.time()*1e3)}-pid{os.getpid()}-thread{threading.get_ident()}.FCStd'
+        if not os.path.exists(f'{tempDirName}/{uniqueName}'):
+          break
+
+      # copy FCStd file to temp dir
+      os.copy(path, f'{tempDirName}/{uniqueName}')
+
+      # modify path variable for following initialization
+      path = f'{tempDirName}/{uniqueName}'
+
     # save in attributes
     self._path = path
     self._freecadExecutable = freecadExecutable
@@ -328,11 +346,27 @@ class FreecadDocument:
     self._freecadInteractionTimesList = [time.time()]
     self._previousFastModeEnabled = False
 
+    # run temp dir cleanup
+    self._sanitizeTempFolder()
+
   def __repr__(self):
     return self.__str__()
 
   def __str__(self):
     return f'<FreecadDocument {os.path.basename(self._path)}>'
+
+  def _getTempFolder(self):
+    basename, fname = os.path.split(self._originalPath)
+    tempDirName = f'{basename}/temp-{fname[:-6]}.OpticsDesign'
+    os.makedirs(tempDirName, exist_ok=True)
+    return tempDirName
+
+  def _sanitizeTempFolder(self):
+    # remove files that did not change for a long time, import logs to
+    # original folder
+    for e in os.scandir(self._getTempFolder()):
+      pass
+
 
   ###########################################################################
   # FILE MANIPULATION/SIMULATION TRIGGER LOGIC
@@ -585,6 +619,10 @@ class FreecadDocument:
     # print success
     io.verb(f'done in {time.time()-t0:.1f}s')
 
+    # run temp dir cleanup
+    self._sanitizeTempFolder()
+
+
   ###########################################################################
   # SUBPROCESS IO LOGIC
 
@@ -599,13 +637,24 @@ class FreecadDocument:
   def _fastModeEnabled(self):
     T = array(self._freecadInteractionTimesList)
 
-    # enable fast mode if more than 10 freecad interactions
-    # within last 3 seconds
+    # enable fast mode if more than 100 freecad interactions
+    # within last 3 seconds, only disable if less then 100
+    # interactions within 10 seconds 
     #io.verb(f'{sum( time.time()-T < 5 )=}')
-    enable = sum( time.time()-T < 5 ) > 100
+    if self._previousFastModeEnabled:
+      enable = sum( time.time()-T < 10 ) > 100
+    else:
+      enable = sum( time.time()-T < 3 ) > 100
+
+    # if fast mode was just ended, make sure to flush buffers
+    if not enable and self._previousFastModeEnabled:
+      self._flushOutput(forceCareful=True)
+
+    # update previousFastMode attribute and log if fastModeEnable changed
     if enable != self._previousFastModeEnabled:
       io.verb(f'{"enabled" if enable else "disabled"} freecad communication fast mode')
       self._previousFastModeEnabled = enable
+
     return enable
 
   def write(self, *data):
@@ -618,7 +667,7 @@ class FreecadDocument:
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
 
-  def _flushOutput(self, timeout=3):
+  def _flushOutput(self, timeout=3, forceCareful=False):
     self._updateInteractionTime()
     t0 = time.time()
 
@@ -626,8 +675,8 @@ class FreecadDocument:
     self.readErr()
     self.read()
 
-    # skip carful flush if fastMode is avtive
-    if not self._fastModeEnabled():
+    # skip careful flush if fastMode is active (and not forced)
+    if forceCareful or not self._fastModeEnabled():
       # ask to print random number
       rn = f'{random.random():.8f}'
       self.write(f'print("{rn}")')
@@ -754,6 +803,10 @@ class FreecadDocument:
 
     io.verb(f'done in {time.time()-t0:.1f}s')
     processes.unsetJupyterMaster()
+
+    # run temp dir cleanup
+    self._sanitizeTempFolder()
+
 
   def isRunning(self):
     if self._isRunning:

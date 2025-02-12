@@ -60,6 +60,23 @@ class PointSourceProxy(GenericSourceProxy):
                 'ThetaResolutionNumericMode', 'PhiResolutionNumericMode'):
       self._clearVrv(obj)
 
+    # parse fanPhi0
+    if prop == 'FanPhi0':
+      try:
+        parsed = self._parsedFanPhi0(obj) 
+      except Exception:
+        io.err(f'invalid value for FanPhi0')
+        setattr(obj, prop, '0')
+      else:
+        if parsed < -2*pi:
+          io.err(f'value for FanPhi0 out of range [-2*pi, 2*pi]')
+          setattr(obj, prop, '-2*pi')
+        if parsed > 2*pi:
+          io.err(f'value for FanPhi0 out of range [-2*pi, 2*pi]')
+          setattr(obj, prop, '2*pi')
+
+  def _parsedFanPhi0(self, obj):
+    return float(sy.sympify(getattr(obj, 'FanPhi0')).evalf())
 
   def _getVrv(self, obj):
     if NON_SERIALIZABLE_STORE.get(self, None) is None:
@@ -120,7 +137,7 @@ class PointSourceProxy(GenericSourceProxy):
       if l1 < _limits[0] or l2 > _limits[1]:
         if not isRecursive:
           io.err(f'domain {domain} out of bounds, expect both boundaries to be within {limits}.')
-        orig1, orig2 = [s.strip() for domain.split(',')]
+        orig1, orig2 = [s.strip() for s in domain.split(',')]
         limited = f'{limits[0] if l1 < _limits[0] else orig1}, {limits[1] if l2 > _limits[1] else orig2}'
         return limited, self._parsedDomain(limited, None)[1]
 
@@ -135,7 +152,7 @@ class PointSourceProxy(GenericSourceProxy):
         # if silence error is not set let's do our best to suggest a good domain
         else:
           io.err(f'domain span of {domain} out of bounds, expect {spanLimits[0]} <= domain span <= {spanLimits[1]} .')
-          orig1, orig2 = [s.strip() for domain.split(',')]
+          orig1, orig2 = [s.strip() for s in domain.split(',')]
           limited = f'{orig1}, {spanLimits[1] if l1==0 else {_spanLimits[1]}}'
           # silence errors and pass all limits etc. to recursive call here, because we might violate limits
           # with our enforced span limit
@@ -202,31 +219,76 @@ class PointSourceProxy(GenericSourceProxy):
 
       # create obj.Fans ray fans oriented in phi0
       totalFanCount = int(min([obj.Fans, maxFanCount]))
-      for fanIndex, _phi in enumerate(obj.FanPhi0 + linspace(0, pi, totalFanCount+1)[:-1]):
+      for fanIndex, _phi in enumerate(self._parsedFanPhi0(obj) + linspace(0, pi, totalFanCount+1)[:-1]):
 
-          # generate the required thetas to place beams
-          # calc the phi+pi part of the fan using using positive and negative 
-          # thetas here (sorry, a little hacky...)
-          l1, l2 = self.parsedThetaDomain(obj)
+        # generate the required thetas to place beams, calc the phi+pi part of the
+        # fan using using positive and negative thetas here
+        l1, l2 = self.parsedThetaDomain(obj)
+        if l1 == 0:
+          isFullFanMode = True
+          _report = getattr(self, '_reportedFullFanMode', None)
+          if _report is None or _report != isFullFanMode:
+            io.verb(f'using full fan-mode')
+            self._reportedFullFanMode = True
           vrv = distributions.ScalarRandomVariable(
-                      obj.PowerDensity, # no sin(theta) correction here because fans are 2D
+                      # no sin(theta) correction here because fans are 2D, but make sure theta 
+                      # is taken as absolute value because of the negative-theta-hack:
+                      obj.PowerDensity.replace('theta', 'abs(theta)'),
                       variable='theta',
                       variableDomain=(-l2,l2), 
                       numericalResolution=obj.ThetaResolutionNumericMode)
-          vrv.compile(phi=phi)
+          vrv.compile(phi=_phi)
           _posNegThetas = vrv.findGrid(N=raysPerFan)
+          #io.verb(f'{_posNegThetas=}')
 
+          # store whether most central ray has positive of negative theta to
+          # decide later where to place rayIndex==0
+          _isCentralThetaNegative = (abs(_posNegThetas).min() < 0)
+
+        # make one iteration per ray fan half
         for rayIndexSign, phi in ([1, _phi], [-1, _phi+pi]):
+
+          # generate the required thetas to place beams in two halves if 
+          # lower theta limit l1 is not zero
+          if l1 != 0:
+            isFullFanMode = False
+            _report = getattr(self, '_reportedFullFanMode', None)
+            if _report is None or _report != isFullFanMode:
+              io.verb(f'using split fan-mode')
+              self._reportedFullFanMode = False
+            vrv = distributions.ScalarRandomVariable(
+                        # no sin(theta) correction here because fans are 2D
+                        obj.PowerDensity,
+                        variable='theta',
+                        variableDomain=(l1,l2), 
+                        numericalResolution=obj.ThetaResolutionNumericMode)
+            vrv.compile(phi=_phi)
+            _thetas = vrv.findGrid(N=raysPerFan)
+            #io.verb(f'{_thetas=}')
+
+          # select thetas belonging to this half of the fan
+          if rayIndexSign == 1:
+            _thetas = _posNegThetas[_posNegThetas>=0]
+          else:
+            _thetas = -_posNegThetas[_posNegThetas<0]
+          #io.verb(f'{_isCentralThetaNegative=}, {rayIndexSign=}, {_thetas=}')
 
           # this loop may run for quite some time, keep GUI responsive by handling events
           keepGuiResponsiveAndRaiseIfSimulationDone()
 
-          totalRaysInFan = 2*len(_thetas)-1
-          for rayIndex, theta in enumerate(_thetas):
+          for rayIndex, theta in enumerate(sorted(_thetas)):
 
-            # skip rayIndex zero in one half of fan
-            if rayIndexSign == -1 and rayIndex == 0:
-              continue
+            if isFullFanMode:
+              # increment index if we are on the side of the fan that is 
+              # to avoid having two rayIndex==0 rays 
+              if (       (_isCentralThetaNegative and rayIndexSign == +1)
+                  or (not _isCentralThetaNegative and rayIndexSign == -1) ):
+                rayIndex += 1
+            else:
+              # in split ray fan mode just increment the negative ray indices
+              # by one to avoid having rayIndex==0 twice
+              if rayIndexSign == -1:
+                rayIndex += 1
 
             # this loop may run for quite some time, keep GUI responsive by handling events
             keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -236,7 +298,7 @@ class PointSourceProxy(GenericSourceProxy):
                                metadata=dict(fanIndex=fanIndex, 
                                              rayIndex=rayIndex*rayIndexSign,
                                              totalFanCount=totalFanCount,
-                                             totalRaysInFan=totalRaysInFan))
+                                             totalRaysInFan=len(_posNegThetas)))
 
     # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
     elif mode == 'true' or mode == 'pseudo':
@@ -289,7 +351,7 @@ class AddPointSource(AddGenericSource):
         ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
         ('PhiResolutionNumericMode', 3, 'Integer', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
-        ('FanPhi0', 0, 'Float', 'Change this to rotate fans around optical axis.'),
+        ('FanPhi0', '0', 'String', 'Change this to rotate fans around optical axis.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
        ]),
     ]:

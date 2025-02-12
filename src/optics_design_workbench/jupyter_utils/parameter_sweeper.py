@@ -61,8 +61,11 @@ class ParameterSweeper:
 
   def close(self):
     with self._freecadDocumentLock:
-      if self._freecadDocument:
-        self._freecadDocument.close()
+      try:
+        if self._freecadDocument:
+          self._freecadDocument.close()
+      except BrokenPipeError:
+        pass
       self._freecadDocument = None
 
       # remove self from global list
@@ -159,6 +162,43 @@ class ParameterSweeper:
 
   def bounds(self):
     return {k: self._bounds.get(k, (-inf, inf)) for k in self.parameters().keys()}
+
+  def optimizeStrategy(*args, relWaitForParallel=0.1):
+    '''
+    Pass a (nested) list of dictionaries with optimize args to run a sequence of
+    optimization steps with varied free parameters, methods, etc.
+
+    Passing dictionaries only will cause a sequence of optimize-calls with parameters
+    given by the dictionary. All dictionaries inherit keys from prededing arg-dict.
+    Only changed keys need to be specified. The following example will run one optimize
+    with default method and the remaining args given in the first dict. The second 
+    optimize run will use the same arguments as the first, except for method='evolution'. 
+    
+    optimizer.optimizeStrategy(
+      dict(method=None, minimizeFunc=...),
+      dict(method='evolution') 
+    )
+
+    If a list if dictionaries is passed instead of a dictionary, two optimize calls
+    will be run in parallel. Again later dicts in the list inherit from previous dicts.
+    The following example will first run the default method and a Nelder-Mead optimizer
+    in parallel. After one of them finished, we will wait relWaitForParallel*runtime 
+    for the other optimize run and then proceed with a method=evolution run:
+
+    optimizer.optimizeStrategy(
+      [ dict(method=None, minimizeFunc=...),
+        dict(method='Nelder-Mead') 
+      ],
+      dict(method='evolution') 
+    )
+    '''
+    # check validity of strategy
+    descriptionStr = ''
+    if not len(args):
+      raise ValueError('no steps for optimization strategy given')
+    for step in args:
+      raise ValueError('not implemented')
+
 
   def optimize(self, minimizeFunc, parameters, simulationMode, 
                prepareSimulation=None, simulationKwargs={},
