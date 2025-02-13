@@ -13,6 +13,7 @@ import traceback
 import functools
 import multiprocessing
 import pickle
+import cloudpickle
 import copy
 from atomicwrites import atomic_write
 
@@ -20,25 +21,37 @@ from .. import io
 from . import freecad_document
 from . import progress
 
-CLOSE_FREECAD_TIMEOUT = 30
+CLOSE_FREECAD_TIMEOUT = 90
 _ALL_OPEN_SWEEPERS = []
+
 
 def closeAllSweepers():
   for s in _ALL_OPEN_SWEEPERS:
     s.close()
 
+
 @functools.cache
 def _mpCtx():
   # use safest method='spawn' even if it is rather slow, but SweeperWorkers
   # will live many minutes usually, so the overhead does not matter
-  return multiprocessing.get_context('spawn')
+  return multiprocessing.get_context('forkserver')
+
+
+def _unpickleAndWork(pickledSweeperOptimizeWorker):
+  '''
+  wrapper around SweeperOptimizeWorker._work method that is 
+  a suitable multiprocessing.Process target
+  '''
+  _self = pickle.loads(pickledSweeperOptimizeWorker)
+  _self.work()
+
 
 class SweeperOptimizeWorker:
   def __init__(self, sweeper, optimizeArgs):
     self._optimizeArgs = optimizeArgs
 
     # set path to dump history to
-    self._historyDumpPath = os.path.realpath(f'temp-optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
+    self._historyDumpPath = os.path.abspath(f'temp-optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
 
     # setup history dump path and randomize historyDumpInterval to
     # avoid synchronization
@@ -46,11 +59,7 @@ class SweeperOptimizeWorker:
     self._optimizeArgs['historyDumpInterval'] = 30+30*random.random()
 
     # make sure background worker will never plot anything on his own
-    self._optimizeArgs['progressPlotInterval'] = inf
-
-    # set run in fresh copy to true to prevent any worker from every
-    # touching the main FCStd file
-    self._optimizeArgs['openFreshCopy'] = True
+    # self._optimizeArgs['progressPlotInterval'] = inf
 
     # setup history attrs
     self._history = []
@@ -63,9 +72,23 @@ class SweeperOptimizeWorker:
     self._sweeperInstance.close()
     self._sweeperInstance._freecadLock = None
 
+    # Pickle sweeper instance and optimize args func using cloudpickle,
+    # because they are usually defined in a jupyter notebook.
+    # The multiprocessing module uses built-in pickle and will not be able
+    # to pass functions defined in the jupyter notebook to its workers. 
+    pickledSelf = cloudpickle.dumps(self)
+
     # setup and start child process
-    self._process = _mpCtx().Process(target=self._work)
+    self._process = _mpCtx().Process(target=_unpickleAndWork, args=(pickledSelf,))
     self._process.start()
+
+  def work(self):
+    # make sure run-in-fresh-copy-mode is enabled to prevent any worker
+    # from ever touching the main FCStd file
+    self._sweeperInstance.setOpenFreshCopyMode(True)
+
+    # run optimizer work
+    self._sweeperInstance.optimize(**self._optimizeArgs)
 
   def historyDumpPath(self):
     return self._historyDumpPath
@@ -73,12 +96,13 @@ class SweeperOptimizeWorker:
   def fetchHistory(self):
     # try to load history to update cached history
     try:
-      with open(self.historyDumpPath, 'rb') as f:
-        self._history = pickle.load(f)
-      os.remove(self.historyDumpPath)
-    except Exception:
-      pass
-
+      if os.path.exists(self.historyDumpPath()):
+        with open(self.historyDumpPath(), 'rb') as f:
+          self._history = pickle.load(f)
+        os.remove(self.historyDumpPath())
+    except Exception:      
+      io.verb(f'fetching history from {self.historyDumpPath()} '
+              f'failed:\n\n'+traceback.format_exc())
     # return history
     return self._history
 
@@ -90,9 +114,6 @@ class SweeperOptimizeWorker:
 
   def kill(self):
     return self._process.kill()
-
-  def _work(self):
-    self._sweeperInstance.optimize(**self._optimizeArgs)
 
 
 class ParameterSweeper:
@@ -157,6 +178,19 @@ class ParameterSweeper:
       # own soon, because we set _freecadDocument to None)
       self._closeDocumentAfterInactivityThread = None
 
+  def setOpenFreshCopyMode(self, mode):
+    # close file if mode changed to ensure it is re-opened with proper mode
+    # on next occasion
+    prevMode = self._freecadDocumentKwargs.get('openFreshCopy', None)
+    if prevMode != mode:
+      self.close()
+
+    # update freecad document kwargs
+    self._freecadDocumentKwargs['openFreshCopy'] = mode
+
+  def getOpenFreshCopyMode(self):
+    return self._freecadDocumentKwargs.get('openFreshCopy', None)
+
   def open(self):
     with self._freecadDocumentLock():
       if self._freecadDocument is None:
@@ -181,7 +215,10 @@ class ParameterSweeper:
     with self._freecadDocumentLock():
       self.open()
       return self._freecadDocument
-  
+
+  def resultsPath(self):
+    return self.freecadDocument().resultsPath()
+
   def _parameterNodeDict(self):
     with self._freecadDocumentLock():
       self.open()
@@ -246,7 +283,10 @@ class ParameterSweeper:
   def bounds(self):
     return {k: self._bounds.get(k, (-inf, inf)) for k in self.parameters().keys()}
 
-  def optimizeStrategyStep(self, *args, relWaitForParallel=1/3, progressPlotInterval=30):
+  def optimizeStrategyBegin(self):
+    self._optimizeStepsArgCache = {}
+
+  def optimizeStrategyStep(self, *args, relWaitForParallel=1/3, progressPlotInterval=15):
     '''
     Pass one or more dictionaries with optimize args to run
     optimization steps with varied free parameters, methods, etc. in parallel
@@ -279,6 +319,8 @@ class ParameterSweeper:
       dict(method='evolution') 
     )
     '''
+    global CLOSE_FREECAD_TIMEOUT
+
     # check validity of strategy
     if not len(args):
       raise ValueError('no steps for optimization strategy given')
@@ -304,11 +346,15 @@ class ParameterSweeper:
       for kwargs in args:
         workers.append(SweeperOptimizeWorker(self, kwargs))
 
+      # increase freecad timeout duration to a very log time to avoid annoying reopenings
+      # during optimize strategy
+      CLOSE_FREECAD_TIMEOUT = 3600
+      
       bestParamsDict = None
       try:
         # monitor workers until happy
-        lastWorkerFinished = None
-        runningWorkers = []
+        lastWorkerFinished = inf
+        runningWorkers = list(workers)
         bestPenalty = inf
         lastPenaltyImprovement = 0
         tryToEndWorkersSince = inf
@@ -344,13 +390,21 @@ class ParameterSweeper:
             # plot hits
             sca(ax2)
             bestResultSoFar = freecad_document.RawFolder(allParamsHist[argmin([h[1] for h in allParamsHist])][3])
-            bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
+            bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if args[0].get('simulationMode', 'true')=='fans' else []))
             gca().set_title(f'best result so far', fontsize=10)
             tight_layout()
+
+            # save plot to disk
+            savefig(f'{self.resultsPath()}/optimize-progress.pdf')
+
+            # show plot in notebook
             show()
 
+            # close figure
+            close()
+
             # print status
-            io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}')
+            io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}, {runningWorkers}/{workers} workers busy')
 
           # update running workers list
           for w in runningWorkers:
@@ -367,7 +421,7 @@ class ParameterSweeper:
           # if at least one worker finished and none of the other workers managed
           # to improve the penalty since relWaitForParallel*runtime, exit all remaining
           # workers
-          if ( isfinite(tryToEndWorkersSince)
+          if ( not isfinite(tryToEndWorkersSince)
                and time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
                and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0) ):
             io.verb(f'at least one worker finished and others did not improve for more '
@@ -392,12 +446,36 @@ class ParameterSweeper:
       finally:
         io.info(f'optimize strategy step ended, {bestParamsDict=}')
         if bestParamsDict:
-          self.set(bestParamsDict)
+          self.set(**bestParamsDict)
+
+        # wait for all workers to finish
+        lastPrint = time.time()
+        while True:
+          runningWorkers = [w for w in workers if w.isRunning()]
+          if time.time()-lastPrint > 3:
+            lastPrint = time.time()
+            io.warn(f'optimize strategy step ended, but still waiting for {len(workers)} to exit...')
+          for w in runningWorkers:
+            w.terminate()
+          time.sleep(1/2)
+
+        # make sure all progress files are cleared
+        for w in workers:
+          w.fetchHistory()
+
+        # restore standard 90s freecad timeout
+        CLOSE_FREECAD_TIMEOUT = 90
+
+  def optimizeStrategyEnd(self):
+    self._optimizeStepsArgCache = {}
+
+    # import/delete all created temp folders
+    pass
 
 
   def optimize(self, minimizeFunc, parameters, simulationMode, 
                prepareSimulation=None, simulationKwargs={},
-               minimizeKwargs={}, progressPlotInterval=30, 
+               minimizerKwargs={}, progressPlotInterval=30, 
                method=None, historyDumpPath=None, 
                historyDumpInterval=inf, **kwargs):
 
@@ -415,7 +493,8 @@ class ParameterSweeper:
 
       # wrap minimize func, run simulation before and pass additional args
       def _simulateAndCalcMinimizeFunc(args):
-        nonlocal bestPenaltySoFar, bestParametersSoFar, bestResultSoFar, lastProgressPlot
+        nonlocal lastProgressPlot, lastHistoryDump
+        nonlocal bestPenaltySoFar, bestParametersSoFar, bestResultSoFar
 
         # retry up to five times if exception is raised in the loop
         for retryNo in range(999):
@@ -452,7 +531,16 @@ class ParameterSweeper:
               bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
               gca().set_title(f'best result so far', fontsize=10) 
               tight_layout()
-              show()
+
+              # save plot to disk
+              savefig(f'{self.resultsPath()}/optimize-progress.pdf')
+
+              # show in notebook (if not running as worker)
+              if not self.getOpenFreshCopyMode():
+                show()
+
+              # close figure
+              close()
 
               # print status
               io.info(f'optimizer running since {io.secondsToStr(time.time()-t0)}')
@@ -478,8 +566,11 @@ class ParameterSweeper:
             if historyDumpPath:
               if time.time()-lastHistoryDump > historyDumpInterval:
                 lastHistoryDump = time.time()
-                with atomic_write(historyDumpPath, mode='wb', overwrite=True) as f:
-                  pickle.dump(allParamsHist, f)
+                try:
+                  with atomic_write(historyDumpPath, mode='wb', overwrite=True) as f:
+                    pickle.dump(allParamsHist, f)
+                except Exception:
+                  io.warn(f'dumping progress failed:\n\n'+traceback.format_exc())
 
             # return the penalty value
             return penalty
@@ -507,12 +598,12 @@ class ParameterSweeper:
       # run actual minimizer
       try:
         if method == 'annealing':
-          return scipy.optimize.dual_annealing(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+          return scipy.optimize.dual_annealing(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizerKwargs) 
         elif method == 'evolution':
-          return scipy.optimize.differential_evolution(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+          return scipy.optimize.differential_evolution(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizerKwargs) 
         if method:
-          minimizeKwargs['method'] = method
-        return scipy.optimize.minimize(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+          minimizerKwargs['method'] = method
+        return scipy.optimize.minimize(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizerKwargs) 
 
       # before returning, make sure parameters for global optimum are set
       finally:

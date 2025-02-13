@@ -19,6 +19,7 @@ import random
 import functools
 import glob
 import pickle
+import shutil
 
 from .. import io
 from ..simulation import processes
@@ -302,11 +303,11 @@ class FreecadDocument:
     if freecadExecutable:
       if not os.path.exists(freecadExecutable):
         raise RuntimeError(f'path of custom freecad executable {freecadExecutable} '
-                          f'does not seem to exist')
+                           f'does not seem to exist')
     else:
       freecadExecutable = 'FreeCAD'
 
-    # if openFreshCopy is True, create temp folder and copy freecad file in there, 
+    # if openFreshCopy is True, create temp folder, copy freecad file in there, 
     # and modify path attributes accordingly
     self._openFreshCopy = openFreshCopy
     self._originalPath = path
@@ -314,12 +315,12 @@ class FreecadDocument:
       # find unique filename for FCStd file
       tempDirName = self._getTempFolder()
       while True:
-        uniqueName = f'{dirname[:-6]}-{int(time.time()*1e3)}-pid{os.getpid()}-thread{threading.get_ident()}.FCStd'
+        uniqueName = f'{os.path.basename(path)[:-6]}-{int(time.time()*1e3)}-pid{os.getpid()}-thread{threading.get_ident()}.FCStd'
         if not os.path.exists(f'{tempDirName}/{uniqueName}'):
           break
 
       # copy FCStd file to temp dir
-      os.copy(path, f'{tempDirName}/{uniqueName}')
+      shutil.copy(path, f'{tempDirName}/{uniqueName}')
 
       # modify path variable for following initialization
       path = f'{tempDirName}/{uniqueName}'
@@ -347,6 +348,9 @@ class FreecadDocument:
 
   def __str__(self):
     return f'<FreecadDocument {os.path.basename(self._path)}>'
+
+  def resultsPath(self):
+    return self._resultsPath
 
   def _getTempFolder(self, create=False):
     basename, fname = os.path.split(self._originalPath)
@@ -819,7 +823,6 @@ class FreecadDocument:
 
     # run temp dir cleanup
     self._sanitizeTempFolder()
-
 
   def isRunning(self):
     if self._isRunning:
