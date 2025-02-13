@@ -6,12 +6,14 @@ import matplotlib.ticker
 import seaborn as sns
 import scipy.optimize
 
+import os
 import threading
 import time
 import traceback
 import functools
 import multiprocessing
 import pickle
+import copy
 from atomicwrites import atomic_write
 
 from .. import io
@@ -19,10 +21,10 @@ from . import freecad_document
 from . import progress
 
 CLOSE_FREECAD_TIMEOUT = 30
-_ALL_SWEEPERS = []
+_ALL_OPEN_SWEEPERS = []
 
 def closeAllSweepers():
-  for s in _ALL_SWEEPERS:
+  for s in _ALL_OPEN_SWEEPERS:
     s.close()
 
 @functools.cache
@@ -34,7 +36,9 @@ def _mpCtx():
 class SweeperOptimizeWorker:
   def __init__(self, sweeper, optimizeArgs):
     self._optimizeArgs = optimizeArgs
-    self._sweeperInstance = sweeper
+
+    # set path to dump history to
+    self._historyDumpPath = os.path.realpath(f'temp-optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
 
     # setup history dump path and randomize historyDumpInterval to
     # avoid synchronization
@@ -48,15 +52,16 @@ class SweeperOptimizeWorker:
     # touching the main FCStd file
     self._optimizeArgs['openFreshCopy'] = True
 
-    # set path to dump history to
-    self._historyDumpPath = os.path.realpath(f'temp-optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
-
-    # make sure sweeper sweeper document is closed to avoid inheriting
-    # the opened FreecadDocument attributes to the child process
-    self._sweeperInstance.close()
-
     # setup history attrs
     self._history = []
+
+    # Make sure sweeper sweeper document is closed to avoid inheriting
+    # the opened FreecadDocument attributes to the child process.
+    # Also remove the threading lock object, which cannot be passed to 
+    # the child process (lock will be recreated next time it is needed)
+    self._sweeperInstance = sweeper
+    self._sweeperInstance.close()
+    self._sweeperInstance._freecadLock = None
 
     # setup and start child process
     self._process = _mpCtx().Process(target=self._work)
@@ -112,10 +117,15 @@ class ParameterSweeper:
     self._getParametersFunc = getParametersFunc
     self._freecadDocumentKwargs = freecadDocumentKwargs
     self._freecadDocument = None
-    self._freecadDocumentLock = threading.RLock()
     self._closeDocumentAfterInactivityThread = None
+    self._freecadLock = None
     self._bounds = {}
     self._optimizeStepsArgCache = {}
+
+  def _freecadDocumentLock(self):
+    if self._freecadLock is None:
+      self._freecadLock = threading.RLock()
+    return self._freecadLock
 
   def _closeOnInactivity(self):
     while self._freecadDocument:
@@ -129,7 +139,7 @@ class ParameterSweeper:
     self.close()
 
   def close(self):
-    with self._freecadDocumentLock:
+    with self._freecadDocumentLock():
       try:
         if self._freecadDocument:
           self._freecadDocument.close()
@@ -138,16 +148,20 @@ class ParameterSweeper:
       self._freecadDocument = None
 
       # remove self from global list
-      _ALL_SWEEPERS[:] = [s for s in _ALL_SWEEPERS if s != self]
+      _ALL_OPEN_SWEEPERS[:] = [s for s in _ALL_OPEN_SWEEPERS if s != self]
 
       # clear parameter cache if file was closed
       self.parameters.cache_clear()
 
+      # remove reference to background thread (it will end on its 
+      # own soon, because we set _freecadDocument to None)
+      self._closeDocumentAfterInactivityThread = None
+
   def open(self):
-    with self._freecadDocumentLock:
+    with self._freecadDocumentLock():
       if self._freecadDocument is None:
         # append self to global sweeper list
-        _ALL_SWEEPERS.append(self)
+        _ALL_OPEN_SWEEPERS.append(self)
 
         # create instance and open freecad document
         self._freecadDocument = freecad_document.FreecadDocument(**self._freecadDocumentKwargs)
@@ -164,12 +178,12 @@ class ParameterSweeper:
         self._closeDocumentAfterInactivityThread.start()
 
   def freecadDocument(self):
-    with self._freecadDocumentLock:
+    with self._freecadDocumentLock():
       self.open()
       return self._freecadDocument
   
   def _parameterNodeDict(self):
-    with self._freecadDocumentLock:
+    with self._freecadDocumentLock():
       self.open()
       res = self._getParametersFunc(self._freecadDocument)
       if not len(res):
@@ -179,11 +193,11 @@ class ParameterSweeper:
 
   @functools.cache
   def parameters(self):
-    with self._freecadDocumentLock:
+    with self._freecadDocumentLock():
       return {k: v.get() for k,v in self._parameterNodeDict().items()}
 
   def set(self, **kwargs):
-    with self._freecadDocumentLock:
+    with self._freecadDocumentLock():
       paramDict = self._parameterNodeDict()
 
       # check whether keys are valid
@@ -232,7 +246,7 @@ class ParameterSweeper:
   def bounds(self):
     return {k: self._bounds.get(k, (-inf, inf)) for k in self.parameters().keys()}
 
-  def optimizeStrategyStep(*args, relWaitForParallel=1/3, progressPlotInterval=30):
+  def optimizeStrategyStep(self, *args, relWaitForParallel=1/3, progressPlotInterval=30):
     '''
     Pass one or more dictionaries with optimize args to run
     optimization steps with varied free parameters, methods, etc. in parallel
@@ -299,6 +313,7 @@ class ParameterSweeper:
         lastPenaltyImprovement = 0
         tryToEndWorkersSince = inf
         while True:
+
           # fetch history of all worker progresses
           allParamsHist = []
           for w in workers:
@@ -306,10 +321,11 @@ class ParameterSweeper:
           allParamsHist = sorted(allParamsHist, key=lambda e: e[0])
 
           # check if global best-penalty improved
-          if (_newBest:=min([h[1] for h in allParamsHist])) < bestPenalty:
+          if len(allParamsHist) and (_newBest:=min([h[1] for h in allParamsHist])) < bestPenalty:
             bestPenalty = _newBest
             lastPenaltyImprovement = time.time()
             bestParamsDict = allParamsHist[argmin([h[1] for h in allParamsHist])][4]
+            io.verb(f'found new best solution {bestPenalty=}, {bestParamsDict=}')
 
           # plot history of optimization and hits of best result so far
           if len(allParamsHist) > 5 and time.time()-lastProgressPlot > progressPlotInterval:
@@ -339,25 +355,33 @@ class ParameterSweeper:
           # update running workers list
           for w in runningWorkers:
             if not w.isRunning():
+              io.verb(f'worker {w} finished')
               lastWorkerFinished = time.time()
           runningWorkers = [w for w in runningWorkers if w.isRunning()]
 
           # end loop if all workers finished
           if not len(runningWorkers):
+            io.verb(f'all workers finished, exiting...')
             break
 
           # if at least one worker finished and none of the other workers managed
           # to improve the penalty since relWaitForParallel*runtime, exit all remaining
           # workers
-          if ( time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
-                and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0) ):
+          if ( isfinite(tryToEndWorkersSince)
+               and time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
+               and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0) ):
+            io.verb(f'at least one worker finished and others did not improve for more '
+                    f'than {io.secondsToStr(relWaitForParallel*(lastWorkerFinished-t0))}, '
+                    f'quitting remaining workers...')
             tryToEndWorkersSince = time.time()
           
           # send kill/terminate signals depending on wait time
           if time.time()-tryToEndWorkersSince > 10:
+            io.verb(f'issuing .kill() for {len(runningWorkers)} workers')
             for w in runningWorkers:
               w.kill()
           elif time.time()-tryToEndWorkersSince > 0:
+            io.verb(f'issuing .terminate() for {len(runningWorkers)} workers')
             for w in runningWorkers:
               w.terminate()
 
@@ -366,6 +390,7 @@ class ParameterSweeper:
         
       # make sure to apply best result to current FCStd file if loop ends
       finally:
+        io.info(f'optimize strategy step ended, {bestParamsDict=}')
         if bestParamsDict:
           self.set(bestParamsDict)
 
@@ -385,11 +410,11 @@ class ParameterSweeper:
     bestPenaltySoFar, bestParametersSoFar, bestResultSoFar = inf, None, None
 
     parameters = list(parameters)
-    with self._freecadDocumentLock:
+    with self._freecadDocumentLock():
       self.open()
 
       # wrap minimize func, run simulation before and pass additional args
-      def _simulateAndMinimizeFunc(args):
+      def _simulateAndCalcMinimizeFunc(args):
         nonlocal bestPenaltySoFar, bestParametersSoFar, bestResultSoFar, lastProgressPlot
 
         # retry up to five times if exception is raised in the loop
@@ -482,12 +507,12 @@ class ParameterSweeper:
       # run actual minimizer
       try:
         if method == 'annealing':
-          return scipy.optimize.dual_annealing(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+          return scipy.optimize.dual_annealing(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
         elif method == 'evolution':
-          return scipy.optimize.differential_evolution(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+          return scipy.optimize.differential_evolution(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
         if method:
           minimizeKwargs['method'] = method
-        return scipy.optimize.minimize(_simulateAndMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
+        return scipy.optimize.minimize(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizeKwargs) 
 
       # before returning, make sure parameters for global optimum are set
       finally:

@@ -325,15 +325,6 @@ def runSimulation(action, slaveInfo={}):
       if isMasterProcess() and continuous and gui_windows:
         gui_windows.showProgressWindow(store)
 
-    # Save document so background workers will work on the exact state of the project,
-    # but make sure to save only if GUI exists, otherwise all ViewProvider objects will
-    # break and loose their info. This implies that a master running in headless mode
-    # will not save before spawning the workers, because nothing can change in the document
-    # in headless mode.
-    io.verb(f'{isMasterProcess()=} and {App.GuiUp=}')
-    if isMasterProcess() and App.GuiUp:
-      _SIMULATING_DOCUMENT.save()
-
     ##########################################################################################
     # do pre-worker launched init and post-worker launched init of each light source
     # and optical object
@@ -354,6 +345,20 @@ def runSimulation(action, slaveInfo={}):
       else:
         backgroundWorkers = workers
         io.info(f'doing simulation work with {backgroundWorkers} background workers and lazy gui process')
+
+      # If background workers will be started, save document so they will work on the exact
+      # state of the project, but make sure to save only if GUI exists, otherwise all 
+      # ViewProvider objects will break and loose their info. 
+      # This implies that a master running in headless mode
+      # will not save before spawning the workers (which implies nothing must be can changed 
+      # in the document in headless mode)
+      if backgroundWorkers > 0 and App.GuiUp:
+        io.verb(f'saving document {App.GuiUp=}')
+        _SIMULATING_DOCUMENT.save()
+      else:
+        io.verb(f'skip saving document {App.GuiUp=}')
+
+      # actually launch workers
       for workerNo in range(backgroundWorkers):
         _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, simulationRunFolder=simulationRunFolder))
         freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()

@@ -419,17 +419,25 @@ class FreecadDocument:
 
         # check plausibility of result
         if len(newFolders) == 0 and not allowEmpty:
+
+          # no new folder appeared, show different exception texts depending on 
+          # fans/single or if error output occurred
           if action == 'fans' or 'single' in action:
             raise RuntimeError(f'no new results folder was created during {action} '
                               f'simulation, did you enable "Enable Store Single Shot '
-                              f'Data" in the active Simulation Settings?')
+                              f'Data" in the active Simulation Settings?'
+                              +self._errorOutText())
           raise RuntimeError(f'no new results folder was created during {action} '
-                            f'simulation, is another simulation running? '
-                            f'{self._path=}, {self._resultsPath=}')
+                             f'simulation, is another simulation running? '
+                             f'{self._path=}, {self._resultsPath=}'
+                             +self._errorOutText())
+        
+        # more than one new folder appeared
         elif len(newFolders) > 1:
           raise RuntimeError(f'somehow more than one result folder was created '
                             f'during {action} simulation, this should not be '
-                            f'possible...')
+                            f'possible...'
+                            +_errorOutText())
         # return result
         return RawFolder(f'{self._resultsPath}/raw/{newFolders[0]}') if len(newFolders) else None 
 
@@ -492,7 +500,9 @@ class FreecadDocument:
           if len((''.join(possibleStacktrace)).strip()):
             stacktraceGuess = f'; I guess it has something to do with this output:\n\n'+'\n'.join(possibleStacktrace)
           logfile = os.path.relpath(self._resultsPath+'/optics_design_workbench.log')
-          raise RuntimeError(f'simulation process failed, see logfile {logfile} for details'+stacktraceGuess) 
+          raise RuntimeError(f'simulation process failed, see logfile {logfile} for details'
+                              +stacktraceGuess
+                              +self._errorOutText())
 
         # return new results folder generated during the simulation
         return newFolder(allowEmpty=False)
@@ -620,6 +630,14 @@ class FreecadDocument:
 
   ###########################################################################
   # SUBPROCESS IO LOGIC
+
+  def _errorOutText(self):
+    'return a string to append to exceptions which hints to freecad error output'
+    errorOut = self.readErr()
+    if not errorOut.strip():
+      return ''
+    return (f'\n\nFreecad process had possibly related '
+            f'error output recently:\n\n{errorOut}')
 
   def lastInteractionTime(self):
     return self._freecadInteractionTimesList[-1]

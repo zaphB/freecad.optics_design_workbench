@@ -13,7 +13,6 @@ except ImportError:
 import os
 import warnings
 
-from .. import simulation_loop
 from . import point_source
 from . import optical_group
 from . import simulation_settings
@@ -23,7 +22,10 @@ def iconpath(name):
 
 
 def _allObjects():
-  for obj in simulation_loop.simulatingDocument().Objects:
+  # this hast to be imported here to avoid circular import problems
+  from .. import simulation
+
+  for obj in simulation.simulatingDocument().Objects:
     # make sure TypeId attribute can be read without exception 
     # before yiedling to avoid yielding deleted objects
     try:
