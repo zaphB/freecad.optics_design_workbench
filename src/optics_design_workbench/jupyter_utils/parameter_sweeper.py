@@ -285,8 +285,10 @@ class ParameterSweeper:
 
   def optimizeStrategyBegin(self):
     self._optimizeStepsArgCache = {}
+    self.open()
 
-  def optimizeStrategyStep(self, *args, relWaitForParallel=1/3, progressPlotInterval=15):
+  def optimizeStrategyStep(self, *args, progressCallback=None, 
+                           relWaitForParallel=1, progressPlotInterval=30):
     '''
     Pass one or more dictionaries with optimize args to run
     optimization steps with varied free parameters, methods, etc. in parallel
@@ -320,6 +322,7 @@ class ParameterSweeper:
     )
     '''
     global CLOSE_FREECAD_TIMEOUT
+    self.open()
 
     # check validity of strategy
     if not len(args):
@@ -344,6 +347,11 @@ class ParameterSweeper:
       # create worker objects
       workers = []
       for kwargs in args:
+        # sleep random time between worker creation to not stress the filesystem
+        # too much
+        time.sleep(1+random.random())
+
+        # launch and add worker to list
         workers.append(SweeperOptimizeWorker(self, kwargs))
 
       # increase freecad timeout duration to a very log time to avoid annoying reopenings
@@ -365,6 +373,8 @@ class ParameterSweeper:
           for w in workers:
             allParamsHist.extend(w.fetchHistory())
           allParamsHist = sorted(allParamsHist, key=lambda e: e[0])
+          while len(allParamsHist) > 1e4:
+            allParamsHist = allParamsHist[::2]
 
           # check if global best-penalty improved
           if len(allParamsHist) and (_newBest:=min([h[1] for h in allParamsHist])) < bestPenalty:
@@ -406,6 +416,11 @@ class ParameterSweeper:
             # print status
             io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}, {runningWorkers}/{workers} workers busy')
 
+            # run custom progress callback if given
+            if progressCallback:
+              progressCallback(bestParams=bestParamsDict, history=allParamsHist)
+            lastProgressPlot = time.time()
+
           # update running workers list
           for w in runningWorkers:
             if not w.isRunning():
@@ -424,8 +439,11 @@ class ParameterSweeper:
           if ( not isfinite(tryToEndWorkersSince)
                and time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
                and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0) ):
-            io.verb(f'at least one worker finished and others did not improve for more '
+            io.verb(f'at least one worker finished '
+                    f'({io.secondsToStr(time.time()-lastWorkerFinished)} ago) '
+                    f'and others did not improve for more '
                     f'than {io.secondsToStr(relWaitForParallel*(lastWorkerFinished-t0))}, '
+                    f'(last improvement {io.secondsToStr(time.time()-lastPenaltyImprovement)} ago) '
                     f'quitting remaining workers...')
             tryToEndWorkersSince = time.time()
           
@@ -452,9 +470,11 @@ class ParameterSweeper:
         lastPrint = time.time()
         while True:
           runningWorkers = [w for w in workers if w.isRunning()]
+          if not len(runningWorkers):
+            break
           if time.time()-lastPrint > 3:
             lastPrint = time.time()
-            io.warn(f'optimize strategy step ended, but still waiting for {len(workers)} to exit...')
+            io.warn(f'optimize strategy step ended, but still waiting for {len(runningWorkers)} workers to exit...')
           for w in runningWorkers:
             w.terminate()
           time.sleep(1/2)
@@ -559,7 +579,7 @@ class ParameterSweeper:
             else:
               allParamsHist.append([time.time(), penalty, False, 
                                     os.path.realpath(resultFolder.path()), paramDict])
-            if len(allParamsHist) > 1e3:
+            while len(allParamsHist) > 1e4:
               allParamsHist[:] = allParamsHist[::2]
             
             # dump entire history to file if enabled
