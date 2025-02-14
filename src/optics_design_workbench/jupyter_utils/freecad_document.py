@@ -117,9 +117,9 @@ class FreecadProperty:
     # run proper query and error checking if not in fast mode
     else:
       try:
-        if ( (out:=self._doc.query(f'{self._freecadShellRepr()}; print("success")', 
-                                  expect='success')) != 'success' ):
-          raise ValueError(f'property {self} does not exist')    
+        rn = f'{random.random():.8f}'
+        self._doc.query(f'{self._freecadShellRepr()}; print("success{rn}")', expect=f'success{rn}',
+                        errText=f'property {self} does not exist')
       except Exception:
         io.warn(f'running {"call" if isCall else "ensureExists"} line failed: {self._freecadShellRepr()}')
         raise
@@ -141,9 +141,9 @@ class FreecadProperty:
 
       # run proper query and error checking if not in fast mode
       else:
-        if ( (out:=self._doc.query(f'{setterLine}; print("success")', 
-                                  expect='success')) != 'success'  ):
-          raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
+        rn = f'{random.random():.8f}'
+        self._doc.query(f'{setterLine}; print("success{rn}")', expect=f'success{rn}',
+                        errText=f'failed running python line in FreeCAD: {setterLine.strip()}')
 
   def __setattr__(self, key, value):
     self._set(value, lvalSuffix=f'.{key}')
@@ -602,8 +602,7 @@ class FreecadDocument:
                f'  exit()')
 
     # flush outputs with infinite timeout to make sure startup was completely done
-    self._freecadInteractionTimesList.clear()
-    self._flushOutput(timeout=3600)
+    self._flushOutput(forceCareful=True)
 
     # after gui is fully loaded, load document
     self.write(f'try: ',
@@ -612,8 +611,7 @@ class FreecadDocument:
                f'  exit()')
 
     # flush outputs with infinite timeout to make sure loading file was completely done
-    self._freecadInteractionTimesList.clear()
-    self._flushOutput(timeout=3600)
+    self._flushOutput(forceCareful=True)
 
     # make sure numpy is imported globally, as numpy and as np, to ensure all numpy datatypes
     # can be constructed properly
@@ -622,8 +620,10 @@ class FreecadDocument:
                f'from numpy import *')
 
     # flush outputs with infinite timeout to ensure this was successfully imported
-    self._freecadInteractionTimesList.clear()
-    self._flushOutput(timeout=3600)
+    self._flushOutput(forceCareful=True)
+
+    # clear interaction time list to avoid immediately triggering fast mode
+    self._freecadInteractionTimesList[:] = [time.time()]
 
     # print success
     io.verb(f'done in {time.time()-t0:.1f}s')
@@ -684,7 +684,7 @@ class FreecadDocument:
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
 
-  def _flushOutput(self, timeout=3, forceCareful=False):
+  def _flushOutput(self, timeout=60, forceCareful=False):
     self._updateInteractionTime()
     t0 = time.time()
 
@@ -694,18 +694,29 @@ class FreecadDocument:
 
     # skip careful flush if fastMode is active (and not forced)
     if forceCareful or not self._fastModeEnabled():
-      # ask to print random number
-      rn = f'{random.random():.8f}'
-      self.write(f'print("{rn}")')
-
-      # wait until random number appears in output
+      lastWarned = time.time()
+      lastPrintedRn = 0
+      rn = None
       while True:
-        out = self.read()
-        #print(f'waiting for {rn}, dropping {out}')
-
+        # ask to print random number every few seconds 
+        # (scale wait time with time that has passed)
+        if time.time()-lastPrintedRn > 1/5*(time.time()-t0):
+          lastPrintedRn = time.time()
+          rn = f'{random.random():.8f}'
+          self.write(f'print("{rn}")')
+        
         # if random number appears in output: success
+        out = self.read()
+        #print(f'waiting for {rn}, found {out}')
         if rn in out:
           return
+
+        # warn of takes long
+        if time.time()-lastWarned > 5:
+          lastWarned = time.time()
+          io.warn(f'long waiting time for freecad process to become responsive, '
+                  f' waiting since {io.secondsToStr(time.time()-t0)} '
+                  f'(this may happen if the system is under heavy load)')
 
         # if time is up: raise timeout error
         if time.time()-t0 > timeout:
@@ -755,33 +766,47 @@ class FreecadDocument:
       pass
     return None
 
-  def query(self, *data, timeout=6, expect=None):
+  def query(self, *data, timeout=60, expect=None, errText=None):
     self._updateInteractionTime()
     t0 = time.time()
 
-    # make sure output buffer of freecad is empty
-    self._flushOutput(timeout=timeout/2)
+    # make sure output buffer of freecad is empty (do not wait
+    # full timeout to leave a bit time for the query itself)
+    self._flushOutput(timeout=0.9*timeout)
 
     # send python commands
     self.write(*data)
 
     # wait for single line response
+    lastWarned = time.time()
+    sentCommandT0 = time.time()
     while True:
       if error:=self.readErr():
-        raise RuntimeError(f'exception was raised while handling '
-                           f'command(s) {data}:\n\n'+error)
+        raise RuntimeError((f'{errText.strip()}\n' if errText else '')
+                           +f'exception was raised while handling '
+                           +f'command(s) {data}:\n\n'+error)
 
       # check for result line
       if line:=self.readline():
-        if expect is not None and expect not in line:
-          continue
         if _PRINT_FREECAD_COMMUNICATION:
           io.verb(f'< {line}')
+        if expect is not None and expect not in line:
+          continue
         return line
 
+      # warn of takes long
+      if time.time()-lastWarned > 5:
+        lastWarned = time.time()
+        io.warn(f'long waiting time for response from freecad process, waiting '
+                f'since {io.secondsToStr(time.time()-sentCommandT0)} '
+                f'(this may happen if the system is under heavy load)')
+
+      # raise if timeout has passed
       if time.time()-t0 > timeout:
-        raise RuntimeError(f'failed to fetch any response to command(s) {data}, '
-                           f'is a process featuring heavy output printing running?')
+        raise RuntimeError((f'{errText.strip()}\n' if errText else '')
+                           +f'failed to fetch any response to command(s) {data}, '
+                           +f'is the system overloaded or is freecad running '
+                           +f'something with heavy output printing running?')
       time.sleep(1e-3)
 
   ###########################################################################
@@ -790,12 +815,15 @@ class FreecadDocument:
   def __exit__(self, *args, **kwargs):
     self.close()
 
+  def save(self):
+    self.write('App.activeDocument().save()')
+
   def close(self):
     t0 = time.time()
     io.verb(f'closing {self} instance...')
 
-    # save changes
-    self.write('App.activeDocument().save()')
+    # save changes to disk
+    self.save()
 
     while self.isRunning():
       # gently ask to quit
@@ -979,15 +1007,31 @@ class RawFolder:
   RawFolder class represents one simluation-run folder in the raw subfolder of
   the simulation results directory.
   '''
-  def __init__(self, path):
+  def __init__(self, path, timeout=60):
     self._path = path
-    candidates = [f for f in os.listdir(self._path) 
-                      if os.path.isfile(f'{self._path}/{f}') and f.startswith('uid')]
-    if len(candidates) == 0:
-      raise RuntimeError('invalid raw data folder: uid file missing')
-    if len(candidates) > 1:
-      raise RuntimeError('invalid raw data folder: more than one uid file')
-    self._uid = candidates[0][4:]
+
+    # detect uid, wait up to timeout for uid file to show up
+    t0 = time.time()
+    lastWarned = time.time()
+    while True:
+      candidates = [f for f in os.listdir(self._path) 
+                        if os.path.isfile(f'{self._path}/{f}') and f.startswith('uid')]
+      # if exactly one candidate: save uid and exit loop
+      if len(candidates) == 1:
+        self._uid = candidates[0][4:] 
+        break
+
+      # warn if it takes long
+      if time.time()-lastWarned > 3:
+        lastWarned = time.time()
+        io.warn(f'waiting for uid file to show up took long ({io.secondsToStr(time.time()-t0)})')
+
+      # raise after timeout
+      if time.time()-t0 > timeout:
+        if len(candidates) == 0:
+          raise RuntimeError('invalid raw data folder: uid file missing')
+        if len(candidates) > 1:
+          raise RuntimeError('invalid raw data folder: more than one uid file')
 
   def __repr__(self):
     return self.__str__()

@@ -349,7 +349,7 @@ class ParameterSweeper:
       for kwargs in args:
         # sleep random time between worker creation to not stress the filesystem
         # too much
-        time.sleep(1+random.random())
+        time.sleep(1/3+1/3*random.random())
 
         # launch and add worker to list
         workers.append(SweeperOptimizeWorker(self, kwargs))
@@ -359,6 +359,7 @@ class ParameterSweeper:
       CLOSE_FREECAD_TIMEOUT = 3600
       
       bestParamsDict = None
+      bestParamsArgs = None
       try:
         # monitor workers until happy
         lastWorkerFinished = inf
@@ -380,7 +381,9 @@ class ParameterSweeper:
           if len(allParamsHist) and (_newBest:=min([h[1] for h in allParamsHist])) < bestPenalty:
             bestPenalty = _newBest
             lastPenaltyImprovement = time.time()
-            bestParamsDict = allParamsHist[argmin([h[1] for h in allParamsHist])][4]
+            _best = allParamsHist[argmin([h[1] for h in allParamsHist])]
+            bestParamsDict = _best[4]
+            bestParamsArgs = _best[5]
             io.verb(f'found new best solution {bestPenalty=}, {bestParamsDict=}')
 
           # plot history of optimization and hits of best result so far
@@ -498,6 +501,8 @@ class ParameterSweeper:
                minimizerKwargs={}, progressPlotInterval=30, 
                method=None, historyDumpPath=None, 
                historyDumpInterval=inf, **kwargs):
+    # save optimize params to variable
+    optimizeParams = {k:v for k,v in locals().items() if k not in ('self',)}
 
     # setup progress and timing vars
     t0 = time.time()
@@ -572,13 +577,15 @@ class ParameterSweeper:
             if penalty < bestPenaltySoFar:
               io.verb(f'found new optimum: {penalty=}, {paramDict=}')
               allParamsHist.append([time.time(), penalty, True, 
-                                    os.path.realpath(resultFolder.path()), paramDict])
+                                    os.path.realpath(resultFolder.path()), paramDict, 
+                                    optimizeParams])
               bestParametersSoFar = dict(paramDict)
               bestPenaltySoFar = penalty
               bestResultSoFar = resultFolder
             else:
               allParamsHist.append([time.time(), penalty, False, 
-                                    os.path.realpath(resultFolder.path()), paramDict])
+                                    os.path.realpath(resultFolder.path()), paramDict, 
+                                    optimizeParams])
             while len(allParamsHist) > 1e4:
               allParamsHist[:] = allParamsHist[::2]
             
@@ -588,7 +595,7 @@ class ParameterSweeper:
                 lastHistoryDump = time.time()
                 try:
                   with atomic_write(historyDumpPath, mode='wb', overwrite=True) as f:
-                    pickle.dump(allParamsHist, f)
+                    cloudpickle.dump(allParamsHist, f)
                 except Exception:
                   io.warn(f'dumping progress failed:\n\n'+traceback.format_exc())
 
