@@ -20,6 +20,7 @@ import functools
 import glob
 import pickle
 import shutil
+import traceback
 
 from .. import io
 from ..simulation import processes
@@ -320,7 +321,9 @@ class FreecadDocument:
           break
 
       # copy FCStd file to temp dir
-      shutil.copy(path, f'{tempDirName}/{uniqueName}')
+      _target = f'{tempDirName}/{uniqueName}'
+      os.makedirs(os.path.dirname(_target), exist_ok=True)
+      shutil.copy(path, _target)
 
       # modify path variable for following initialization
       path = f'{tempDirName}/{uniqueName}'
@@ -353,19 +356,85 @@ class FreecadDocument:
     return self._resultsPath
 
   def _getTempFolder(self, create=False):
-    basename, fname = os.path.split(self._originalPath)
-    tempDirName = f'{basename}/temp-{fname[:-6]}.OpticsDesign'
+    tempDirName = f'{self._originalPath[:-6]}.OpticsDesign/tmp'
     os.makedirs(tempDirName, exist_ok=True)
     return tempDirName
 
-  def _sanitizeTempFolder(self):
-    # remove files that did not change for a long time, import logs to
-    # original folder
-    _tmp = self._getTempFolder(create=False)
-    if os.path.exists(_tmp):
-      for e in os.scandir(_tmp):
-        pass
+  def purgeTempFolder(self):
+    # dont clean if this is a tmp-document
+    if self._openFreshCopy:
+      raise ValueError(f'this freecad document was opened using openFreshCopy=True, '
+                       f'can only purge temp folder from instances that were opened '
+                       f'without openFreshCopy option')
+    shutil.rmtree(self._getTempFolder())
 
+  def _sanitizeTempFolder(self, timeout=4):
+    # dont clean if this is a tmp-document
+    if self._openFreshCopy:
+      return
+
+    t0 = time.time()
+    _tmp = self._getTempFolder(create=False)
+    lastWarn = time.time()
+    if os.path.exists(_tmp):
+
+      # retry cleanup on fail
+      cleanedSomething = True 
+      while cleanedSomething:
+        maxLevel = 3 # <- recurse down to tmp/...OpticsDesign/raw/sim... level but not deeper
+        try:
+          cleanedSomething = False
+
+          # walk through tmp-dir tree and delete anything that 
+          # did not change for more than a day, remove empty
+          # directories
+          for r, dirs, files in os.walk(_tmp, topdown=True):
+            # remove empty dirs
+            for d in dirs:
+              if not len(os.listdir(f'{r}/{d}')):
+                os.rmdir(f'{r}/{d}')
+                cleanedSomething = True
+
+            # remove dirs on third sublevel by age
+            dirLevel = r.count('/') - _tmp.count('/') 
+            if dirLevel >= maxLevel:
+              for d in dirs:
+                maxAge = 24*60*60
+                if time.time()-os.stat(f'{r}/{d}').st_mtime > maxAge:
+                  shutil.rmtree(f'{r}/{d}')
+                  cleanedSomething = True
+            
+            # do not recurse deeper then to third sublevel
+            if dirLevel >= maxLevel:
+              dirs[:] = []
+            
+            # remove old files
+            for f in files:
+              io.verb(f'checking {dirLevel=} {r}/{f}')
+
+              maxAge = 24*60*60
+              if f.endswith('FCStd'):
+                maxAge = 7*24*60*60
+              try:
+                if time.time()-os.stat(f'{r}/{f}').st_mtime > maxAge:
+                  os.remove(f'{r}/{f}')
+                  cleanedSomething = True
+              except Exception as e:
+                pass
+
+            # apologize if cleaning takes long
+            if time.time()-lastWarn > 5:
+              lastWarn = time.time()
+              io.warn(f'sorry, house keeping of the tmp-folder '
+                      f'is taking a lot of time... (cleaning since {io.secondsToStr(time.time()-t0)})')
+
+            # abort cleaning if time is up
+            if time.time()-t0 > timeout:
+              io.verb(f'tmp folder clean timed out {io.secondsToStr(time.time()-t0)}')
+              return
+        except Exception:
+          io.warn(f'exception raised during tmp-dir cleanup:\n\n'+traceback.format_exc())
+      io.verb(f'full tmp folder clean successful after {io.secondsToStr(time.time()-t0)}')
 
   ###########################################################################
   # FILE MANIPULATION/SIMULATION TRIGGER LOGIC
@@ -846,11 +915,11 @@ class FreecadDocument:
     progress.progressTrackerInstance(doc=self).quit()
     progress.ALLOW_PROGRESS_TACKERS = False
 
-    io.verb(f'done in {time.time()-t0:.1f}s')
-    processes.unsetJupyterMaster()
-
     # run temp dir cleanup
     self._sanitizeTempFolder()
+
+    io.verb(f'done in {time.time()-t0:.1f}s')
+    processes.unsetJupyterMaster()
 
   def isRunning(self):
     if self._isRunning:

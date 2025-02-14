@@ -75,7 +75,8 @@ def setupJupyterMaster(path):
   _IS_MASTER_PROCESS = True
   # complain if already registered
   if io.isRegisteredJupyter():
-    raise ValueError(f'cannot setup jupyterMaster state if already in jupyter master state')
+    io.warn(f'setting jupyter master state even though already in jupyter master state '
+            f'(this may imply a stale FreecadDocument handle is open somewhere)')
   # replace FCStd suffix
   if path.endswith('.FCStd'):
     path = path[:-6]+'.OpticsDesign'

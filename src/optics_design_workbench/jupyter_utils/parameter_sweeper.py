@@ -51,7 +51,7 @@ class SweeperOptimizeWorker:
     self._optimizeArgs = optimizeArgs
 
     # set path to dump history to
-    self._historyDumpPath = os.path.abspath(f'temp-optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
+    self._historyDumpPath = os.path.abspath(f'{sweeper.resultsPath()}/tmp/optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
 
     # setup history dump path and randomize historyDumpInterval to
     # avoid synchronization
@@ -155,6 +155,11 @@ class ParameterSweeper:
         break
       # limit loop speed
       time.sleep(1/3)
+
+  def save(self):
+    with self._freecadDocumentLock():
+      if self._freecadDocument:
+        self._freecadDocument.save()
 
   def __del__(self):
     self.close()
@@ -288,7 +293,8 @@ class ParameterSweeper:
     self.open()
 
   def optimizeStrategyStep(self, *args, progressCallback=None, 
-                           relWaitForParallel=1, progressPlotInterval=30):
+                           relWaitForParallel=1, progressPlotInterval=30,
+                           saveInterval=5*60):
     '''
     Pass one or more dictionaries with optimize args to run
     optimization steps with varied free parameters, methods, etc. in parallel
@@ -367,6 +373,7 @@ class ParameterSweeper:
         bestPenalty = inf
         lastPenaltyImprovement = 0
         tryToEndWorkersSince = inf
+        lastDocumentSave = time.time()
         while True:
 
           # fetch history of all worker progresses
@@ -385,6 +392,14 @@ class ParameterSweeper:
             bestParamsDict = _best[4]
             bestParamsArgs = _best[5]
             io.verb(f'found new best solution {bestPenalty=}, {bestParamsDict=}')
+
+          # update non-temp document every now and then with best params so far and 
+          # save to disk to avoid loosing all on a crash
+          if time.time()-lastDocumentSave > saveInterval:
+            lastDocumentSave = time.time()
+            io.verb('autosaving current best result')
+            self.set(**bestParametersSoFar)
+            self.save()
 
           # plot history of optimization and hits of best result so far
           if len(allParamsHist) > 5 and time.time()-lastProgressPlot > progressPlotInterval:
@@ -468,6 +483,7 @@ class ParameterSweeper:
         io.info(f'optimize strategy step ended, {bestParamsDict=}')
         if bestParamsDict:
           self.set(**bestParamsDict)
+          self.save()
 
         # wait for all workers to finish
         lastPrint = time.time()
@@ -594,6 +610,7 @@ class ParameterSweeper:
               if time.time()-lastHistoryDump > historyDumpInterval:
                 lastHistoryDump = time.time()
                 try:
+                  os.makedirs(os.path.dirname(historyDumpPath), exist_ok=True)
                   with atomic_write(historyDumpPath, mode='wb', overwrite=True) as f:
                     cloudpickle.dump(allParamsHist, f)
                 except Exception:
@@ -636,3 +653,4 @@ class ParameterSweeper:
       finally:
         if bestParametersSoFar:
           self.set(**bestParametersSoFar)
+          self.save()
