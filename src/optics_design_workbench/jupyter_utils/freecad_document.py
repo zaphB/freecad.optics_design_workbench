@@ -426,7 +426,7 @@ class FreecadDocument:
 
             # abort cleaning if time is up
             if time.time()-t0 > timeout:
-              io.verb(f'tmp folder clean timed out {io.secondsToStr(time.time()-t0)}')
+              io.verb(f'tmp folder clean timed out after {io.secondsToStr(time.time()-t0)}')
               return
         except Exception:
           io.warn(f'exception raised during tmp-dir cleanup:\n\n'+traceback.format_exc())
