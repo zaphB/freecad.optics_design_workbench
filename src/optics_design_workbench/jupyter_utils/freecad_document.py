@@ -343,9 +343,6 @@ class FreecadDocument:
     self._freecadInteractionTimesList = [time.time()]
     self._previousFastModeEnabled = False
 
-    # run temp dir cleanup
-    self._sanitizeTempFolder()
-
   def __repr__(self):
     return self.__str__()
 
@@ -410,8 +407,7 @@ class FreecadDocument:
             
             # remove old files
             for f in files:
-              io.verb(f'checking {dirLevel=} {r}/{f}')
-
+              #io.verb(f'checking {dirLevel=} {r}/{f}')
               maxAge = 24*60*60
               if f.endswith('FCStd'):
                 maxAge = 7*24*60*60
@@ -697,9 +693,6 @@ class FreecadDocument:
     # print success
     io.verb(f'done in {time.time()-t0:.1f}s')
 
-    # run temp dir cleanup
-    self._sanitizeTempFolder()
-
 
   ###########################################################################
   # SUBPROCESS IO LOGIC
@@ -784,7 +777,7 @@ class FreecadDocument:
         if time.time()-lastWarned > 5:
           lastWarned = time.time()
           io.warn(f'long waiting time for freecad process to become responsive, '
-                  f' waiting since {io.secondsToStr(time.time()-t0)} '
+                  f'waiting since {io.secondsToStr(time.time()-t0)} '
                   f'(this may happen if the system is under heavy load)')
 
         # if time is up: raise timeout error

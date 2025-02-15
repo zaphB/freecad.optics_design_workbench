@@ -79,7 +79,9 @@ class SweeperOptimizeWorker:
     pickledSelf = cloudpickle.dumps(self)
 
     # setup and start child process
-    self._process = _mpCtx().Process(target=_unpickleAndWork, args=(pickledSelf,))
+    self._process = _mpCtx().Process(
+                        target=_unpickleAndWork, args=(pickledSelf,), 
+                        daemon=True ) # <- kill process after parent has exited
     self._process.start()
 
   def work(self):
@@ -391,14 +393,14 @@ class ParameterSweeper:
             _best = allParamsHist[argmin([h[1] for h in allParamsHist])]
             bestParamsDict = _best[4]
             bestParamsArgs = _best[5]
-            io.verb(f'found new best solution {bestPenalty=}, {bestParamsDict=}')
+            io.verb(f'found new best solution {bestPenalty=},\n{bestParamsDict=}\n{bestParamsArgs=}')
 
           # update non-temp document every now and then with best params so far and 
           # save to disk to avoid loosing all on a crash
           if time.time()-lastDocumentSave > saveInterval:
             lastDocumentSave = time.time()
             io.verb('autosaving current best result')
-            self.set(**bestParametersSoFar)
+            self.set(**bestParamsDict)
             self.save()
 
           # plot history of optimization and hits of best result so far
@@ -432,7 +434,7 @@ class ParameterSweeper:
             close()
 
             # print status
-            io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}, {runningWorkers}/{workers} workers busy')
+            io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}, {len(runningWorkers)}/{len(workers)} workers busy')
 
             # run custom progress callback if given
             if progressCallback:
