@@ -21,6 +21,7 @@ import glob
 import pickle
 import shutil
 import traceback
+from atomicwrites import atomic_write
 
 from .. import io
 from ..simulation import processes
@@ -1158,19 +1159,90 @@ class RawFolder:
   def loadRays(self, pattern='*'):
     return self._load(pattern=pattern, kind='rays')
 
-  def _load(self, pattern, kind):
-    result = {}
+  def _findPathsAndSanitize(self, pattern, kind, optimalFilesize=500e6):
     if pattern == '*':
       pattern = '**'
-    for path in glob.iglob(f'{self._path}/{pattern}/*-{kind}.pkl', recursive=True):
+    def _makeGlob():
+      return glob.iglob(f'{self._path}/{pattern}/*-{kind}.pkl', recursive=True)
+
+    # group all files to consider by folder
+    byFolder = {}
+    for path in _makeGlob():
+      base, name = os.path.split(path)
+      if base not in byFolder.keys():
+        byFolder[base] = []
+      try:
+        _stat = os.stat(path)
+        mtime = _stat.st_mtime
+        size = _stat.st_size
+      except Exception:
+        mtime = time.time()
+        size = 1
+      byFolder[base].append([name, mtime, size])
+
+    # find files that look well suited for merging
+    for base, namesTimesSizes in byFolder.items():
+      mergeList = []
+      sizeInList = 0
+      def mergeAllInList():
+        # only do something if more than one file ist list
+        if len(mergeList) > 1:
+          # load and merge all files in list
+          merged = {}
+          for name in mergeList:
+            try:
+              with open(f'{base}/{name}', 'rb') as _f:
+                data = pickle.load(_f)
+            except Exception as e:
+              io.warn(f'failed to read {kind} file {base}/{name}: {e.__class__.__name__} "{e}"')
+            else:
+              # merge file content with merged dict
+              for k, v in data.items():
+                _updateResultEntry(merged, k, v)
+          
+          # overwrite first file in list with total results
+          with atomic_write(f'{base}/{mergeList[0]}',
+                            mode='wb', overwrite=True) as f:
+            pickle.dump(merged, f)
+
+          # delete all remaining files in list
+          for name in mergeList[1:]:
+            os.remove(f'{base}/{name}')
+
+        # reset list
+        mergeList.clear()
+
+      # only consider files that did not change in the last hour
+      for name, size in sorted([(n, s) for n, t, s in namesTimesSizes if time.time()-t > 60*60],
+                               key=lambda e: e[0]):
+        # if this file would make the current merge collection much larger than optimal
+        # size -> merge without current file
+        if sizeInList+size > 1.5*optimalFilesize:
+          mergeAllInList()
+
+        # add current file to list and merge if collection is larger than optimal size
+        mergeList.append(name)
+        sizeInList += size
+        if sizeInList > optimalFilesize:
+          mergeAllInList()
+
+      # merge leftover files no matter the total size
+      mergeAllInList()
+
+    # return all cleaned up paths
+    return _makeGlob()
+
+  def _load(self, pattern, kind):
+    result = {}
+    for path in self._findPathsAndSanitize(pattern, kind):
       try:
         with open(path, 'rb') as _f:
-          hitData = pickle.load(_f)
+          data = pickle.load(_f)
       except Exception as e:
         io.warn(f'failed to read {kind} file {path}: {e.__class__.__name__} "{e}"')
       else:
         # merge hitData content with result dict
-        for k, v in hitData.items():
+        for k, v in data.items():
           _updateResultEntry(result, k, v)
 
     return result
