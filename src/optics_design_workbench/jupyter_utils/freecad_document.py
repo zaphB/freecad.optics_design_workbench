@@ -19,10 +19,18 @@ import random
 import functools
 import glob
 import pickle
+import shutil
+import traceback
+from atomicwrites import atomic_write
 
 from .. import io
 from ..simulation import processes
 from . import progress
+from . import hits
+from . import parameter_sweeper
+
+_PRINT_FREECAD_COMMUNICATION = False
+_PRINT_SETTER_AND_CALL_LINES = False
 
 # signal handler that kills all running freecad processes
 # in case this process is killed
@@ -76,11 +84,14 @@ class FreecadProperty:
   be read from and written to as if it was the real freecad property. All 
   read/writes will be forwarded to the running Freecad child process.
   '''
-  def __init__(self, doc, obj, path):
+  def __init__(self, doc, obj, path, isCall=False, internalObjectName=False):
     self.__dict__['_doc'] = doc
     self.__dict__['_obj'] = obj
     self.__dict__['_path'] = path
-    self._ensureExists()
+    self.__dict__['_internalObjectName'] = internalObjectName
+    self.__dict__['_isConstraint'] = False
+    self.__dict__['_sketchObjReference'] = None
+    self._ensureExists(isCall=isCall)
 
   def __repr__(self):
     return self.__str__()
@@ -89,48 +100,66 @@ class FreecadProperty:
     return f'<FreecadProperty {self._obj}.{self._path}, value: {self.getStr()}>'
 
   def _freecadShellRepr(self):
-    return f'App.activeDocument().getObject("{self._obj}").{self._path}'
+    if self._internalObjectName:
+      return f'App.activeDocument().getObject("{self._obj}").{self._path}'    
+    return f'App.activeDocument().getObjectsByLabel("{self._obj}")[0].{self._path}'
 
-  def _ensureExists(self):
-    if ((out:=self._doc.query(
-            f'try: ',
-            f'  {self._freecadShellRepr()}',
-            f'except Exception: ',
-            f'  print("failed") ',
-            f'else: ',
-            f'  print("success")',
-            expect=['failed', 'success']
-        )) != 'success'):
-      raise ValueError(f'property {self} does not exist')
+  def _ensureExists(self, isCall=False):
+    # log in case of function call
+    if isCall:
+      if _PRINT_SETTER_AND_CALL_LINES:
+        io.verb(f'running call line: {self._freecadShellRepr()}')
+      pass
+    
+    # if fast mode is enabled, skip any existCheck and run calls without waiting for response
+    if self._doc._fastModeEnabled():
+      if isCall:
+        self._doc.write(self._freecadShellRepr())
+
+    # run proper query and error checking if not in fast mode
+    else:
+      try:
+        rn = f'{random.random():.8f}'
+        self._doc.query(f'{self._freecadShellRepr()}; print("success{rn}")', expect=f'success{rn}',
+                        errText=f'property {self} does not exist')
+      except Exception:
+        io.warn(f'running {"call" if isCall else "ensureExists"} line failed: {self._freecadShellRepr()}')
+        raise
 
   # ----------------------------------
   # ITEM AND ATTRIBUTE ACCESS
 
-  def _set(self, value, lvalSuffix=''):
-    setterLine = f'  {self._freecadShellRepr()}{lvalSuffix} = {value}'
-    #print(f'running setter line: {setterLine.strip()}')
-    if ((out:=self._doc.query(
-            f'try: ',
-            setterLine,
-            f'except Exception: ',
-            f'  print("failed") ',
-            f'else: ',
-            f'  print("success")', 
-            expect=['failed', 'success']
-        )) != 'success'):
-      raise RuntimeError(f'failed running python line in FreeCAD: {setterLine.strip()}')
+  def set(self, value, lvalSuffix=''):
+    if self._isConstraint:
+      return self._sketchObjReference.setDatum(self._constraintIndex, value)
+    else:
+      setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {repr(value)}'
+      if _PRINT_SETTER_AND_CALL_LINES:
+        io.verb(f'running setter line: {setterLine.strip()}')
+
+      # if fast mode is enabled run setter line without waiting for response
+      if self._doc._fastModeEnabled():
+        self._doc.write(setterLine)
+
+      # run proper query and error checking if not in fast mode
+      else:
+        rn = f'{random.random():.8f}'
+        self._doc.query(f'{setterLine}; print("success{rn}")', expect=f'success{rn}',
+                        errText=f'failed running python line in FreeCAD: {setterLine.strip()}')
 
   def __setattr__(self, key, value):
     self._set(value, lvalSuffix=f'.{key}')
 
   def __getattr__(self, key):
-    return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}')
+    return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}', 
+                           internalObjectName=self._internalObjectName)
 
   def __setitem__(self, key, value):
     self._set(value, lvalSuffix=f'[{repr(key)}]')
 
   def __getitem__(self, key):
-    return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]')
+    return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]', 
+                           internalObjectName=self._internalObjectName)
 
   def __len__(self):
     return int( self._doc.query( f'len( {self._freecadShellRepr()} )' ) )
@@ -146,9 +175,12 @@ class FreecadProperty:
       if len(argsStr):
         argsStr += ', '
       argsStr += f'**{kwargs}'
-    return FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})')
+    p = FreecadProperty(self._doc, self._obj, f'{self._path}({argsStr})', isCall=True, 
+                        internalObjectName=self._internalObjectName)
 
   def getStr(self):
+    if self._isConstraint:
+      return self.Value.getStr()
     return self._doc.query(self._freecadShellRepr())
 
   def getFloat(self):
@@ -166,10 +198,16 @@ class FreecadProperty:
 
   # ----------------------------------
   # CUSTOM ATTRIBUTES AND METHODS
+  def markAsConstraint(self, sketchObj, sketchIndex):
+    self.__dict__['_isConstraint'] = True
+    self.__dict__['_sketchObjReference'] = sketchObj
+    self.__dict__['_constraintIndex'] = sketchIndex
+    return self
+
   def getConstraintsByName(self):
-    indexAndConstraints = { c.Name.get(): (i, c)
-                                for i, c in enumerate(self.Constraints)
-                                                    if c.Name.strip() }
+    indexAndConstraints = { c.Name.get().strip(): (i, c.markAsConstraint(self, i))
+                                            for i, c in enumerate(self.Constraints)
+                                                              if c.Name.get().strip() }
     return FreecadConstraintDict(constraintDict={k:v[1] for k,v in indexAndConstraints.items()},
                                  indexDict={k:v[0] for k,v in indexAndConstraints.items()},
                                  sketch=self)
@@ -182,35 +220,55 @@ class FreecadObject(FreecadProperty):
   written to as if it was the real freecad object. All read/writes will be forwarded
   to the running Freecad child process.
   '''
-  def __init__(self, doc, obj):
+  def __init__(self, doc, obj, internalObjectName=False):
     self.__dict__['_doc'] = doc
     self.__dict__['_obj'] = obj
+    self.__dict__['_internalObjectName'] = internalObjectName
     self._ensureExists()
 
   def __str__(self):
     return f'<FreecadObject {os.path.basename(self._doc._path)}: {self._obj}>'
 
   def _freecadShellRepr(self):
-    return f'App.activeDocument().getObject("{self._obj}")'
+    if self._internalObjectName:
+      return f'App.activeDocument().getObject("{self._obj}")'
+    return f'App.activeDocument().getObjectsByLabel("{self._obj}")[0]'
 
   def _ensureExists(self):
-    if self._doc.query(f'print({self._freecadShellRepr()})') == 'None':
-      raise ValueError(f'object {self} does not exist')
+    # ensure at exactly one object exists
+    if not self._internalObjectName:
+      try:
+        # force careful flushing because we need the exact response to object count also in fastMode
+        self._doc._flushOutput(forceCareful=True)
+        objectCount = int(self._doc.query(f'print(len( App.activeDocument().getObjectsByLabel("{self._obj}") ))'))
+        # zero objects with given label exist -> fail
+        if objectCount == 0:
+          raise ValueError(f'object with label {self._obj} does not exist.')
+        # more than one object with given label exist -> fail
+        if objectCount != 1:
+          raise ValueError(f'object label {self._obj} is not unique, consider to rename it '
+                           f'or to use the internal name instead.')
+
+      # handle value errors by retrying with "internal name" style instead of label
+      except ValueError:
+        self.__dict__['_internalObjectName'] = True
+        self._ensureExists()
+
+    # make sure self._freecadShellRepr() evaluates fine
+    try:
+      queryResponse = self._doc.query(f'print({self._freecadShellRepr()})')
+      if queryResponse == 'None':
+        raise ValueError(f'expected freecad object, found None')
+    except Exception:
+      raise ValueError(f'object with {"internal name" if self._internalObjectName else "label"} {self._obj} does '
+                       f'not exist in freecad document (see exceptions above for detailed reason)')
   
   def __setattr__(self, key, value):
-    if (out:=self._doc.query(
-            f'try: ',
-            f'  {self._freecadShellRepr()}.{key} = {value}',
-            f'except Exception: ',
-            f'  print("failed") ',
-            f'else: ',
-            f'  print("success")', 
-            expect=['failed', 'success']
-         ) != 'success'):
-      raise RuntimeError(f'failed setting {key} of {self} to {value}: {out}')
+    self.__getattr__(key).set(value)
 
   def __getattr__(self, key):
-    return FreecadProperty(self._doc, self._obj, key)
+    return FreecadProperty(self._doc, self._obj, key, 
+                           internalObjectName=self._internalObjectName)
 
 
 class FreecadDocument:
@@ -222,14 +280,14 @@ class FreecadDocument:
   
   The document is intended to be used as a context manager to clean up after itself.
   '''
-  def __init__(self, path=None, freecadExecutable=None):
+  def __init__(self, path=None, freecadExecutable=None, openFreshCopy=False):
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
     # autodetect path is none is given
     if path is None:
       _path = os.path.realpath(os.getcwd())
-      while _path.count('/') > 1:
+      while _path.count('/') != 1:
         if _path.endswith('.OpticsDesign'):
           candidate = _path[:-13]+'.FCStd'
           if os.path.exists(candidate):
@@ -247,9 +305,29 @@ class FreecadDocument:
     if freecadExecutable:
       if not os.path.exists(freecadExecutable):
         raise RuntimeError(f'path of custom freecad executable {freecadExecutable} '
-                          f'does not seem to exist')
+                           f'does not seem to exist')
     else:
       freecadExecutable = 'FreeCAD'
+
+    # if openFreshCopy is True, create temp folder, copy freecad file in there, 
+    # and modify path attributes accordingly
+    self._openFreshCopy = openFreshCopy
+    self._originalPath = path
+    if openFreshCopy:
+      # find unique filename for FCStd file
+      tempDirName = self._getTempFolder()
+      while True:
+        uniqueName = f'{os.path.basename(path)[:-6]}-{int(time.time()*1e3)}-pid{os.getpid()}-thread{threading.get_ident()}.FCStd'
+        if not os.path.exists(f'{tempDirName}/{uniqueName}'):
+          break
+
+      # copy FCStd file to temp dir
+      _target = f'{tempDirName}/{uniqueName}'
+      os.makedirs(os.path.dirname(_target), exist_ok=True)
+      shutil.copy(path, _target)
+
+      # modify path variable for following initialization
+      path = f'{tempDirName}/{uniqueName}'
 
     # save in attributes
     self._path = path
@@ -263,12 +341,102 @@ class FreecadDocument:
     self._isterminate = False
     self._iskill = False
     self._isRunning = False
+    self._freecadInteractionTimesList = [time.time()]
+    self._previousFastModeEnabled = False
 
   def __repr__(self):
     return self.__str__()
 
   def __str__(self):
     return f'<FreecadDocument {os.path.basename(self._path)}>'
+
+  def resultsPath(self):
+    return self._resultsPath
+
+  def _getTempFolder(self, create=False):
+    tempDirName = f'{self._originalPath[:-6]}.OpticsDesign/tmp'
+    os.makedirs(tempDirName, exist_ok=True)
+    return tempDirName
+
+  def purgeTempFolder(self):
+    # dont clean if this is a tmp-document
+    if self._openFreshCopy:
+      raise ValueError(f'this freecad document was opened using openFreshCopy=True, '
+                       f'can only purge temp folder from instances that were opened '
+                       f'without openFreshCopy option')
+    shutil.rmtree(self._getTempFolder())
+
+  def isOpenFreshCopy(self):
+    if self._openFreshCopy:
+      return True
+    return '.OpticsDesign/tmp'.lower() in self._path.lower()
+
+  def _sanitizeTempFolder(self, timeout=4):
+    # dont clean if this is a tmp-document
+    if self.isOpenFreshCopy():
+      return
+
+    t0 = time.time()
+    _tmp = self._getTempFolder(create=False)
+    lastWarn = time.time()
+    if os.path.exists(_tmp):
+
+      # retry cleanup on fail
+      cleanedSomething = True 
+      while cleanedSomething:
+        maxLevel = 3 # <- recurse down to tmp/...OpticsDesign/raw/sim... level but not deeper
+        try:
+          cleanedSomething = False
+
+          # walk through tmp-dir tree and delete anything that 
+          # did not change for more than a day, remove empty
+          # directories
+          for r, dirs, files in os.walk(_tmp, topdown=True):
+            # remove empty dirs
+            for d in dirs:
+              if not len(os.listdir(f'{r}/{d}')):
+                os.rmdir(f'{r}/{d}')
+                cleanedSomething = True
+
+            # remove dirs on third sublevel by age
+            dirLevel = r.count('/') - _tmp.count('/') 
+            if dirLevel >= maxLevel:
+              for d in dirs:
+                maxAge = 24*60*60
+                if time.time()-os.stat(f'{r}/{d}').st_mtime > maxAge:
+                  shutil.rmtree(f'{r}/{d}')
+                  cleanedSomething = True
+            
+            # do not recurse deeper then to third sublevel
+            if dirLevel >= maxLevel:
+              dirs[:] = []
+            
+            # remove old files
+            for f in files:
+              #io.verb(f'checking {dirLevel=} {r}/{f}')
+              maxAge = 24*60*60
+              if f.endswith('FCStd'):
+                maxAge = 7*24*60*60
+              try:
+                if time.time()-os.stat(f'{r}/{f}').st_mtime > maxAge:
+                  os.remove(f'{r}/{f}')
+                  cleanedSomething = True
+              except Exception as e:
+                pass
+
+            # apologize if cleaning takes long
+            if time.time()-lastWarn > 5:
+              lastWarn = time.time()
+              io.warn(f'sorry, house keeping of the tmp-folder '
+                      f'is taking a lot of time... (cleaning since {io.secondsToStr(time.time()-t0)})')
+
+            # abort cleaning if time is up
+            if time.time()-t0 > timeout:
+              io.verb(f'tmp folder clean timed out after {io.secondsToStr(time.time()-t0)}')
+              return
+        except Exception:
+          io.warn(f'exception raised during tmp-dir cleanup:\n\n'+traceback.format_exc())
+      io.verb(f'full tmp folder clean successful after {io.secondsToStr(time.time()-t0)}')
 
   ###########################################################################
   # FILE MANIPULATION/SIMULATION TRIGGER LOGIC
@@ -279,8 +447,10 @@ class FreecadDocument:
   def getObject(self, name):
     return FreecadObject(self, name)
 
-  def objects(self):
-    return eval(self.query(f'[o.Name for o in App.activeDocument().Objects]'))
+  def objects(self, internalNames=False):
+    if internalNames:
+      return sorted(list(set(eval(self.query(f'[o.Name for o in App.activeDocument().Objects]')))))
+    return sorted(list(set(eval(self.query(f'[o.Label for o in App.activeDocument().Objects]')))))
 
   def runSimulation(self, action='true', endIf=None, endIfMaxLoad=.5):
     '''
@@ -324,21 +494,25 @@ class FreecadDocument:
 
         # check plausibility of result
         if len(newFolders) == 0 and not allowEmpty:
+
+          # no new folder appeared, show different exception texts depending on 
+          # fans/single or if error output occurred
           if action == 'fans' or 'single' in action:
             raise RuntimeError(f'no new results folder was created during {action} '
                               f'simulation, did you enable "Enable Store Single Shot '
-                              f'Data" in the active Simulation Settings?')
+                              f'Data" in the active Simulation Settings?'
+                              +self._errorOutText())
           raise RuntimeError(f'no new results folder was created during {action} '
-                            f'simulation, is another simulation running? '
-                            f'{self._path=}, {self._resultsPath=}')
+                             f'simulation, is another simulation running? '
+                             f'{self._path=}, {self._resultsPath=}'
+                             +self._errorOutText())
+        
+        # more than one new folder appeared
         elif len(newFolders) > 1:
           raise RuntimeError(f'somehow more than one result folder was created '
                             f'during {action} simulation, this should not be '
-                            f'possible...')
-        elif len(newFolders) > 1:
-          raise RuntimeError(f'somehow more than one result folder was created '
-                            f'during {action} simulation, this should not be '
-                            f'possible...')
+                            f'possible...'
+                            +_errorOutText())
         # return result
         return RawFolder(f'{self._resultsPath}/raw/{newFolders[0]}') if len(newFolders) else None 
 
@@ -369,7 +543,7 @@ class FreecadDocument:
 
           # check custom simulation-end criterion with ~50% dutycycle
           if ( endIf is not None 
-                and time.time()-lastEndIfCheck 
+                and time.time()-lastEndIfCheck
                       > min([60*60, max([1, 1/max([0.01, endIfMaxLoad]) * endIfDuration ]) ]) ):
             lastEndIfCheck = time.time()
             if _newFolder is not None:
@@ -401,7 +575,9 @@ class FreecadDocument:
           if len((''.join(possibleStacktrace)).strip()):
             stacktraceGuess = f'; I guess it has something to do with this output:\n\n'+'\n'.join(possibleStacktrace)
           logfile = os.path.relpath(self._resultsPath+'/optics_design_workbench.log')
-          raise RuntimeError(f'simulation process failed, see logfile {logfile} for details'+stacktraceGuess) 
+          raise RuntimeError(f'simulation process failed, see logfile {logfile} for details'
+                              +stacktraceGuess
+                              +self._errorOutText())
 
         # return new results folder generated during the simulation
         return newFolder(allowEmpty=False)
@@ -423,6 +599,7 @@ class FreecadDocument:
     return self
 
   def open(self):
+    self._updateInteractionTime()
     t0 = time.time()
     
     # register that this process is a jupyter process to setup logging
@@ -437,25 +614,46 @@ class FreecadDocument:
     #                        ViewProvider objects because GUI is not yet up
     self._p = subprocess.Popen([self._freecadExecutable, '-c'],
                                 stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE,
                                 stdin=subprocess.PIPE, 
                                 text=True, bufsize=-1)
     self._isRunning = True
 
     # start thread the continuously reads stdout and adds results to queue
     self._q = queue.Queue()
+    self._qe = queue.Queue()
     def readOutput():
       for line in iter(self._p.stdout.readline, ''):
         if line.strip():
+          # remove line ending characters
           while line.endswith('\r') or line.endswith('\n'):
             line = line[:-1]
           #print(f'received line {line}')
           self._q.put(line)
-        time.sleep(1e-3)
+        #time.sleep(1e-6)
       self._p.stdout.close()
     self._t = threading.Thread(target=readOutput)
     self._t.daemon = True # thread dies with the program
     self._t.start()
+
+    def readError():
+      for line in iter(self._p.stderr.readline, ''):
+        # remove prompt characters from beginning of line
+        while line.lstrip().startswith('>>>') or line.lstrip().startswith('...'):
+          line = line.lstrip()[4:]
+         
+        if line.strip():
+          # remove line ending characters
+          while line.endswith('\r') or line.endswith('\n'):
+            line = line[:-1]
+          # ignore prompt lines
+          io.warn(f'received error line {repr(line)}', logOnly=True)
+          self._qe.put(line)
+        time.sleep(1e-3)
+      self._p.stdout.close()
+    self._te = threading.Thread(target=readError)
+    self._te.daemon = True # thread dies with the program
+    self._te.start()
 
     # Send python snippet to load GUI and immediately hide window, this allows to run
     # in a "headless-like" mode but still loads all ViewProvider objects. In true headless
@@ -475,7 +673,7 @@ class FreecadDocument:
                f'  exit()')
 
     # flush outputs with infinite timeout to make sure startup was completely done
-    self._flushOutput(timeout=3600)
+    self._flushOutput(forceCareful=True)
 
     # after gui is fully loaded, load document
     self.write(f'try: ',
@@ -484,58 +682,119 @@ class FreecadDocument:
                f'  exit()')
 
     # flush outputs with infinite timeout to make sure loading file was completely done
-    self._flushOutput(timeout=3600)
+    self._flushOutput(forceCareful=True)
 
     # make sure numpy is imported globally, as numpy and as np, to ensure all numpy datatypes
     # can be constructed properly
-    self.write(f'numpy',
+    self.write(f'import numpy',
                f'import numpy as np',
                f'from numpy import *')
 
     # flush outputs with infinite timeout to ensure this was successfully imported
-    self._flushOutput(timeout=3600)
+    self._flushOutput(forceCareful=True)
+
+    # clear interaction time list to avoid immediately triggering fast mode
+    self._freecadInteractionTimesList[:] = [time.time()]
 
     # print success
     io.verb(f'done in {time.time()-t0:.1f}s')
 
+
   ###########################################################################
   # SUBPROCESS IO LOGIC
 
+  def _errorOutText(self):
+    'return a string to append to exceptions which hints to freecad error output'
+    errorOut = self.readErr()
+    if not errorOut.strip():
+      return ''
+    return (f'\n\nFreecad process had possibly related '
+            f'error output recently:\n\n{errorOut}')
+
+  def lastInteractionTime(self):
+    return self._freecadInteractionTimesList[-1]
+
+  def _updateInteractionTime(self):
+    self._freecadInteractionTimesList.append(time.time())
+    T = array(self._freecadInteractionTimesList)
+    self._freecadInteractionTimesList[:] = T[time.time()-T < 30]
+
+  def _fastModeEnabled(self):
+    T = array(self._freecadInteractionTimesList)
+
+    # enable fast mode if more than 100 freecad interactions
+    # within last 3 seconds, only disable if less then 100
+    # interactions within 10 seconds 
+    #io.verb(f'{sum( time.time()-T < 5 )=}')
+    if self._previousFastModeEnabled:
+      enable = sum( time.time()-T < 10 ) > 100
+    else:
+      enable = sum( time.time()-T < 3 ) > 100
+
+    # if fast mode was just ended, make sure to flush buffers
+    if not enable and self._previousFastModeEnabled:
+      self._flushOutput(forceCareful=True)
+
+    # update previousFastMode attribute and log if fastModeEnable changed
+    if enable != self._previousFastModeEnabled:
+      io.verb(f'{"enabled" if enable else "disabled"} freecad communication fast mode')
+      self._previousFastModeEnabled = enable
+
+    return enable
+
   def write(self, *data):
-    cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*5 # add plenty of newlines at the and to
-                                               # make sure command is complete
-    #print(f'sending python:')
-    #print(cmdStr)
+    self._updateInteractionTime()
+    cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*2 # add plenty of newlines at the and to
+                                               # make sure command is complete also 
+                                               # if indented a few levels
+    if _PRINT_FREECAD_COMMUNICATION:
+      io.verb('> '+cmdStr.replace('\r', '').strip('\n'))
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
 
-  def _flushOutput(self, timeout=3):
+  def _flushOutput(self, timeout=60, forceCareful=False):
+    self._updateInteractionTime()
     t0 = time.time()
 
     # throw away any previous content
+    self.readErr()
     self.read()
 
-    # ask to print random number
-    rn = f'{random.random():.8f}'
-    self.write(f'print("{rn}")')
+    # skip careful flush if fastMode is active (and not forced)
+    if forceCareful or not self._fastModeEnabled():
+      lastWarned = time.time()
+      lastPrintedRn = 0
+      rn = None
+      while True:
+        # ask to print random number every few seconds 
+        # (scale wait time with time that has passed)
+        if time.time()-lastPrintedRn > 1/5*(time.time()-t0):
+          lastPrintedRn = time.time()
+          rn = f'{random.random():.8f}'
+          self.write(f'print("{rn}")')
+        
+        # if random number appears in output: success
+        out = self.read()
+        #print(f'waiting for {rn}, found {out}')
+        if rn in out:
+          return
 
-    # wait until random number appears in output
-    while True:
-      out = self.read()
-      #print(f'waiting for {rn}, dropping {out}')
+        # warn of takes long
+        if time.time()-lastWarned > 5:
+          lastWarned = time.time()
+          io.warn(f'long waiting time for freecad process to become responsive, '
+                  f'waiting since {io.secondsToStr(time.time()-t0)} '
+                  f'(this may happen if the system is under heavy load)')
 
-      # if random number appears in output: success
-      if rn in out:
-        return
-
-      # if time is up: raise timeout error
-      if time.time()-t0 > timeout:
-        raise RuntimeError(f'failed to flush output buffer of FreeCAD, '
-                           f'is a process featuring heavy output printing '
-                           f'running?')
-      time.sleep(1e-3)
+        # if time is up: raise timeout error
+        if time.time()-t0 > timeout:
+          raise RuntimeError(f'failed to flush output buffer of FreeCAD, '
+                            f'is a process featuring heavy output printing '
+                            f'running?')
+        time.sleep(1e-3)
 
   def read(self):
+    self._updateInteractionTime()
     result = []
     try:
       while True:
@@ -544,32 +803,78 @@ class FreecadDocument:
       pass
     return result
 
+  def readErr(self):
+    self._updateInteractionTime()
+    result = []
+    lastLineReceived = 0
+    while True:
+      # fetch lines until queue.Empty is raised
+      try:
+        while True:
+          result.append(self._qe.get_nowait())
+          lastLineReceived = time.time()
+      except queue.Empty:
+        pass
+
+      # if a line was received once only exit after
+      # no line was seen for 500ms
+      if time.time()-lastLineReceived > .5:
+        break
+
+      # limit loop seed
+      time.sleep(1e-3)
+
+    return '\n'.join(result)
+
   def readline(self):
+    self._updateInteractionTime()
     try:
       return self._q.get_nowait()
     except queue.Empty:
       pass
     return None
 
-  def query(self, *data, timeout=6, expect=None):
+  def query(self, *data, timeout=60, expect=None, errText=None):
+    self._updateInteractionTime()
     t0 = time.time()
 
-    # make sure output buffer of freecad is empty
-    self._flushOutput(timeout=timeout/2)
+    # make sure output buffer of freecad is empty (do not wait
+    # full timeout to leave a bit time for the query itself)
+    self._flushOutput(timeout=0.9*timeout)
 
     # send python commands
     self.write(*data)
 
     # wait for single line response
+    lastWarned = time.time()
+    sentCommandT0 = time.time()
     while True:
+      if error:=self.readErr():
+        raise RuntimeError((f'{errText.strip()}\n' if errText else '')
+                           +f'exception was raised while handling '
+                           +f'command(s) {data}:\n\n'+error)
+
+      # check for result line
       if line:=self.readline():
-        if expect is not None and line not in expect:
+        if _PRINT_FREECAD_COMMUNICATION:
+          io.verb(f'< {line}')
+        if expect is not None and expect not in line:
           continue
-        #print(f'query complete: {line}')
         return line
+
+      # warn of takes long
+      if time.time()-lastWarned > 5:
+        lastWarned = time.time()
+        io.warn(f'long waiting time for response from freecad process, waiting '
+                f'since {io.secondsToStr(time.time()-sentCommandT0)} '
+                f'(this may happen if the system is under heavy load)')
+
+      # raise if timeout has passed
       if time.time()-t0 > timeout:
-        raise RuntimeError(f'failed to fetch response to command(s) "{data}", '
-                           f'is a process featuring heavy output printing running?')
+        raise RuntimeError((f'{errText.strip()}\n' if errText else '')
+                           +f'failed to fetch any response to command(s) {data}, '
+                           +f'is the system overloaded or is freecad running '
+                           +f'something with heavy output printing running?')
       time.sleep(1e-3)
 
   ###########################################################################
@@ -578,12 +883,15 @@ class FreecadDocument:
   def __exit__(self, *args, **kwargs):
     self.close()
 
+  def save(self):
+    self.write('App.activeDocument().save()')
+
   def close(self):
     t0 = time.time()
     io.verb(f'closing {self} instance...')
 
-    # save changes
-    self.write('App.activeDocument().save()')
+    # save changes to disk
+    self.save()
 
     while self.isRunning():
       # gently ask to quit
@@ -605,6 +913,9 @@ class FreecadDocument:
     # the document context manager anymore
     progress.progressTrackerInstance(doc=self).quit()
     progress.ALLOW_PROGRESS_TACKERS = False
+
+    # run temp dir cleanup
+    self._sanitizeTempFolder()
 
     io.verb(f'done in {time.time()-t0:.1f}s')
     processes.unsetJupyterMaster()
@@ -653,6 +964,9 @@ class FreecadDocument:
 
 @functools.wraps(FreecadDocument.__init__)
 def openFreecadGui(*args, **kwargs):
+  # close all sweepers that may have opened the file
+  parameter_sweeper.closeAllSweepers()
+
   # create dummy-document object to detect all necessary paths 
   document = FreecadDocument(*args, **kwargs)
 
@@ -761,15 +1075,31 @@ class RawFolder:
   RawFolder class represents one simluation-run folder in the raw subfolder of
   the simulation results directory.
   '''
-  def __init__(self, path):
+  def __init__(self, path, timeout=60):
     self._path = path
-    candidates = [f for f in os.listdir(self._path) 
-                      if os.path.isfile(f'{self._path}/{f}') and f.startswith('uid')]
-    if len(candidates) == 0:
-      raise RuntimeError('invalid raw data folder: uid file missing')
-    if len(candidates) > 1:
-      raise RuntimeError('invalid raw data folder: more than one uid file')
-    self._uid = candidates[0][4:]
+
+    # detect uid, wait up to timeout for uid file to show up
+    t0 = time.time()
+    lastWarned = time.time()
+    while True:
+      candidates = [f for f in os.listdir(self._path) 
+                        if os.path.isfile(f'{self._path}/{f}') and f.startswith('uid')]
+      # if exactly one candidate: save uid and exit loop
+      if len(candidates) == 1:
+        self._uid = candidates[0][4:] 
+        break
+
+      # warn if it takes long
+      if time.time()-lastWarned > 3:
+        lastWarned = time.time()
+        io.warn(f'waiting for uid file to show up took long ({io.secondsToStr(time.time()-t0)})')
+
+      # raise after timeout
+      if time.time()-t0 > timeout:
+        if len(candidates) == 0:
+          raise RuntimeError('invalid raw data folder: uid file missing')
+        if len(candidates) > 1:
+          raise RuntimeError('invalid raw data folder: more than one uid file')
 
   def __repr__(self):
     return self.__str__()
@@ -828,25 +1158,96 @@ class RawFolder:
       else:
         raise ValueError(f'invalid tree node {_node}')
 
-  def loadHits(self, pattern):
-    return self._load(pattern=pattern, kind='hits')
+  def loadHits(self, pattern='*'):
+    return hits.Hits(self._load(pattern=pattern, kind='hits'))
 
-  def loadRays(self, pattern):
+  def loadRays(self, pattern='*'):
     return self._load(pattern=pattern, kind='rays')
+
+  def _findPathsAndSanitize(self, pattern, kind, optimalFilesize=500e6):
+    if pattern == '*':
+      pattern = '**'
+    def _makeGlob():
+      return glob.iglob(f'{self._path}/{pattern}/*-{kind}.pkl', recursive=True)
+
+    # group all files to consider by folder
+    byFolder = {}
+    for path in _makeGlob():
+      base, name = os.path.split(path)
+      if base not in byFolder.keys():
+        byFolder[base] = []
+      try:
+        _stat = os.stat(path)
+        mtime = _stat.st_mtime
+        size = _stat.st_size
+      except Exception:
+        mtime = time.time()
+        size = 1
+      byFolder[base].append([name, mtime, size])
+
+    # find files that look well suited for merging
+    for base, namesTimesSizes in byFolder.items():
+      mergeList = []
+      sizeInList = 0
+      def mergeAllInList():
+        # only do something if more than one file ist list
+        if len(mergeList) > 1:
+          # load and merge all files in list
+          merged = {}
+          for name in mergeList:
+            try:
+              with open(f'{base}/{name}', 'rb') as _f:
+                data = pickle.load(_f)
+            except Exception as e:
+              io.warn(f'failed to read {kind} file {base}/{name}: {e.__class__.__name__} "{e}"')
+            else:
+              # merge file content with merged dict
+              for k, v in data.items():
+                _updateResultEntry(merged, k, v)
+          
+          # overwrite first file in list with total results
+          with atomic_write(f'{base}/{mergeList[0]}',
+                            mode='wb', overwrite=True) as f:
+            pickle.dump(merged, f)
+
+          # delete all remaining files in list
+          for name in mergeList[1:]:
+            os.remove(f'{base}/{name}')
+
+        # reset list
+        mergeList.clear()
+
+      # only consider files that did not change in the last hour
+      for name, size in sorted([(n, s) for n, t, s in namesTimesSizes if time.time()-t > 60*60],
+                               key=lambda e: e[0]):
+        # if this file would make the current merge collection much larger than optimal
+        # size -> merge without current file
+        if sizeInList+size > 1.5*optimalFilesize:
+          mergeAllInList()
+
+        # add current file to list and merge if collection is larger than optimal size
+        mergeList.append(name)
+        sizeInList += size
+        if sizeInList > optimalFilesize:
+          mergeAllInList()
+
+      # merge leftover files no matter the total size
+      mergeAllInList()
+
+    # return all cleaned up paths
+    return _makeGlob()
 
   def _load(self, pattern, kind):
     result = {}
-    if pattern == '*':
-      pattern = '**'
-    for path in glob.iglob(f'{self._path}/{pattern}/*-{kind}.pkl', recursive=True):
+    for path in self._findPathsAndSanitize(pattern, kind):
       try:
         with open(path, 'rb') as _f:
-          hitData = pickle.load(_f)
+          data = pickle.load(_f)
       except Exception as e:
         io.warn(f'failed to read {kind} file {path}: {e.__class__.__name__} "{e}"')
       else:
         # merge hitData content with result dict
-        for k, v in hitData.items():
+        for k, v in data.items():
           _updateResultEntry(result, k, v)
 
     return result
@@ -876,12 +1277,12 @@ class RawFolderRange:
     for res in [r.loadHits(*args, **kwargs) for r in self]:
       for k, v in res.items():
         _updateResultEntry(result, k, v)
-    return result
+    return hits.Hits(result)
 
   @functools.wraps(RawFolder.loadRays)
   def loadRays(self, *args, **kwargs):
     result = {}
-    for res in [r.loadHits(*args, **kwargs) for r in self]:
+    for res in [r.loadRays(*args, **kwargs) for r in self]:
       for k, v in res.items():
         _updateResultEntry(result, k, v)
     return result

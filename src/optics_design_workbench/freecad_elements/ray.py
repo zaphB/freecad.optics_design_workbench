@@ -257,22 +257,20 @@ class Ray():
       return sorted(intersects, key=lambda e: e[-1])[0][:-1]
   
   
-  def getNormal(self, nearest_part, origin, neworigin, epsLength = 1e-6):
+  def getNormal(self, nearest_part, origin, neworigin, epsLength=1e-6):
     '''
     calculate the normal vector given, inherited from OpticsWorkbench
     '''
     dRay = neworigin - origin
-    if hasattr(nearest_part, 'Curve'):
-      param = nearest_part.Curve.parameter(neworigin)
-      tangent = nearest_part.tangentAt(param)
-      normal1 = dRay.cross(tangent)
-      normal = tangent.cross(normal1)
-      if normal.Length < epsLength:
-        return Vector(0, 0, 0)
-      normal = normal / normal.Length
-    elif hasattr(nearest_part, 'Surface'):
+    if hasattr(nearest_part, 'Surface'):
       uv = nearest_part.Surface.parameter(neworigin)
-      normal = nearest_part.normalAt(uv[0], uv[1])
+      try:
+        normal = nearest_part.normalAt(uv[0], uv[1])
+      except Exception:
+        # try to take normal in very close vicinity, hoping it is only
+        # locally illdefined
+        r1, r2 = [(1 if random.random()<.5 else -1)*(.1+random.random()) for _ in range(2)]
+        normal = nearest_part.normalAt(uv[0] + epsLength*r1, uv[1] + epsLength*r2)
     else:
       return Vector(0, 0, 0)
     cosangle = dRay*normal / (dRay.Length*normal.Length)

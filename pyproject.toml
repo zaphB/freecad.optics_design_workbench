@@ -16,11 +16,12 @@ name = "freecad.optics_design_workbench"
 dynamic = ["version"]
 dependencies = [
   "numpy>1.24.4", 
-  "scipy", 
+  "scipy>=1.14.0", 
   "sympy", 
   "matplotlib", 
   "seaborn",
   "atomicwrites",
+  "cloudpickle",
   "PySide6",
 ]
 

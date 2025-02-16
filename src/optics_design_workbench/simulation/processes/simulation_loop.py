@@ -73,6 +73,10 @@ def setupJupyterMaster(path):
   '''
   global _IS_MASTER_PROCESS
   _IS_MASTER_PROCESS = True
+  # complain if already registered
+  if io.isRegisteredJupyter():
+    io.warn(f'setting jupyter master state even though already in jupyter master state '
+            f'(this may imply a stale FreecadDocument handle is open somewhere)')
   # replace FCStd suffix
   if path.endswith('.FCStd'):
     path = path[:-6]+'.OpticsDesign'
@@ -239,6 +243,10 @@ def runSimulation(action, slaveInfo={}):
     # prepare simulation, assemble simulation parameters from the various sources (settings,
     # defaults, mutual conditions, ...)
 
+    # save active document and recompute
+    _SIMULATING_DOCUMENT = App.activeDocument()
+    _SIMULATING_DOCUMENT.recompute()
+
     # make sure other simulations have stopped and no other simulation
     # can be started
     if isMasterProcess():
@@ -254,19 +262,6 @@ def runSimulation(action, slaveInfo={}):
       if not isRunning():
         raise RuntimeError('slave was launched but no simulation seems to be running')
         
-    # save active document and recompute
-    _SIMULATING_DOCUMENT = App.activeDocument()
-    _SIMULATING_DOCUMENT.recompute()
-
-    # Save document so background workers will work on the exact state of the project,
-    # but make sure to save only if GUI exists, otherwise all ViewProvider objects will
-    # break and loose their info. This implies that a master running in headless mode
-    # will not save before spawning the workers, because nothing can change in the document
-    # in headless mode.
-    io.verb(f'{isMasterProcess()=} and {App.GuiUp=}')
-    if isMasterProcess() and App.GuiUp:
-      _SIMULATING_DOCUMENT.save()
-
     # determine simulation mode
     mode = action
     continuous = True
@@ -351,6 +346,20 @@ def runSimulation(action, slaveInfo={}):
       else:
         backgroundWorkers = workers
         io.info(f'doing simulation work with {backgroundWorkers} background workers and lazy gui process')
+
+      # If background workers will be started, save document so they will work on the exact
+      # state of the project, but make sure to save only if GUI exists, otherwise all 
+      # ViewProvider objects will break and loose their info. 
+      # This implies that a master running in headless mode
+      # will not save before spawning the workers (which implies nothing must be can changed 
+      # in the document in headless mode)
+      if backgroundWorkers > 0 and App.GuiUp:
+        io.verb(f'saving document {App.GuiUp=}')
+        _SIMULATING_DOCUMENT.save()
+      else:
+        io.verb(f'skip saving document {App.GuiUp=}')
+
+      # actually launch workers
       for workerNo in range(backgroundWorkers):
         _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, simulationRunFolder=simulationRunFolder))
         freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
