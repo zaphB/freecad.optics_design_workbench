@@ -366,9 +366,14 @@ class FreecadDocument:
                        f'without openFreshCopy option')
     shutil.rmtree(self._getTempFolder())
 
+  def isOpenFreshCopy(self):
+    if self._openFreshCopy:
+      return True
+    return '.OpticsDesign/tmp'.lower() in self._path.lower()
+
   def _sanitizeTempFolder(self, timeout=4):
     # dont clean if this is a tmp-document
-    if self._openFreshCopy:
+    if self.isOpenFreshCopy():
       return
 
     t0 = time.time()

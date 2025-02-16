@@ -509,9 +509,11 @@ class ParameterSweeper:
 
   def optimizeStrategyEnd(self):
     self._optimizeStepsArgCache = {}
+    self.purgeTempFolder()
+  
 
-    # import/delete all created temp folders
-    pass
+  def purgeTempFolder(self):
+    self.freecadDocument().purgeTempFolder()
 
 
   def optimize(self, minimizeFunc, parameters, simulationMode, 

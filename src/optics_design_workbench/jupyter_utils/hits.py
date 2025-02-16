@@ -238,7 +238,7 @@ class Hits:
     return len(set(self.hits['fanIndex']))
 
   @functools.cache
-  def _calcFanDensityEtc(self, **kwargs):
+  def _calcFanDensityEtc(self, pCenter=None, **kwargs):
     self._raiseIfNotFanMath()
 
     rI, fI, p, trf = self.hits['rayIndex'], self.hits['fanIndex'], self.hits['points'], self.hits['totalRaysInFan']
@@ -254,7 +254,9 @@ class Hits:
 
       # find most central ray
       centerI = rayIs[argmin(abs(array(rayIs)))]
-      pCenter = mean(pXY[logical_and(fI==fanI, rI==centerI)], axis=0)
+      if pCenter is None:
+        pCenter = mean(pXY[logical_and(fI==fanI, rI==centerI)], axis=0)
+      pCenter = array(pCenter)
 
       # increment missing rays
       missingRays += mean(trf[fI==fanI])-len(rayIs)
@@ -290,8 +292,8 @@ class Hits:
   def fanSkippedRays(self):
     return self._calcFanDensityEtc()['skippedRays']
 
-  def fanCenterDists(self):
-    return self._calcFanDensityEtc()['centerDists'].T
+  def fanCenterDists(self, pCenter=None):
+    return self._calcFanDensityEtc(pCenter=tuple(pCenter))['centerDists'].T
 
   def fanNeighborDists(self):
     return self._calcFanDensityEtc()['neighborDists'].T
