@@ -11,6 +11,7 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 from .freecad_document import *
 from .progress import *
 from .hits import *
+from .histogram import *
 from .parameter_sweeper import *
 
 # import a few useful toplevel modules too

@@ -7,12 +7,14 @@ __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
-
 from numpy import *
 from matplotlib.pyplot import *
 import seaborn as sns
 import pandas as pd
 import functools
+
+from .. import io
+from . import histogram
 
 nx, ny, nz = array([1,0,0]), array([0,1,0]), array([0,0,1])
 
@@ -40,71 +42,134 @@ class Hits:
       return self.hits['points']
     return array([])
 
+  def directions(self):
+    if 'directions' in self.hits:
+      return self.hits['directions']
+    return array([])
+
+  def isEntering(self):
+    if 'isEntering' in self.hits:
+      return self.hits['isEntering']
+    return array([])
+
   # ====================================================
   # POINT CLOUD MATH
 
-  def planeProject3dPoints(self, points=None, planeNormal=None, returnZ=False):
+  def planeProject3dPoints(self, points=None, planeNormal=None, 
+                           inPlaneXDir=None, returnZ=False):
     '''
-    Turn a 3D point cloud of shape (N,3) into a 2D point cloud (N,2) 
+    Turn a 3D point cloud of shape (N,3) into a 2D point cloud (N,2).
+
+    Parameters:
+      points : (N,3) array (optional)
+        Point cloud to project, defaults to self.points().
+
+      planeNormal : (3,) array (optional)
+        Normal vector of the projection plane, defaults to result
+        of detectPlaneNormal(points).
+
+      inPlaneXDir : (3,) array (optional)
+        Vector pointing into the desired X-coordinate direction of
+        the coordinate system after projection. Defaults to the 
+        numerically best suited vector among (1,0,0), (0,1,0) and (0,0,1).
     '''
     # detect plane normal if none is given explicitly
     if points is None:
       points = self.points()
-    if planeNormal is None:
-      planeNormal = self.detectPlaneNormal()
+    if planeNormal is None or inPlaneXDir is None:
+      planeNormal, inPlaneXDir = self.detectPlaneNormal(planeNormal=planeNormal, 
+                                                        inPlaneXDir=inPlaneXDir)
 
-    # select projection vectors by cross products of normal with 
-    # nx, ny and nz with highest norm 
-    projX, projY = sorted([cross(planeNormal, n) for n in (nx, ny, nz)], 
-                          key=lambda x: -linalg.norm(x))[:2]
-    if returnZ:
-      projZ = cross(projX, projY)
+    projX = inPlaneXDir
     X = dot(points, projX/linalg.norm(projX)) 
+    projY = cross(planeNormal, inPlaneXDir)
     Y = dot(points, projY/linalg.norm(projY))
     if returnZ:
-      Z = dot(points, projZ/linalg.norm(projZ))
+      Z = dot(points, planeNormal/linalg.norm(planeNormal))
       return array([X, Y, Z]).T
     return array([X, Y]).T
 
-  def detectPlaneNormal(self, points=None, maxPointCountConsidered=300, angleTol=1e-9):
+  def detectPlaneNormal(self, points=None, directions=None, 
+                        planeNormal=None, inPlaneXDir=None,
+                        maxPointCountConsidered=300, angleTol=1e-9):
     '''
     Find the best possible plane normal vector to project the 3D point cloud
     points to a 2D point cloud spanning a maximal area.
     '''
     if points is None:
       points = self.points()
+    if directions is None:
+      directions = self.directions()
+      isEntering = self.isEntering()
+      # remove directions of exiting rays when more rays entered than exited
+      # -> heuristic to improve planeNormal sign auto-detect for transparent detectors
+      if sum(isEntering==0) < .51*len(isEntering):
+        directions = directions[isEntering!=0]
     checkPoints = points[::1+int(points.shape[0]/maxPointCountConsidered)]
+    checkDirections = directions[::1+int(directions.shape[0]/maxPointCountConsidered)]
 
-    # cover only half the unit sphere because every plane has two normal
-    # vectors (sign is ambiguous)
-    phis = linspace(0, pi, 30)
-    dphi = phis[1]-phis[0]
-    thetas = linspace(-pi/2, pi/2, 30)
-    dtheta = thetas[1]-thetas[0]
-    while True:
-      # check all phi theta candidates and calculate expected span for them
-      phiThetas, zSpans = [], []
-      for phi, theta in zip(*[g.flatten() for g in meshgrid(phis, thetas)]):
-        normal = array([cos(phi)*sin(theta), sin(phi)*sin(theta), cos(theta)])
-        p = self.planeProject3dPoints(points=checkPoints, planeNormal=normal, returnZ=True)
-        phiThetas.append((phi, theta))
-        zSpans.append( (p[:,2].max()-p[:,2].min()) )
-
-      # select phi thata with the best span so far and update grid
-      phiOpt, thetaOpt = phiThetas[argmin(zSpans)]
-      phis = linspace(phiOpt-1.1*dphi, phiOpt+1.1*dphi, 10)
+    if planeNormal is None:
+      # cover only half the unit sphere because every plane has two normal
+      # vectors (sign is ambiguous)
+      phis = linspace(0, pi, 30)
       dphi = phis[1]-phis[0]
-      thetas = linspace(thetaOpt-1.1*dtheta, thetaOpt+1.1*dtheta, 10)
+      thetas = linspace(-pi/2, pi/2, 30)
       dtheta = thetas[1]-thetas[0]
+      while True:
+        # check all phi theta candidates and calculate expected span for them
+        phiThetas, zSpans = [], []
+        for phi, theta in zip(*[g.flatten() for g in meshgrid(phis, thetas)]):
+          normal = array([cos(phi)*sin(theta), sin(phi)*sin(theta), cos(theta)])
+          p = dot(checkPoints, normal)
+          phiThetas.append((phi, theta))
+          zSpans.append( p.max()-p.min() )
 
-      # quit loop if angle diff is smaller than tolerance
-      if dphi < angleTol and dtheta < angleTol:
-        break
-    
+        # select phi thata with the best span so far and update grid
+        phiOpt, thetaOpt = phiThetas[argmin(zSpans)]
+        phis = linspace(phiOpt-1.1*dphi, phiOpt+1.1*dphi, 10)
+        dphi = phis[1]-phis[0]
+        thetas = linspace(thetaOpt-1.1*dtheta, thetaOpt+1.1*dtheta, 10)
+        dtheta = thetas[1]-thetas[0]
+
+        # quit loop if angle diff is smaller than tolerance
+        if dphi < angleTol and dtheta < angleTol:
+          break
+
+      # calc best planeNormal
+      planeNormal = array([cos(phiOpt)*sin(thetaOpt), sin(phiOpt)*sin(thetaOpt), cos(thetaOpt)])
+
+    # choose planeNormal sign to be parallel with directions as well as possible
+    projectedDirs = dot(checkDirections, planeNormal)
+    # 90% of directions are same direction as planeNormal -> flip plane normal
+    if quantile(projectedDirs, 0.1) > 0:
+      planeNormal = -planeNormal
+    # 90% of directions are opposite direction of planeNormal -> all good
+    elif quantile(projectedDirs, 0.9) < 0:
+      pass
+    # something in between: follow best guess and warn user
+    else:
+      if quantile(projectedDirs, 0.5) < 0:
+        planeNormal = -planeNormal
+      io.warn(f'unsure of result when trying to auto-detect sign of plane normal, '
+              f'avoid relying on the sign of the planeNormal')
+
+    # select projection vectors by cross products of normal with 
+    # nx, ny and nz with highest norm to ensure numeric stability
+    # if planeNormal is almost parallel to one of nx, ny or nz.
+    candidates = [nx, ny, nz]
+    if inPlaneXDir is not None:
+      candidates = [inPlaneXDir]
+    projY = sorted([cross(planeNormal, n) for n in candidates], 
+                   key=lambda x: -linalg.norm(x))[0]
+    inPlaneXDir = cross(planeNormal, projY)
+    # prefer positive coefficients in inPlaneXDir
+    if sum(inPlaneXDir) < 0:
+      inPlaneXDir = -inPlaneXDir
+
     # set plane normal to optimal normal found so far
-    return array([cos(phiOpt)*sin(thetaOpt), sin(phiOpt)*sin(thetaOpt), cos(thetaOpt)])
+    return planeNormal, inPlaneXDir
 
-  def planarHistogram(self, XY='centers', key='points', planeNormal=None, comRadius=None, **kwargs):
+  def histogram(self, planeNormal=None, inPlaneXDir=None, key='points', **kwargs):
     '''
     Return the histogram of a 3D-point-cloud projected to a planeNormal. If planeNormal
     is not passed, a normal orthogonal to the two largest extents of the point could
@@ -112,64 +177,44 @@ class Hits:
     Returns three rays: histogram, X and Y axes values. X and Y are either the bin edges
     (XY='edges') or the bin centers (XY='center')
     '''
-    points = self.points()
+    points = self.hits[key]
 
     # if project vector is not given, set it to the direction of minimum span
-    if planeNormal is None:
-      planeNormal = self.detectPlaneNormal()
+    if planeNormal is None or inPlaneXDir is None:
+      planeNormal, inPlaneXDir = self.detectPlaneNormal(planeNormal, inPlaneXDir)
 
     # perform projection of full dataset
-    projPoints = self.planeProject3dPoints(points, planeNormal)
+    projPoints = self.planeProject3dPoints(points, planeNormal=planeNormal, inPlaneXDir=inPlaneXDir)
     X, Y = projPoints.T
+    return histogram.Histogram(X, Y, planeNormal=planeNormal, inPlaneXDir=inPlaneXDir, **kwargs)
 
-    # calculate bins if comRadius is given
-    if comRadius is not None:
-      bins = kwargs.pop('bins', 50)
-      if hasattr(bins, '__len__'):
-        bins = len(bins)
 
-      # find center of mass
-      comX, comY = median(X), median(Y)
-      bins = [comX+linspace(-comRadius, comRadius, bins),
-              comY+linspace(-comRadius, comRadius, bins)]
-      kwargs['bins'] = bins
-
-    # get histogram
-    hist, binX, binY = histogram2d(X, Y, **kwargs)
-
-    if XY == 'centers':
-      binX = (binX[1:]+binX[:-1])/2
-      binY = (binY[1:]+binY[:-1])/2
-    elif XY == 'edges':
-      pass
-    else:
-      raise ValueError(f'expected XY to be one of "edges" or "centers", found {XY=}')
-
-    # return results
-    return hist, binX, binY
-
-  def plot(self, hueKey=None, hueLabel=None, planeNormal=None, plotKey='points', figsize=None, **kwargs):
+  def plot(self, hueKey=None, hueLabel=None, planeNormal=None, inPlaneXDir=None, 
+           plotKey='points', **kwargs):
     # just return if no hits exist
     if plotKey not in self.hits.keys():
       return
 
-    if planeNormal is None:
-      planeNormal = self.detectPlaneNormal(self.hits[plotKey])
+    if planeNormal is None or inPlaneXDir is None:
+      planeNormal, inPlaneXDir = self.detectPlaneNormal(points=self.hits[plotKey], 
+                                    planeNormal=planeNormal, inPlaneXDir=inPlaneXDir)
     X, Y = self.planeProject3dPoints(self.hits[plotKey], planeNormal=planeNormal).T
-    data = {'projected x':X, 'projected y':Y}
+    data = {'projected $x$':X, 'projected $y$':Y}
     if hueKey is not None:
       if hueLabel is None:
         hueLabel = hueKey
       data[hueLabel] = self.hits[hueKey]
-    nx, ny, nz = planeNormal
-    if figsize is not None:
-      figure(figsize=figsize)
     sns.scatterplot(pd.DataFrame(data),
-                    x='projected x', y='projected y', 
-                    **(dict(hue=hueLabel, palette='hls') if hueLabel else {}))
-    title(f'plane normal = [{nx:.2f}, {ny:.2f}, {nz:.2f}]', fontsize=10) 
+                    x='projected $x$', y='projected $y$', 
+                    **(dict(hue=hueLabel, palette='hls') if hueLabel else {}),
+                    **kwargs)
+    nx, ny, nz = planeNormal
+    px, py, pz = inPlaneXDir
+    title(f'plane normal = [{nx:.2f}, {ny:.2f}, {nz:.2f}],\n'
+          f'projected $x$ = [{px:.2f}, {py:.2f}, {pz:.2f}]', fontsize=10) 
     gca().axis('equal')
     gca().set_aspect('equal')
+    tight_layout()
 
   # ====================================================
   # FAN MATH
@@ -189,6 +234,7 @@ class Hits:
     return self.hits['totalRaysInFan'][0]
 
   def fanCount(self):
+    self._raiseIfNotFanMath()
     return len(set(self.hits['fanIndex']))
 
   @functools.cache
