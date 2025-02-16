@@ -21,7 +21,7 @@ from ..simulation.tracing_cache import *
 from .. import io
 
 # global dict with keys being PointSourceProxy objects and values being 
-# more dicts that store pseudo-attributes. This akward attribute storing
+# more dicts that store pseudo-attributes. This awkward attribute storing
 # format allows to bypass the serializer which wants to safe the Proxy
 # objects whenever the FreeCAD project is saved.
 NON_SERIALIZABLE_STORE = {}
@@ -77,7 +77,7 @@ class GenericSourceProxy():
     # recalculate cached matrices for each iteration
     self._makeRayCache.cache_clear()
 
-    # prepare transforms etc that wil be used many times
+    # prepare transforms etc that will be used many times
     gpM, gpMi = self._makeRayCache(obj)[:2]
 
     # clear displayed rays on begin of each simulation iteration

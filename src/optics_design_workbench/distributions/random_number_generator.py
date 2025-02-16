@@ -174,7 +174,7 @@ class VectorRandomVariable:
       # start alarm that raises exception in this thread after timeout
       _setAlarm(self._deadline)
 
-      # test wether expression looks positive
+      # test whether expression looks positive
       isPositive = False
       try:
         if not bool( expr < 0 ):
