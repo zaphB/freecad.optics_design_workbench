@@ -293,7 +293,7 @@ class Hits:
     return self._calcFanDensityEtc()['skippedRays']
 
   def fanCenterDists(self, pCenter=None):
-    return self._calcFanDensityEtc(pCenter=tuple(pCenter))['centerDists'].T
+    return self._calcFanDensityEtc(pCenter=(tuple(pCenter) if pCenter else None))['centerDists'].T
 
   def fanNeighborDists(self):
     return self._calcFanDensityEtc()['neighborDists'].T

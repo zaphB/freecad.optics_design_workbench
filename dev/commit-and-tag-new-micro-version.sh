@@ -17,9 +17,9 @@ echo && echo "-> version was $major.$minor.$micro, setting new version $newVer..
   && git tag "v$newVer" \
   && ./dev/update-packagexml.py \
   && git tag -d "v$newVer" \
+  && rm freecad \
   && echo && echo "-> adding all files and create new commit " \
   && git add . \
   && git commit $* \
   && git tag "v$newVer" \
   && echo "done."
-
