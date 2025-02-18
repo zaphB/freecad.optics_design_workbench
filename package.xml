@@ -13,7 +13,7 @@
   <license file="LICENSE">LGPL-3.0-or-later</license>
   <url type="repository" branch="master">https://github.com/zaphB/freecad.optics_design_workbench</url>
   <url type="readme">https://github.com/zaphB/freecad.optics_design_workbench/blob/master/README.md</url>
-  <icon>freecad/optics_design_workbench/icons/workbench.svg</icon>
+  <icon>src/optics_design_workbench/icons/workbench.svg</icon>
   <content>
     <workbench>
       <classname>OpticsDesignWorkbench</classname>
