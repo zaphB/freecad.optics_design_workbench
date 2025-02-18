@@ -10,24 +10,26 @@ Feel free to ask any question in the [forum thread](https://forum.freecad.org/vi
 FreeCAD version >=0.21, python packages numpy, scipy, matplotlib, atomicwrites. A jupyter notebook installation is recommended.
 
 
-## Installation
+## Installing the FreeCAD workbench
 
 To make the Optics Design Workbench available in FreeCAD, install it using FreeCAD's built in addon manager.
 
-To be able to use the workbench as a regular python module run
-
-```bash
-pip install freecad.optics_design_workbench
-```
-
-
-## Manual/offline installation without addon manager
-
-Head to the releases section and download the zipped source of your version of choice. Extract the downloaded zip to the Mod folder of your FreeCAD installation. Make sure that the folder containing the `init_gui.py` is on the third subfolder level below the Mod directory:
+If you want to install without the addon manager, head to the releases section and download the zipped source of your version of choice. Extract the downloaded zip to the Mod folder of your FreeCAD installation. Make sure that the folder containing the `init_gui.py` is on the third subfolder level below the Mod directory like this:
 
 ```bash
 ..../Mod/freecad.optics_design_workbench-1.2.3/freecad/optics_design_workbench/init_gui.py
 ```
+
+
+## Installing for usage in external python shells and jupyter notebooks
+
+To install as a regular python package run
+
+```bash
+pip install optics_design_workbench
+```
+
+(Note that the package looks very much like a `freecad.optics_design_workbench` namespace package, however it is uploaded to PyPi just as `optics_design_workbench`, i.e., not being part of the freecad namespace. The reason for this is that the freecad base package is not pip-installable yet and is therefore very difficult to install in virtual environments. The `optics_design_workbench` without the namespace component does not rely on the freecad package to exist, therefore can be installed via pip in any virtual environment without any issue.)
 
 
 ## Development installation
@@ -79,8 +81,8 @@ All parameters of the FreeCAD model are accessible from an external python shell
 When things don't work as expected first make sure you are actually running want you intend to run and whether the same workbench version is installed on the python and the FreeCAD side. To check this, run
 
 ```python
-import freecad.optics_design_workbench
-freecad.optics_design_workbench.versionInfo()
+import optics_design_workbench
+optics_design_workbench.versionInfo()
 ```
 
 in the FreeCAD python shell and
