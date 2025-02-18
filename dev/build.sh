@@ -3,6 +3,15 @@
 # change dir to this script's location
 cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
+# sync with github if upload is enabled
+if [[ "$1" == "--upload" ]]; then
+  git pull \
+  && git pull --tags \
+  && git push \
+  && git push --tags \
+  || exit 1
+fi
+
 # This removes the freecad-link before building and uploading to PyPi, to prevent building as a namespace
 # package. It has to be done this way, because using include/exclude options in pyproject.toml did not make
 # hatch ingore the freecad symlink (not sure if this is a bug or intentional).
@@ -15,7 +24,7 @@ cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 # Hopefully the freecad base package will be added to PyPi in the future, to remove necessity for this mess.
 rm freecad \
 && rm -rf dist \
-&& hatch build \
+&& uv build \
 
 # restore link and remove src/optics_design_workbench copy
 ln -s src freecad
