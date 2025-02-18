@@ -248,9 +248,17 @@ class PointSourceProxy(GenericSourceProxy):
         # make one iteration per ray fan half
         for rayIndexSign, phi in ([1, _phi], [-1, _phi+pi]):
 
+          # select thetas belonging to this half of the fan
+          if l1 == 0:
+            if rayIndexSign == 1:
+              _thetas = _posNegThetas[_posNegThetas>=0]
+            else:
+              _thetas = -_posNegThetas[_posNegThetas<0]
+            totalRaysInFan = len(_posNegThetas)
+
           # generate the required thetas to place beams in two halves if 
           # lower theta limit l1 is not zero
-          if l1 != 0:
+          else:
             isFullFanMode = False
             _report = getattr(self, '_reportedFullFanMode', None)
             if _report is None or _report != isFullFanMode:
@@ -264,14 +272,8 @@ class PointSourceProxy(GenericSourceProxy):
                         numericalResolution=obj.ThetaResolutionNumericMode)
             vrv.compile(phi=_phi)
             _thetas = vrv.findGrid(N=raysPerFan)
+            totalRaysInFan = 2*len(_thetas)
             #io.verb(f'{_thetas=}')
-
-          # select thetas belonging to this half of the fan
-          if rayIndexSign == 1:
-            _thetas = _posNegThetas[_posNegThetas>=0]
-          else:
-            _thetas = -_posNegThetas[_posNegThetas<0]
-          #io.verb(f'{_isCentralThetaNegative=}, {rayIndexSign=}, {_thetas=}')
 
           # this loop may run for quite some time, keep GUI responsive by handling events
           keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -298,7 +300,7 @@ class PointSourceProxy(GenericSourceProxy):
                                metadata=dict(fanIndex=fanIndex, 
                                              rayIndex=rayIndex*rayIndexSign,
                                              totalFanCount=totalFanCount,
-                                             totalRaysInFan=len(_posNegThetas)))
+                                             totalRaysInFan=totalRaysInFan))
 
     # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
     elif mode == 'true' or mode == 'pseudo':

@@ -6,10 +6,7 @@ build-backend = "hatchling.build"
 source = "versioningit"
 
 [tool.hatch.build.targets.wheel]
-packages = [
-  "src/freecad", 
-  "src/optics_design_workbench"
-]
+packages = ["src/optics_design_workbench"]
 
 [project]
 name = "freecad.optics_design_workbench"
@@ -52,4 +49,3 @@ addopts = "-ra -q"
 testpaths = [
     "tests/python",
 ]
-
