@@ -5,8 +5,18 @@ build-backend = "hatchling.build"
 [tool.hatch.version]
 source = "versioningit"
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "test-docker",
+  "dev",
+  "releases",
+  "dist"
+]
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/optics_design_workbench"]
+packages = [
+  "src/optics_design_workbench"
+]
 
 [project]
 name = "freecad.optics_design_workbench"
