@@ -82,6 +82,8 @@ class SweeperOptimizeWorker:
     self._process = _mpCtx().Process(
                         target=_unpickleAndWork, args=(pickledSelf,), 
                         daemon=True ) # <- kill process after parent has exited
+
+  def start(self):
     self._process.start()
 
   def work(self):
@@ -118,6 +120,65 @@ class SweeperOptimizeWorker:
     return self._process.kill()
 
 
+class MetaParameter:
+  '''
+  This class implements set and get methods like the FreeCAD document
+  parameters do. The get method returns the value previously set, or 
+  nan if no set command was issued so far. The set command stores the
+  set value and tries to set the dependent real parameters.
+  '''
+  def __init__(self, name, metaParameterFunc, sweeper):
+    self._metaParameterFunc = metaParameterFunc
+    self._name = name
+    self._sweeper = sweeper
+    self._siblings = [self]
+    self._latestResultDict = {}
+    self._value = nan
+    self._allSiblingsWereSetOnce = False
+
+  def setSiblings(self, siblings):
+    self._siblings = list(siblings)
+
+  def set(self, value, dontApplyMetaParamYet=False, **kwargs):
+    # store whether value was nan before and update our own value
+    wasNan = isnan(self._value)
+    self._value = value
+
+    # check if all siblings have non-nan value
+    unsetSiblings = [p._name for p in self._siblings if isnan(p.get())]
+    if not len(unsetSiblings):
+      # report if this is the first time we reach this point and actually use the metaParameterFunc
+      if not self._allSiblingsWereSetOnce:
+        io.verb(f'meta parameter family {", ".join([p._name for p in self._siblings])} is '
+                f'completely initialized and active from now on')
+      self._allSiblingsWereSetOnce = True
+
+      # calculate result dict to be set according to stored metaParameterFunc
+      resultDict = self._metaParameterFunc(self._sweeper, **{p._name: p.get() for p in self._siblings})
+
+      # set result dict in all siblings, sweeper.set will internally 
+      if dontApplyMetaParamYet:
+        self._latestResultDict = resultDict
+        for s in self._siblings:
+          s._latestResultDict = resultDict
+
+      # alternatively: directly apply new result dict
+      else:
+        self._sweeper.set(**resultDict)
+
+    # if other meta param siblings have not been set yet and our previous value was
+    # non-nan, issue a warning
+    else:
+      if not wasNan:
+        io.warn(f'set meta parameter {self._name} to {value}, but its the siblings '
+                f'{", ".join(unsetSiblings)} have not been set yet. Setting meta '
+                f'parameters only has an effect once all siblings have been set once.')
+
+
+  def get(self):
+    return self._value
+
+
 class ParameterSweeper:
   '''
   The parameter sweeper allows to conveniently set/get/sweep/optimize 
@@ -138,12 +199,36 @@ class ParameterSweeper:
   '''
   def __init__(self, getParametersFunc, freecadDocumentKwargs={}):
     self._getParametersFunc = getParametersFunc
+    self._metaParameterDict = {}
     self._freecadDocumentKwargs = freecadDocumentKwargs
     self._freecadDocument = None
     self._closeDocumentAfterInactivityThread = None
     self._freecadLock = None
     self._bounds = {}
     self._optimizeStepsArgCache = {}
+  
+  def addMetaParameters(self, metaParameterFunc):
+    newMetaParams = {}
+    for argName in list(inspect.signature(metaParameterFunc).parameters.keys())[1:]:
+      if argName in list(self.parameters().keys()):
+        raise ValueError(f'meta parameter function argument {repr(argName)} '
+                         f'conflicts with existing parameter. Did you already '
+                         f'add these metaparameters? Or does the name exist '
+                         f'among the regular parameters?')
+
+      # add meta parameter object to the dictionary
+      newMetaParams[argName] = MetaParameter(argName, metaParameterFunc, self)
+
+    # let all newly generated meta params know about their siblings
+    for v in newMetaParams.values():
+      v.setSiblings(newMetaParams.values())
+
+    # save new meta params to dictionary
+    self._metaParameterDict.update(newMetaParams)
+    io.verb(f'registered meta parameters {newMetaParams}')
+    
+    # reset self.parameters cache to make sure meta params appear on next call
+    self.parameters.cache_clear()
 
   def _freecadDocumentLock(self):
     if self._freecadLock is None:
@@ -190,6 +275,7 @@ class ParameterSweeper:
     # on next occasion
     prevMode = self._freecadDocumentKwargs.get('openFreshCopy', None)
     if prevMode != mode:
+      self.resultsPath.cache_clear()
       self.close()
 
     # update freecad document kwargs
@@ -223,6 +309,7 @@ class ParameterSweeper:
       self.open()
       return self._freecadDocument
 
+  @functools.cache
   def resultsPath(self):
     return self.freecadDocument().resultsPath()
 
@@ -230,6 +317,7 @@ class ParameterSweeper:
     with self._freecadDocumentLock():
       self.open()
       res = self._getParametersFunc(self._freecadDocument)
+      res.update(self._metaParameterDict)
       if not len(res):
         raise ValueError(f'getParametersFunc return empty dict, a ParameterSweeper '
                          f'without parameters is pointless')
@@ -242,6 +330,7 @@ class ParameterSweeper:
 
   def set(self, **kwargs):
     with self._freecadDocumentLock():
+      boundsDict = self.bounds()
       paramDict = self._parameterNodeDict()
 
       # check whether keys are valid
@@ -252,8 +341,19 @@ class ParameterSweeper:
 
       # update parameter values
       for setKey, setVal in kwargs.items():
-        # update value
-        paramDict[setKey].set(setVal)
+        # restrict set val if bounds are exceeded
+        b1, b2 = boundsDict[setKey]
+        if setVal < b1:
+          io.warn(f'trying to set parameter {setKey} to {setVal}, which is below '
+                  f'lower bound {b1}. Setting to lower bound {b1} instead.')
+          setVal = b1
+        if setVal > b2:
+          io.warn(f'trying to set parameter {setKey} to {setVal}, which is above '
+                  f'upper bound {b2}. Setting to upper bound {b2} instead.')
+          setVal = b2
+
+        # update value but dont apply meta params right away 
+        paramDict[setKey].set(setVal, dontApplyMetaParamYet=True)
 
         # ensure value was set correctly
         success = False
@@ -266,6 +366,16 @@ class ParameterSweeper:
         if not success:
           raise ValueError(f'try to set parameter {setKey} to value '
                            f'{repr(setVal)}, but got value {repr(gotVal)}.')
+      
+      # apply all changed meta params, make sure to only apply one of each
+      # sibling group to avoid many redundant calls
+      appliedMetaParams = []
+      for setKey, setVal in kwargs.items():
+        param = paramDict[setKey]
+        if isinstance(param, MetaParameter) and param not in appliedMetaParams:
+          appliedMetaParams.append(param)
+          appliedMetaParams.extend(param._siblings)
+          self.set(**param._latestResultDict)
 
       # clear parameter cache if parameters were updated
       self.parameters.cache_clear()
@@ -292,11 +402,13 @@ class ParameterSweeper:
 
   def optimizeStrategyBegin(self):
     self._optimizeStepsArgCache = {}
-    self.open()
+    self._optimizeStepsPosArgCache = {}
 
-  def optimizeStrategyStep(self, *args, progressCallback=None, 
-                           relWaitForParallel=1, progressPlotInterval=30,
-                           saveInterval=5*60):
+  def optimizeStrategyStep(self, *args, 
+                           progressCallback=None, 
+                           relWaitForParallel=None, 
+                           progressPlotInterval=None,
+                           saveInterval=None):
     '''
     Pass one or more dictionaries with optimize args to run
     optimization steps with varied free parameters, methods, etc. in parallel
@@ -330,16 +442,22 @@ class ParameterSweeper:
     )
     '''
     global CLOSE_FREECAD_TIMEOUT
-    self.open()
 
-    # check validity of strategy
-    if not len(args):
-      raise ValueError('no steps for optimization strategy given')
+    # Cache positional argument values, too. Assume Nones mean parameter was not given
+    self._optimizeStepsPosArgCache.update({k:v for k,v in locals().items() if k not in ('self', 'args') and v is not None})
+    progressCallback = self._optimizeStepsPosArgCache.get('progressCallback', None)
+    relWaitForParallel = self._optimizeStepsPosArgCache.get('relWaitForParallel', .5)
+    progressPlotInterval = self._optimizeStepsPosArgCache.get('progressPlotInterval', 60)
+    saveInterval = self._optimizeStepsPosArgCache.get('saveInterval', 5*60)
 
     # add cache contents to all arg dicts
     for kwargs in args:
       self._optimizeStepsArgCache.update(kwargs)
       kwargs.update(self._optimizeStepsArgCache)
+
+    # check validity of strategy
+    if not len(args):
+      raise ValueError('no steps for optimization strategy given')
 
     # do work in this process, no workers launched
     if len(args) == 1:
@@ -352,20 +470,25 @@ class ParameterSweeper:
       t0 = time.time()
       lastProgressPlot = 0
 
-      # create worker objects
-      workers = []
-      for kwargs in args:
-        # sleep random time between worker creation to not stress the filesystem
-        # too much
-        time.sleep(1/3+1/3*random.random())
-
-        # launch and add worker to list
-        workers.append(SweeperOptimizeWorker(self, kwargs))
-
       # increase freecad timeout duration to a very log time to avoid annoying reopenings
       # during optimize strategy
       CLOSE_FREECAD_TIMEOUT = 3600
       
+      # save document and create worker objects
+      self.save()
+      workers = []
+      io.verb(f'setting up worker processes...')
+      for kwargs in args:
+        workers.append(SweeperOptimizeWorker(self, kwargs))
+      
+      # start worker processes (do creation of workers and starting in separate loops to avoid
+      # stretching the period of worker launch induced window flickering for too long)
+      io.verb(f'launching worker processes...')
+      for w in workers:
+        # sleep random time between worker creation to avoid stressing the filesystem unnecessarily
+        time.sleep(.2+.2*random.random())
+        w.start()
+
       bestParamsDict = None
       bestParamsArgs = None
       try:
