@@ -407,6 +407,7 @@ class ParameterSweeper:
   def optimizeStrategyStep(self, *args, 
                            progressCallback=None, 
                            relWaitForParallel=None, 
+                           absWaitForParallel=None, 
                            progressPlotInterval=None,
                            saveInterval=None):
     '''
@@ -447,6 +448,7 @@ class ParameterSweeper:
     self._optimizeStepsPosArgCache.update({k:v for k,v in locals().items() if k not in ('self', 'args') and v is not None})
     progressCallback = self._optimizeStepsPosArgCache.get('progressCallback', None)
     relWaitForParallel = self._optimizeStepsPosArgCache.get('relWaitForParallel', .5)
+    absWaitForParallel = self._optimizeStepsPosArgCache.get('absWaitForParallel', 300)
     progressPlotInterval = self._optimizeStepsPosArgCache.get('progressPlotInterval', 60)
     saveInterval = self._optimizeStepsPosArgCache.get('saveInterval', 5*60)
 
@@ -581,7 +583,9 @@ class ParameterSweeper:
           # workers
           if ( not isfinite(tryToEndWorkersSince)
                and time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
-               and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0) ):
+                                                      + absWaitForParallel
+               and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0)
+                                                          + absWaitForParallel ):
             io.verb(f'at least one worker finished '
                     f'({io.secondsToStr(time.time()-lastWorkerFinished)} ago) '
                     f'and others did not improve for more '
