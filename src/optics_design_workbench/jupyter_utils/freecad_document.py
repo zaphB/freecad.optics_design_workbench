@@ -129,7 +129,7 @@ class FreecadProperty:
   # ----------------------------------
   # ITEM AND ATTRIBUTE ACCESS
 
-  def set(self, value, lvalSuffix=''):
+  def set(self, value, lvalSuffix='', **kwargs):
     if self._isConstraint:
       return self._sketchObjReference.setDatum(self._constraintIndex, value)
     else:
@@ -884,6 +884,10 @@ class FreecadDocument:
     self.close()
 
   def save(self):
+    # send clear rays command
+    self.write('Gui.runCommand("Clear all rays",0)')
+
+    # send save document command
     self.write('App.activeDocument().save()')
 
   def close(self):

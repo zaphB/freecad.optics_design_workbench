@@ -26,11 +26,14 @@ class Histogram:
       # overwrite bins if radius is given
       if radius is not None:
         bins = kwargs.pop('bins', 50)
-        if hasattr(bins, '__len__'):
+        if hasattr(bins, '__len__') and len(bins) > 2:
           bins = len(bins)
+        if not hasattr(bins, '__len__'):
+          bins = [bins,bins]
         # set bins
-        bins = [origin[0]+linspace(-radius, radius, bins),
-                origin[1]+linspace(-radius, radius, bins)]
+        bins = list(bins)
+        bins = [linspace(-radius, radius, bins[0]),
+                linspace(-radius, radius, bins[1])]
         kwargs['bins'] = bins
 
       # calc histogram
@@ -45,11 +48,13 @@ class Histogram:
       # overwrite bins if radius is given
       if radius is not None:
         bins = kwargs.pop('bins', 50)
-        if hasattr(bins, '__len__') and len(bins) != 2:
+        if hasattr(bins, '__len__') and len(bins) > 2:
           bins = len(bins)
-        if not hasattr(bins, '__len__') or len(bins) != 2:
+        if not hasattr(bins, '__len__'):
           bins = [bins,bins]
-        bins[1] = linspace(0, radius, bins)
+        # set bins
+        bins = list(bins)
+        bins[1] = linspace(0, radius, bins[1])
         kwargs['bins'] = bins
 
       # calculate polar histogram

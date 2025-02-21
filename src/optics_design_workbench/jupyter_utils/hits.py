@@ -262,6 +262,29 @@ class Hits:
       missingRays += mean(trf[fI==fanI])-len(rayIs)
       skippedRays += sum(array(rayIs[1:])-array(rayIs[:-1]) - 1)
 
+      # find most likely vectors of positive and negative ray index direction
+      _posIndexVectors = pXY[logical_and(fI==fanI, rI>0)]-pCenter
+      posIndexDirection = None
+      if len(_posIndexVectors):
+        _norms = sqrt(sum(_posIndexVectors**2, axis=0))
+        _norms[_norms==0] = 1
+        posIndexDirection = mean(_posIndexVectors/_norms, axis=0)
+      _negIndexVectors = pXY[logical_and(fI==fanI, rI<0)]-pCenter
+      negIndexDirection = None
+      if len(_negIndexVectors):
+        _norms = sqrt(sum(_negIndexVectors**2, axis=0))
+        _norms[_norms==0] = 1
+        negIndexDirection = mean(_negIndexVectors/_norms, axis=0)
+
+      # fill missing directions with respective other of opposite sign
+      if posIndexDirection is None and negIndexDirection is None:
+        posIndexDirection = array([1,0])
+        negIndexDirection = array([-1,0])
+      elif posIndexDirection is None:
+        posIndexDirection = -negIndexDirection
+      elif negIndexDirection is None:
+        negIndexDirection = -posIndexDirection
+
       # loop trough ray-trios to calculate neighbor dists and curvs
       for i1, i0, i2 in zip(rayIs+[None,None], [None]+rayIs+[None], [None,None]+rayIs):        
 
@@ -275,7 +298,20 @@ class Hits:
         if d1 is not None:
           neighborDists.append( [ fanI, (i0+i1)/2, d1 ] )
         if i0 is not None:
-          centerDists.append( [ fanI, i0, dCenter*sign(i0-centerI) ] )
+          # decide about dCenterSign
+          signP, signN = dot(p0-pCenter, posIndexDirection), dot(p0-pCenter, negIndexDirection)
+          if signP > 0 and signN < 0:
+            dCenterSign = +1
+          elif signP < 0 and signN > 0:
+            dCenterSign = -1
+          else:
+            #if signN != 0 and signP != 0:
+            #  io.warn(f'unsure about center distance value signs, the fan-hit pattern is probably '
+            #          f'very asymmetric ({dot(p0-pCenter, posIndexDirection)=}, {dot(p0-pCenter, negIndexDirection)=})')
+            dCenterSign = sign( signP - signN )
+
+          # add center dist entry
+          centerDists.append( [ fanI, i0, dCenter*dCenterSign ] )
 
         # calc distance of p0 to line through p1,p2
         if i0 is not None and i1 is not None and i2 is not None:
