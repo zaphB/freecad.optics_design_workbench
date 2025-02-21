@@ -264,9 +264,26 @@ class Hits:
 
       # find most likely vectors of positive and negative ray index direction
       _posIndexVectors = pXY[logical_and(fI==fanI, rI>0)]-pCenter
-      posIndexDirection = mean( _posIndexVectors/sqrt(sum(_posIndexVectors**2, axis=0)), axis=0)
+      posIndexDirection = None
+      if len(_posIndexVectors):
+        _norms = sqrt(sum(_posIndexVectors**2, axis=0))
+        _norms[_norms==0] = 1
+        posIndexDirection = mean(_posIndexVectors/_norms, axis=0)
       _negIndexVectors = pXY[logical_and(fI==fanI, rI<0)]-pCenter
-      negIndexDirection = mean( _negIndexVectors/sqrt(sum(_negIndexVectors**2, axis=0)), axis=0)
+      negIndexDirection = None
+      if len(_negIndexVectors):
+        _norms = sqrt(sum(_negIndexVectors**2, axis=0))
+        _norms[_norms==0] = 1
+        negIndexDirection = mean(_negIndexVectors/_norms, axis=0)
+
+      # fill missing directions with respective other of opposite sign
+      if posIndexDirection is None and negIndexDirection is None:
+        posIndexDirection = array([1,0])
+        negIndexDirection = array([-1,0])
+      elif posIndexDirection is None:
+        posIndexDirection = -negIndexDirection
+      elif negIndexDirection is None:
+        negIndexDirection = -posIndexDirection
 
       # loop trough ray-trios to calculate neighbor dists and curvs
       for i1, i0, i2 in zip(rayIs+[None,None], [None]+rayIs+[None], [None,None]+rayIs):        
