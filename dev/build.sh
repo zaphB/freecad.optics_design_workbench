@@ -30,8 +30,8 @@ if [[ "$1" == "--upload" ]]; then
 
   # make new commit with restored freecad link and shift latest version tag 
   ver="$(./dev/update-packagexml.py)"
-  git tag -d $ver
+  git tag -d "v$ver"
   git add freecad
   git commit -m 'restore freecad link'
-  git tag $ver
+  git tag "v$ver"
 fi
