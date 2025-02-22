@@ -46,6 +46,33 @@ for sig in (signal.SIGHUP, signal.SIGTERM):
 # list that holds all ever opened documents
 _ALL_DOCUMENTS = []
 
+# default path to freecad executable
+_DEFAULT_FREECAD_EXECUTABLE = 'FreeCAD'
+
+
+def setDefaultFreecadExecutable(path):
+  global _DEFAULT_FREECAD_EXECUTABLE
+  path = os.path.expanduser(path)
+
+  # check if path exists
+  if not os.path.exists(path):
+    raise ValueError(f'path {path} does not exist')
+
+  # check if regular file
+  if not os.path.isfile(path):
+    raise ValueError(f'path {path} is not looking like a file, did '
+                     f'you specify the full path to the FreeCAD executable '
+                     f'or AppImage?')
+
+  # check if path is executable
+  if not os.access(path, os.X_OK):
+    raise ValueError(f'path {path} is missing executable rights, did '
+                     f'you specify the full path to the FreeCAD executable '
+                     f'or AppImage?')
+
+  # store absolute path in global var
+  _DEFAULT_FREECAD_EXECUTABLE = os.path.abspath(path)
+
 
 class FreecadPropertyDict:
   def __init__(self, d):
@@ -307,7 +334,7 @@ class FreecadDocument:
         raise RuntimeError(f'path of custom freecad executable {freecadExecutable} '
                            f'does not seem to exist')
     else:
-      freecadExecutable = 'FreeCAD'
+      freecadExecutable = _DEFAULT_FREECAD_EXECUTABLE
 
     # if openFreshCopy is True, create temp folder, copy freecad file in there, 
     # and modify path attributes accordingly

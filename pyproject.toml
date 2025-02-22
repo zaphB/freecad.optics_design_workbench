@@ -15,21 +15,22 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = [
-  "src/optics_design_workbench"
+  "freecad/optics_design_workbench",
 ]
 
 [project]
-name = "freecad.optics_design_workbench"
+name = "optics_design_workbench"
 dynamic = ["version"]
 dependencies = [
   "numpy>1.24.4", 
-  "scipy>=1.14.0", 
+  "scipy>=1.14.0", # <- require scipy version with COBYQA optimizer
   "sympy", 
   "matplotlib", 
   "seaborn",
   "atomicwrites",
   "cloudpickle",
   "PySide6",
+  "jupyterlab", # <- jupyter lab ist just here because we usually want to work with jupyter, not because it is strictly necessary to use the package
 ]
 
 requires-python = ">=3.10"
