@@ -15,7 +15,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel]
 packages = [
-  "freecad/optics_design_workbench"
+  "freecad/optics_design_workbench",
+  "optics_design_workbench"
 ]
 
 [project]
