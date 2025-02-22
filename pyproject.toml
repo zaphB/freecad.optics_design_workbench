@@ -16,11 +16,10 @@ exclude = [
 [tool.hatch.build.targets.wheel]
 packages = [
   "freecad/optics_design_workbench",
-  "optics_design_workbench"
 ]
 
 [project]
-name = "freecad.optics_design_workbench"
+name = "optics_design_workbench"
 dynamic = ["version"]
 dependencies = [
   "numpy>1.24.4", 

@@ -24,8 +24,5 @@ test-docker/**/container-home
 *.AppImage
 releases
 
-# exclude folder duplicate used for dev installs
-/optics_design_workbench
-
 # include screenshots in examples
 !examples/**/*.png
