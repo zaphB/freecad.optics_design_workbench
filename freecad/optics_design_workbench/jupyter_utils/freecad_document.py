@@ -74,6 +74,17 @@ def setDefaultFreecadExecutable(path):
   _DEFAULT_FREECAD_EXECUTABLE = os.path.abspath(path)
 
 
+class FreecadExpression:
+  def __init__(self, exprString):
+    self._exprString = exprString
+
+  def _freecadShellRepr(self):
+    return self._exprString
+
+  def __repr__(self):
+    return self._exprString
+
+
 class FreecadPropertyDict:
   def __init__(self, d):
     self._d = d
@@ -101,7 +112,7 @@ class FreecadConstraintDict(FreecadPropertyDict):
     self._sketch = sketch
 
   def __setitem__(self, k, v):
-    self._sketch.setDatum(self._indexDict[k], v)
+    self._sketch.setDatumWrapped(self._indexDict[k], v)
 
 
 class FreecadProperty:
@@ -158,7 +169,7 @@ class FreecadProperty:
 
   def set(self, value, lvalSuffix='', **kwargs):
     if self._isConstraint:
-      return self._sketchObjReference.setDatum(self._constraintIndex, value)
+      return self.setDatumWrapped(self._constraintIndex, value)
     else:
       setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {repr(value)}'
       if _PRINT_SETTER_AND_CALL_LINES:
@@ -173,6 +184,34 @@ class FreecadProperty:
         rn = f'{random.random():.8f}'
         self._doc.query(f'{setterLine}; print("success{rn}")', expect=f'success{rn}',
                         errText=f'failed running python line in FreeCAD: {setterLine.strip()}')
+
+  def setDatumWrapped(self, constraintIndex, v):
+      # select good unit for value
+      if abs(v) < 1e-6:
+        unit = 'nm'
+        _v = 1e6*v
+      elif abs(v) < 1e-3:
+        unit = 'um'
+        _v = 1e3*v
+      else:
+        unit = 'mm'
+        _v = v
+      # return expression
+      valueExpr = FreecadExpression(f'App.Units.Quantity("{_v:.6f} {unit}")')
+      
+      # force careful flush before and after setDatum, because strange "invalid constraint index" may occur otherwise
+      for retry in range(99):
+        result = self._sketchObjReference.setDatum(constraintIndex, valueExpr)
+        self._doc._flushOutput(forceCareful=True, keepErrs=True)
+        if err:=self._doc.readErr():
+          if retry > 5:
+            raise RuntimeError(f'setting datum {constraintIndex} of {self} failed: {err}')
+          io.warn(f'error {err} occurred while setting a datum, retrying...')
+          self._doc._flushOutput(forceCareful=True)
+          time.sleep(0.1*2**retry)
+        else:
+          break
+      return result
 
   def __setattr__(self, key, value):
     self._set(value, lvalSuffix=f'.{key}')
@@ -668,12 +707,24 @@ class FreecadDocument:
         # remove prompt characters from beginning of line
         while line.lstrip().startswith('>>>') or line.lstrip().startswith('...'):
           line = line.lstrip()[4:]
-         
+
+        # not-important-list: ignore some well known errors which are rather warnings than errors:
+        if any([p.lower() in line.lower() for p in (
+              'Updating geometry: Error build geometry',
+              'Invalid solution from', )]):
+          io.warn(f'ignoring FreeCAD error output {repr(line.strip())}')
+          line = ''
+
+        # very-important-list: raise certain errors immediately, as they indicate a broken document state:
+        if any([p.lower() in line.lower() for p in (
+             'BRep_API: command not done', )]):
+          raise RuntimeError(f'FreeCAD reported error: {line}, this needs to be manually '
+                             f'fixed by opening the document')
+
         if line.strip():
-          # remove line ending characters
+          # remove line ending characters and add to queue
           while line.endswith('\r') or line.endswith('\n'):
             line = line[:-1]
-          # ignore prompt lines
           io.warn(f'received error line {repr(line)}', logOnly=True)
           self._qe.put(line)
         time.sleep(1e-3)
@@ -721,7 +772,7 @@ class FreecadDocument:
     self._flushOutput(forceCareful=True)
 
     # clear interaction time list to avoid immediately triggering fast mode
-    self._freecadInteractionTimesList[:] = [time.time()]
+    self._forceDisableFastMode()
 
     # print success
     io.verb(f'done in {time.time()-t0:.1f}s')
@@ -745,6 +796,9 @@ class FreecadDocument:
     self._freecadInteractionTimesList.append(time.time())
     T = array(self._freecadInteractionTimesList)
     self._freecadInteractionTimesList[:] = T[time.time()-T < 30]
+
+  def _forceDisableFastMode(self):
+    self._freecadInteractionTimesList[:] = [time.time()]
 
   def _fastModeEnabled(self):
     T = array(self._freecadInteractionTimesList)
@@ -779,12 +833,13 @@ class FreecadDocument:
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
 
-  def _flushOutput(self, timeout=60, forceCareful=False):
+  def _flushOutput(self, timeout=60, forceCareful=False, keepErrs=False):
     self._updateInteractionTime()
     t0 = time.time()
 
     # throw away any previous content
-    self.readErr()
+    if not keepErrs:
+      self.readErr()
     self.read()
 
     # skip careful flush if fastMode is active (and not forced)
@@ -961,7 +1016,8 @@ class FreecadDocument:
   def _quit(self):
     if self.isRunning() and not self._isquit:
       io.verb('asking FreeCAD to quit...')
-      self.write('exit()')
+      self.write('FreeCADGui.getMainWindow().deleteLater()') # <- trick to gently shut down freecad without any prompts
+      #self.write('exit()') # <- dont do, exiting the python shell causes segfaults sometimes
       self._isquit = True
 
   def _terminate(self):

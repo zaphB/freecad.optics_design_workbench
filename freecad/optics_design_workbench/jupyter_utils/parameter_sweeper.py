@@ -359,7 +359,7 @@ class ParameterSweeper:
         success = False
         gotVal = paramDict[setKey].get()
         try:
-          if isclose(setVal, gotVal):
+          if isclose(setVal, gotVal, rtol=1e-3):
             success = True
         except Exception:
           success = (setVal == gotVal)
