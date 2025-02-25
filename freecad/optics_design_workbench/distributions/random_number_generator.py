@@ -236,6 +236,20 @@ class VectorRandomVariable:
 
     return lambYs
 
+  
+  def _numericalResolution(self, var):
+    # set numerical resolution dict
+    if not self._numericalResolutions:
+      self._numericalResolutions = 5+int(1e6**(1/len(self._variables)))
+    if not type(self._numericalResolutions) is dict:
+      self._numericalResolutions = {str(v): self._numericalResolutions for v in self._variables}
+
+    # get numerical resolution and ensure to return odd number
+    res = int(round(self._numericalResolutions.get(str(var))))
+    if res % 2 == 0:
+      return res+1
+    return res
+
 
   def _generateNumericScalarLambda(self, varI):
     # prepare symbols and domains
@@ -248,25 +262,18 @@ class VectorRandomVariable:
                          f'symbol {s} which is not in list of '
                          f'variables {self._variables}')
 
-    # make sure resolution is list of right length
-    if not self._numericalResolutions:
-      self._numericalResolutions = 5+int(1e4**(1/len(self._variables)))
-    if not type(self._numericalResolutions) is dict:
-      self._numericalResolutions = {str(v): self._numericalResolutions for v in self._variables}
-
     # prepare param grid for probability density evaluation
     # additional prepare in-between ranges with values sitting between the
     # original range for use with cumsum later 
     variableRanges = []
     variableRangesInBetween = []
-    #print(f'making grid with {self._numericalResolutions}')
     for var in self._variables:
       l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
       if not isfinite(l1) or not isfinite(l2):
         raise ValueError(f'failed to find analytical solution, numerical '
                          f'solution requires finite limits, but found limits '
                          f'[{l1}, {l2}] for variable {var}')
-      _range = linspace(l1, l2, self._numericalResolutions[str(var)])
+      _range = linspace(l1, l2, self._numericalResolution(var))
       variableRanges.append(_range)
       variableRangesInBetween.append((_range[1:]+_range[:-1])/2)
     variableGrids = meshgrid(*variableRangesInBetween)
@@ -580,8 +587,7 @@ class VectorRandomVariable:
       l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
       if not isfinite(l1) or not isfinite(l2):
         raise ValueError(f'variable domains must be finite for grid generation')
-      res = self._numericalResolutions.get(str(var), int(1e4))
-      varRange = linspace(l1, l2, res)
+      varRange = linspace(l1, l2, self._numericalResolution(var))
 
       # calc density
       expr = self._probabilityDensityExpr
@@ -601,7 +607,7 @@ class VectorRandomVariable:
                               density=(varRange, density),
                               N=N,
                               startFrom=startFrom)
-      
+
       # clip result to range and return
       return result[logical_and(min(varRange) <= result, result <= max(varRange))]
     else:

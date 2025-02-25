@@ -52,8 +52,16 @@ class PointSourceProxy(GenericSourceProxy):
 
     # make sure resolutions are valid
     if prop in ('ThetaResolutionNumericMode', 'PhiResolutionNumericMode'):
+      try:
+        float(getattr(obj, prop))
+      except Exception:
+        io.err(f'tried to set {prop} to {getattr(obj, prop)}, which is not a valid number')
+        if prop.startswith('Theta'):
+          setattr(obj, prop, '1e6')
+        else:
+          setattr(obj, prop, '4')
       if getattr(obj, prop) < 3:
-        setattr(obj, prop, 3)
+        setattr(obj, prop, '3')
   
     # reset random number generator mode to ? if power density expression is changed
     if prop in ('PowerDensity', 'PhiDomain', 'ThetaDomain', 
@@ -92,8 +100,8 @@ class PointSourceProxy(GenericSourceProxy):
                         theta=self.parsedThetaDomain(obj), 
                         phi=self.parsedPhiDomain(obj)),
                     numericalResolutions=dict(
-                        theta=obj.ThetaResolutionNumericMode,
-                        phi=obj.PhiResolutionNumericMode))
+                        theta=float(obj.ThetaResolutionNumericMode),
+                        phi=float(obj.PhiResolutionNumericMode)))
       )
       vrv = NON_SERIALIZABLE_STORE[self]['vrv']
       vrv.compile()
@@ -217,6 +225,9 @@ class PointSourceProxy(GenericSourceProxy):
     if mode == 'fans':
       raysPerFan = min([obj.RaysPerFan, maxRaysPerFan])
 
+      # reset flag to report fan mode once
+      self._reportedFullFanMode = None
+
       # create obj.Fans ray fans oriented in phi0
       totalFanCount = int(min([obj.Fans, maxFanCount]))
       for fanIndex, _phi in enumerate(self._parsedFanPhi0(obj) + linspace(0, pi, totalFanCount+1)[:-1]):
@@ -235,11 +246,11 @@ class PointSourceProxy(GenericSourceProxy):
                       # is taken as absolute value because of the negative-theta-hack:
                       obj.PowerDensity.replace('theta', 'abs(theta)'),
                       variable='theta',
-                      variableDomain=(-l2,l2), 
-                      numericalResolution=obj.ThetaResolutionNumericMode)
+                      variableDomain=(-l2,l2),
+                      numericalResolution=float(obj.ThetaResolutionNumericMode))
           vrv.compile(phi=_phi)
           _posNegThetas = vrv.findGrid(N=raysPerFan)
-          #io.verb(f'{_posNegThetas=}')
+          #io.verb(f'{_posNegThetas=}, {-l2=}, {l2=}')
 
           # store whether most central ray has positive of negative theta to
           # decide later where to place rayIndex==0
@@ -269,7 +280,7 @@ class PointSourceProxy(GenericSourceProxy):
                         obj.PowerDensity,
                         variable='theta',
                         variableDomain=(l1,l2), 
-                        numericalResolution=obj.ThetaResolutionNumericMode)
+                        numericalResolution=float(obj.ThetaResolutionNumericMode)/2)
             vrv.compile(phi=_phi)
             _thetas = vrv.findGrid(N=raysPerFan)
             totalRaysInFan = 2*len(_thetas)
@@ -350,8 +361,8 @@ class AddPointSource(AddGenericSource):
       ('OpticalSimulationSettings', [
         *self.defaultSimulationSettings(obj),
         ('RandomNumberGeneratorMode', '?', 'String', ''),
-        ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
-        ('PhiResolutionNumericMode', 3, 'Integer', ''),
+        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
+        ('PhiResolutionNumericMode', '3', 'String', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('FanPhi0', '0', 'String', 'Change this to rotate fans around optical axis.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
