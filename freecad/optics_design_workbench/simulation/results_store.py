@@ -80,15 +80,6 @@ def _getFolderBase():
   if fname.lower().endswith('.fcstd'):
     fname = fname[:-6]
   folderName = f'{fname}.OpticsDesign'
-
-  # DEPRECATE: removed SimulationDataFolder property after v0.2.0
-  #folderNamePattern = '{projectName}.opticalSimulationResults'
-  #if settings := freecad_elements.find.activeSimulationSettings():
-  #  folderNamePattern = settings.SimulationDataFolder
-  #folderName = time.strftime(folderNamePattern).format(
-  #                                  projectName=fname, 
-  #                                  settingsName=settings.Name if settings else 'defaultSettings')
-  # return results
   return base, fname, folderName
 
 

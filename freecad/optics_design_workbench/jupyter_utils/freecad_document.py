@@ -102,7 +102,7 @@ class FreecadPropertyDict:
     return self._d[k]
 
   def __setitem__(self, k, v):
-    self._d[k]._set(v)
+    self._d[k].set(v)
 
 
 class FreecadConstraintDict(FreecadPropertyDict):
@@ -214,14 +214,14 @@ class FreecadProperty:
       return result
 
   def __setattr__(self, key, value):
-    self._set(value, lvalSuffix=f'.{key}')
+    self.set(value, lvalSuffix=f'.{key}')
 
   def __getattr__(self, key):
     return FreecadProperty(self._doc, self._obj, f'{self._path}.{key}', 
                            internalObjectName=self._internalObjectName)
 
   def __setitem__(self, key, value):
-    self._set(value, lvalSuffix=f'[{repr(key)}]')
+    self.set(value, lvalSuffix=f'[{repr(key)}]')
 
   def __getitem__(self, key):
     return FreecadProperty(self._doc, self._obj, f'{self._path}[{repr(key)}]', 
