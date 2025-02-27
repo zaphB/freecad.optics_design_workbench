@@ -60,7 +60,7 @@ class PointSourceProxy(GenericSourceProxy):
           setattr(obj, prop, '1e6')
         else:
           setattr(obj, prop, '4')
-      if getattr(obj, prop) < 3:
+      if float(getattr(obj, prop)) < 3:
         setattr(obj, prop, '3')
   
     # reset random number generator mode to ? if power density expression is changed

@@ -58,7 +58,7 @@ class Histogram:
         kwargs['bins'] = bins
 
       # calculate polar histogram
-      self.hist, self.binX, self.binY = histogram2d(atan2(X, Y), 
+      self.hist, self.binX, self.binY = histogram2d(arctan2(X, Y), 
                                                     sqrt(X**2+Y**2), 
                                                     **kwargs)
 
@@ -93,9 +93,9 @@ class Histogram:
     # scale histogram
     scaledHist = (self.hist/self.binAreas).T
     if scale == 'max':
-      scaledHist /= max(scaledHist)
+      scaledHist = scaledHist / scaledHist.max()
     elif scale is not None:
-      scaledHist /= scale
+      scaledHist = scaledHist / scale
 
     # increase phi-bin density in polar mode to make plot "nice and round"
     plotBinX, plotBinY, plotScaledHist = self.binX, self.binY, scaledHist

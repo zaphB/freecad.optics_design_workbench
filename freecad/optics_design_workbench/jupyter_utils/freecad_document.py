@@ -74,6 +74,15 @@ def setDefaultFreecadExecutable(path):
   _DEFAULT_FREECAD_EXECUTABLE = os.path.abspath(path)
 
 
+# create aliases for FreeCAD types that just return simple numpy arrays
+# to allow converting Vectors from FreeCAD side automatically
+def Vector(*a):
+  return array(a)
+def Matrix(*a):
+  return array(a)
+
+
+
 class FreecadExpression:
   def __init__(self, exprString):
     self._exprString = exprString
