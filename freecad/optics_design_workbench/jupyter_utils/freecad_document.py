@@ -726,9 +726,8 @@ class FreecadDocument:
 
         # very-important-list: raise certain errors immediately, as they indicate a broken document state:
         if any([p.lower() in line.lower() for p in (
-             'BRep_API: command not done', )]):
-          raise RuntimeError(f'FreeCAD reported error: {line}, this needs to be manually '
-                             f'fixed by opening the document')
+             'BRep_API: command not done', 'KeyboardInterrupt',)]):
+          raise RuntimeError(f'FreeCAD reported error: {line}')
 
         if line.strip():
           # remove line ending characters and add to queue
@@ -985,8 +984,9 @@ class FreecadDocument:
     t0 = time.time()
     io.verb(f'closing {self} instance...')
 
-    # save changes to disk
-    self.save()
+    # save changes to disk (if self is open)
+    if self.isRunning():
+      self.save()
 
     while self.isRunning():
       # gently ask to quit

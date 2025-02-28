@@ -248,6 +248,9 @@ class PointSourceProxy(GenericSourceProxy):
                       variable='theta',
                       variableDomain=(-l2,l2),
                       numericalResolution=float(obj.ThetaResolutionNumericMode))
+          # TODO: compile twice, once with _phi, once with _phi+pi, then add method to fetch the
+          #       numerical densities from both compiles, merge both densities, 
+          #       find grid of combined
           vrv.compile(phi=_phi)
           _posNegThetas = vrv.findGrid(N=raysPerFan)
           #io.verb(f'{_posNegThetas=}, {-l2=}, {l2=}')
@@ -291,17 +294,24 @@ class PointSourceProxy(GenericSourceProxy):
 
           for rayIndex, theta in enumerate(sorted(_thetas)):
 
-            if isFullFanMode:
-              # increment index if we are on the side of the fan that is 
-              # to avoid having two rayIndex==0 rays 
-              if (       (_isCentralThetaNegative and rayIndexSign == +1)
-                  or (not _isCentralThetaNegative and rayIndexSign == -1) ):
-                rayIndex += 1
+            # if number of rays is even: dont use index=zero, start with +1 and
+            # -1 on each side of the fan, respectively
+            if raysPerFan % 2 == 0:
+              rayIndex += 1
+
+            # if number of rays is odd: place index=zero on the central theta
             else:
-              # in split ray fan mode just increment the negative ray indices
-              # by one to avoid having rayIndex==0 twice
-              if rayIndexSign == -1:
-                rayIndex += 1
+              if isFullFanMode:
+                # increment index if we are on the side of the fan that is 
+                # to avoid having two rayIndex==0 rays 
+                if (       (_isCentralThetaNegative and rayIndexSign == +1)
+                    or (not _isCentralThetaNegative and rayIndexSign == -1) ):
+                  rayIndex += 1
+              else:
+                # in split ray fan mode just increment the negative ray indices
+                # by one to avoid having rayIndex==0 twice
+                if rayIndexSign == -1:
+                  rayIndex += 1
 
             # this loop may run for quite some time, keep GUI responsive by handling events
             keepGuiResponsiveAndRaiseIfSimulationDone()

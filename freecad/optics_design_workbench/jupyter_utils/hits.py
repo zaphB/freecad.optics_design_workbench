@@ -56,7 +56,7 @@ class Hits:
   # POINT CLOUD MATH
 
   def planeProject3dPoints(self, points=None, planeNormal=None, 
-                           inPlaneXDir=None, returnZ=False):
+                           xInPlaneVec=None, returnZ=False):
     '''
     Turn a 3D point cloud of shape (N,3) into a 2D point cloud (N,2).
 
@@ -68,7 +68,7 @@ class Hits:
         Normal vector of the projection plane, defaults to result
         of detectPlaneNormal(points).
 
-      inPlaneXDir : (3,) array (optional)
+      xInPlaneVec : (3,) array (optional)
         Vector pointing into the desired X-coordinate direction of
         the coordinate system after projection. Defaults to the 
         numerically best suited vector among (1,0,0), (0,1,0) and (0,0,1).
@@ -76,13 +76,13 @@ class Hits:
     # detect plane normal if none is given explicitly
     if points is None:
       points = self.points()
-    if planeNormal is None or inPlaneXDir is None:
-      planeNormal, inPlaneXDir = self.detectPlaneNormal(planeNormal=planeNormal, 
-                                                        inPlaneXDir=inPlaneXDir)
+    if planeNormal is None or xInPlaneVec is None:
+      planeNormal, xInPlaneVec = self.detectPlaneNormal(planeNormal=planeNormal, 
+                                                        xInPlaneVec=xInPlaneVec)
 
-    projX = inPlaneXDir
+    projX = xInPlaneVec
     X = dot(points, projX/linalg.norm(projX)) 
-    projY = cross(planeNormal, inPlaneXDir)
+    projY = cross(planeNormal, xInPlaneVec)
     Y = dot(points, projY/linalg.norm(projY))
     if returnZ:
       Z = dot(points, planeNormal/linalg.norm(planeNormal))
@@ -90,7 +90,7 @@ class Hits:
     return array([X, Y]).T
 
   def detectPlaneNormal(self, points=None, directions=None, 
-                        planeNormal=None, inPlaneXDir=None,
+                        planeNormal=None, xInPlaneVec=None,
                         maxPointCountConsidered=300, angleTol=1e-9):
     '''
     Find the best possible plane normal vector to project the 3D point cloud
@@ -157,19 +157,19 @@ class Hits:
     # nx, ny and nz with highest norm to ensure numeric stability
     # if planeNormal is almost parallel to one of nx, ny or nz.
     candidates = [nx, ny, nz]
-    if inPlaneXDir is not None:
-      candidates = [inPlaneXDir]
+    if xInPlaneVec is not None:
+      candidates = [xInPlaneVec]
     projY = sorted([cross(planeNormal, n) for n in candidates], 
                    key=lambda x: -linalg.norm(x))[0]
-    inPlaneXDir = cross(planeNormal, projY)
-    # prefer positive coefficients in inPlaneXDir
-    if sum(inPlaneXDir) < 0:
-      inPlaneXDir = -inPlaneXDir
+    xInPlaneVec = cross(planeNormal, projY)
+    # prefer positive coefficients in xInPlaneVec
+    if sum(xInPlaneVec) < 0:
+      xInPlaneVec = -xInPlaneVec
 
     # set plane normal to optimal normal found so far
-    return planeNormal, inPlaneXDir
+    return planeNormal, xInPlaneVec
 
-  def histogram(self, planeNormal=None, inPlaneXDir=None, key='points', **kwargs):
+  def histogram(self, planeNormal=None, xInPlaneVec=None, key='points', **kwargs):
     '''
     Return the histogram of a 3D-point-cloud projected to a planeNormal. If planeNormal
     is not passed, a normal orthogonal to the two largest extents of the point could
@@ -180,24 +180,24 @@ class Hits:
     points = self.hits[key]
 
     # if project vector is not given, set it to the direction of minimum span
-    if planeNormal is None or inPlaneXDir is None:
-      planeNormal, inPlaneXDir = self.detectPlaneNormal(planeNormal, inPlaneXDir)
+    if planeNormal is None or xInPlaneVec is None:
+      planeNormal, xInPlaneVec = self.detectPlaneNormal(planeNormal, xInPlaneVec)
 
     # perform projection of full dataset
-    projPoints = self.planeProject3dPoints(points, planeNormal=planeNormal, inPlaneXDir=inPlaneXDir)
+    projPoints = self.planeProject3dPoints(points, planeNormal=planeNormal, xInPlaneVec=xInPlaneVec)
     X, Y = projPoints.T
-    return histogram.Histogram(X, Y, planeNormal=planeNormal, inPlaneXDir=inPlaneXDir, **kwargs)
+    return histogram.Histogram(X, Y, planeNormal=planeNormal, xInPlaneVec=xInPlaneVec, **kwargs)
 
 
-  def plot(self, hueKey=None, hueLabel=None, planeNormal=None, inPlaneXDir=None, 
+  def plot(self, hueKey=None, hueLabel=None, planeNormal=None, xInPlaneVec=None, 
            plotKey='points', **kwargs):
     # just return if no hits exist
     if plotKey not in self.hits.keys():
       return
 
-    if planeNormal is None or inPlaneXDir is None:
-      planeNormal, inPlaneXDir = self.detectPlaneNormal(points=self.hits[plotKey], 
-                                    planeNormal=planeNormal, inPlaneXDir=inPlaneXDir)
+    if planeNormal is None or xInPlaneVec is None:
+      planeNormal, xInPlaneVec = self.detectPlaneNormal(points=self.hits[plotKey], 
+                                    planeNormal=planeNormal, xInPlaneVec=xInPlaneVec)
     X, Y = self.planeProject3dPoints(self.hits[plotKey], planeNormal=planeNormal).T
     data = {'projected $x$':X, 'projected $y$':Y}
     if hueKey is not None:
@@ -209,7 +209,7 @@ class Hits:
                     **(dict(hue=hueLabel, palette='hls') if hueLabel else {}),
                     **kwargs)
     nx, ny, nz = planeNormal
-    px, py, pz = inPlaneXDir
+    px, py, pz = xInPlaneVec
     title(f'plane normal = [{nx:.2f}, {ny:.2f}, {nz:.2f}],\n'
           f'projected $x$ = [{px:.2f}, {py:.2f}, {pz:.2f}]', fontsize=10) 
     gca().axis('equal')
@@ -233,6 +233,12 @@ class Hits:
     self._raiseIfNotFanMath()
     return self.hits['totalRaysInFan'][0]
 
+  def allRayIndices(self, fanI=None):
+    rI, fI = self.hits['rayIndex'], self.hits['fanIndex']
+    if fanI is not None:
+      return array(sorted(list(set(rI[fI==fanI]))))
+    return array(sorted(list(set(rI))))
+
   def fanCount(self):
     self._raiseIfNotFanMath()
     return len(set(self.hits['fanIndex']))
@@ -253,9 +259,8 @@ class Hits:
       rayIs = sorted(list(set(rI[fI==fanI])))
 
       # find most central ray
-      centerI = rayIs[argmin(abs(array(rayIs)))]
       if pCenter is None:
-        pCenter = mean(pXY[logical_and(fI==fanI, rI==centerI)], axis=0)
+        pCenter = self.fanCenter()
       pCenter = array(pCenter)
 
       # increment missing rays
@@ -305,9 +310,9 @@ class Hits:
           elif signP < 0 and signN > 0:
             dCenterSign = -1
           else:
-            #if signN != 0 and signP != 0:
-            #  io.warn(f'unsure about center distance value signs, the fan-hit pattern is probably '
-            #          f'very asymmetric ({dot(p0-pCenter, posIndexDirection)=}, {dot(p0-pCenter, negIndexDirection)=})')
+            if signN != 0 and signP != 0:
+              io.warn(f'unsure about center distance value signs, the fan-hit pattern is probably '
+                      f'very asymmetric ({dot(p0-pCenter, posIndexDirection)=}, {dot(p0-pCenter, negIndexDirection)=})')
             dCenterSign = sign( signP - signN )
 
           # add center dist entry
@@ -320,7 +325,8 @@ class Hits:
 
     # return as dict
     return dict(centerDists=array(centerDists), neighborDists=array(neighborDists), 
-                curvs=array(curvs), missingRays=missingRays, skippedRays=skippedRays)
+                curvs=array(curvs), missingRays=missingRays, skippedRays=skippedRays,
+                rI=rI, fI=fI, pXY=pXY, trf=trf)
 
   def fanMissingRays(self):
     return self._calcFanDensityEtc()['missingRays']
@@ -329,10 +335,79 @@ class Hits:
     return self._calcFanDensityEtc()['skippedRays']
 
   def fanCenterDists(self, pCenter=None):
-    return self._calcFanDensityEtc(pCenter=(tuple(pCenter) if pCenter else None))['centerDists'].T
+    return self._calcFanDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['centerDists'].T
 
   def fanNeighborDists(self):
     return self._calcFanDensityEtc()['neighborDists'].T
 
+  def fanCenter(self, **kwargs):
+    self._raiseIfNotFanMath()
+    rI, fI, p = self.hits['rayIndex'], self.hits['fanIndex'], self.hits['points']
+    pXY = self.planeProject3dPoints(p, **kwargs)
+
+    centers = []
+    for fanI in set(fI):
+      # zero ray index exists: use zero ray position as center
+      if 0 in rI[fI==fanI]:
+        centers.extend( pXY[(fI==fanI) & (rI==0)] )
+
+      # no zero ray index exists: use average of +1 and -1 as center 
+      elif +1 in rI[fI==fanI] and -1 in rI[fI==fanI]:
+        centers.extend(( pXY[(fI==fanI) & (rI==+1)] + pXY[(fI==fanI) & (rI==-1)] )/2)
+
+    # return average center, or nan/nan if no fan center was found
+    if len(centers):
+      return mean(centers, axis=0)
+    return array([nan,nan])
+
   def fanCurvs(self):
     return self._calcFanDensityEtc()['curvs'].T
+
+  @functools.cache
+  def _fanPowerDensityEtc(self, pCenter=None):
+    if pCenter is None:
+      pCenter = self.fanCenter()
+
+    # get fan neighbor dists and distances from center
+    nfI, nrI, ndist = self.fanNeighborDists()
+    cfI, crI, cdist = self.fanCenterDists(pCenter=pCenter)
+    
+    # construct per fan estimated power density
+    fanDensities = {}
+    causticIntensity = 0
+    for fanI in sorted(list(set(nfI))):
+      fanDensities[fanI] = []
+      for interRayI in sorted(nrI[fanI==nfI]):
+        # find two center dists of rays around interRayI (.6 to ensure that neighbors for 
+        # interRayI==0 are correctly found as +1 and -1, not 0 and 0 )
+        cr1, cr2 = int(round(interRayI-.6)), int(round(interRayI+.6))
+        cdist1 = mean( cdist[(fanI==cfI) & (crI==cr1)] )
+        cdist2 = mean( cdist[(fanI==cfI) & (crI==cr2)] )
+
+        # find neighbor ray dist
+        estimatedPower = 1/mean( ndist[(fanI==nfI) & (nrI==interRayI)] )
+
+        # if cdist is not monotonically increasing with index -> increment 
+        # caustic intensity counter
+        if cdist2 < cdist1:
+          causticIntensity += abs(cdist1-cdist2)
+
+        # add estimated power and its position to result lust
+        fanDensities[fanI].append([mean([cdist1, cdist2]), estimatedPower ])
+
+    # construct lambdas to interpolate found densities as a function of 
+    # distance from center
+    fanDensityFuncs = [(i, lambda pos, _d=array(d).T: interp(pos, *_d)) for i, d in fanDensities.items()]
+
+    # return all results as dictionary
+    return dict(fanDensities=fanDensities, fanDensityFuncs=fanDensityFuncs,
+                causticIntensity=causticIntensity, pCenter=pCenter)
+    
+  def fanEstimatedPowerDensities(self, pCenter=None):
+    return [(i, array(d).T) for i, d in self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['fanDensities'].items()]
+  
+  def fanEstimatedPowerDensityFuncs(self, pCenter=None):
+    return self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['fanDensityFuncs']
+
+  def fanEstimatedCausticIntensity(self, pCenter=None):
+    return self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['causticIntensity']
