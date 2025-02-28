@@ -550,7 +550,7 @@ class ParameterSweeper:
               ax1.semilogy()
               ax1.set_ylim([l / (u/l)**0.05, u * (u/l)**0.05])
             else:
-              ax1.set_ylim([l-.05*(l-u), u+0.05*(l-u)])
+              ax1.set_ylim([l-.05*(u-l), u+0.05*(u-l)])
             ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
             ax1.set_title(f'penalty history ({len(runningWorkers)}/{len(workers)} workers busy)', fontsize=10)
@@ -700,7 +700,7 @@ class ParameterSweeper:
             progress.clearCellOutput()
 
             # plot history of optimization and hits of best result so far
-            fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
+            fig, ax1 = subplots(1, 1, figsize=(6,4))
             sca(ax1)
             sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
                             style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
@@ -708,12 +708,6 @@ class ParameterSweeper:
             gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
             gca().set_title(f'penalty history', fontsize=10) 
-
-            # plot hits
-            sca(ax2)
-            bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
-            gca().set_title(f'best result so far', fontsize=10) 
-            tight_layout()
 
             # save plot to disk
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
