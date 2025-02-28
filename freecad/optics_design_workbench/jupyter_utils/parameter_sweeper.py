@@ -198,6 +198,11 @@ class ParameterSweeper:
     objects.
   '''
   def __init__(self, getParametersFunc, freecadDocumentKwargs={}):
+    # close all open sweepers when a new one is created to prevent
+    # to make life in jupyter notebooks easier
+    while len(_ALL_OPEN_SWEEPERS):
+      _ALL_OPEN_SWEEPERS[0].close()
+
     self._getParametersFunc = getParametersFunc
     self._metaParameterDict = {}
     self._freecadDocumentKwargs = freecadDocumentKwargs
