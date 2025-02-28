@@ -1286,7 +1286,7 @@ class RawFolder:
       mergeList = []
       sizeInList = 0
       def mergeAllInList():
-        # only do something if more than one file ist list
+        # only do something if more than one file in list
         if len(mergeList) > 1:
           # load and merge all files in list
           merged = {}

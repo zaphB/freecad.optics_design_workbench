@@ -527,7 +527,7 @@ class ParameterSweeper:
             io.verb(f'found new best solution {bestPenalty=},\n{bestParamsDict=}\n{bestParamsArgs=}')
 
           # update non-temp document every now and then with best params so far and 
-          # save to disk to avoid loosing all on a crash
+          # save to disk to avoid losing all on a crash
           if time.time()-lastDocumentSave > saveInterval:
             lastDocumentSave = time.time()
             io.verb('autosaving current best result')

@@ -164,7 +164,7 @@ class PointSourceProxy(GenericSourceProxy):
           limited = f'{orig1}, {spanLimits[1] if l1==0 else {_spanLimits[1]}}'
           # silence errors and pass all limits etc. to recursive call here, because we might violate limits
           # with our enforced span limit
-          return limited, self._parsedDomain(limited, defailt=default, limits=limits, 
+          return limited, self._parsedDomain(limited, default=default, limits=limits, 
                                              spanLimits=spanLimits, isRecursive=True)[1]
 
     # return original string and parsed domain

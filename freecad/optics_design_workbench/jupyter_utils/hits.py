@@ -250,7 +250,7 @@ class Hits:
     rI, fI, p, trf = self.hits['rayIndex'], self.hits['fanIndex'], self.hits['points'], self.hits['totalRaysInFan']
     pXY = self.planeProject3dPoints(p, **kwargs)
 
-    # loop trough fans/rays and calculate distance, curvature etc.
+    # loop through fans/rays and calculate distance, curvature etc.
     centerDists, neighborDists = [], []
     curvs, missingRays, skippedRays = [], 0, 0
     for fanI in sorted(list(set(fI))):
@@ -290,7 +290,7 @@ class Hits:
       elif negIndexDirection is None:
         negIndexDirection = -posIndexDirection
 
-      # loop trough ray-trios to calculate neighbor dists and curvs
+      # loop through ray-trios to calculate neighbor dists and curvs
       for i1, i0, i2 in zip(rayIs+[None,None], [None]+rayIs+[None], [None,None]+rayIs):        
 
         # calc points and distances
