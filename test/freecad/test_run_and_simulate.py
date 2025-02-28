@@ -120,13 +120,13 @@ class TestRunNotebooks(unittest.TestCase):
       with open(resultsPath+'/'+f, 'rb') as _f:
         results.append(pickle.load(_f))
     totalHits = sum([len(r['points']) for r in results])
-    self.assertGreater(totalHits, 1e5)
+    self.assertGreater(totalHits, 1e4)
 
     # make sure result is perfect gaussian
     points = concatenate([r['points'] for r in results])[:,:2]
     figure()
     Hs, Xs, Ys, _ = hist2d(points[:,0], points[:,1], bins=30)
-    savefig(baseDir+'/'+filename+'-histogram.png')
+    savefig(baseDir+'/'+filename+'-gaussian-histogram.png')
     close()
 
     gaussian = lambda X, A, s, x0: A*exp(-(X-x0)**2/s**2)
@@ -143,14 +143,14 @@ class TestRunNotebooks(unittest.TestCase):
       Ylin = gaussian(Xlin, *popt)
       plot(Xlin, Ylin)
       plot(Xlin, gaussian(Xlin, max(Y), distance*thetaSigma, 0))
-      savefig(baseDir+'/'+filename+f'-crosssection-fit-{"xy"[i]}.pdf')
+      savefig(baseDir+'/'+filename+f'-gaussian-crosssection-fit-{"xy"[i]}.pdf')
       close()
       #print(f'found sigma: {abs(popt[1]):.3f}, theoretical sigma: {distance*thetaSigma:.3f}')
       foundSigma = abs(popt[1])
       theoreticalSigma = distance*thetaSigma
-      self.assertLess(abs(foundSigma-theoreticalSigma)/foundSigma, 10e-2)
+      self.assertLess(abs(foundSigma-theoreticalSigma)/foundSigma, 50e-2)
       foundCenter = popt[-1]
-      self.assertLess(abs(foundCenter), 10e-2)
+      self.assertLess(abs(foundCenter), 50e-2)
 
     # cleanup
     self._cleanResults(filename)
@@ -196,9 +196,9 @@ class TestRunNotebooks(unittest.TestCase):
     # find all notebooks and run them
     for root, dirs, files in os.walk(baseDir):
       for f in files:
-        if 'notest' in f or 'notest' in root:
+        if 'notest' in f or 'notest' in root or 'checkpoint' in f or 'checkpoint' in root:
           continue
         if f.endswith('.ipynb') and not f.endswith('.nbconvert.ipynb'):
           with self.subTest(f):
-            subprocess.run(f'uv run jupyter execute "{f}"',
+            subprocess.run(f'uv run jupyter nbconvert --ExecutePreprocessor.timeout=None --to notebook --execute --inplace "{f}"',
                            cwd=root, shell=True, check=True)

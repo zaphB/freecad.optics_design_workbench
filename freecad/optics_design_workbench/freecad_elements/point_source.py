@@ -52,8 +52,16 @@ class PointSourceProxy(GenericSourceProxy):
 
     # make sure resolutions are valid
     if prop in ('ThetaResolutionNumericMode', 'PhiResolutionNumericMode'):
-      if getattr(obj, prop) < 3:
-        setattr(obj, prop, 3)
+      try:
+        float(getattr(obj, prop))
+      except Exception:
+        io.err(f'tried to set {prop} to {getattr(obj, prop)}, which is not a valid number')
+        if prop.startswith('Theta'):
+          setattr(obj, prop, '1e6')
+        else:
+          setattr(obj, prop, '4')
+      if float(getattr(obj, prop)) < 3:
+        setattr(obj, prop, '3')
   
     # reset random number generator mode to ? if power density expression is changed
     if prop in ('PowerDensity', 'PhiDomain', 'ThetaDomain', 
@@ -92,8 +100,8 @@ class PointSourceProxy(GenericSourceProxy):
                         theta=self.parsedThetaDomain(obj), 
                         phi=self.parsedPhiDomain(obj)),
                     numericalResolutions=dict(
-                        theta=obj.ThetaResolutionNumericMode,
-                        phi=obj.PhiResolutionNumericMode))
+                        theta=float(obj.ThetaResolutionNumericMode),
+                        phi=float(obj.PhiResolutionNumericMode)))
       )
       vrv = NON_SERIALIZABLE_STORE[self]['vrv']
       vrv.compile()
@@ -156,7 +164,7 @@ class PointSourceProxy(GenericSourceProxy):
           limited = f'{orig1}, {spanLimits[1] if l1==0 else {_spanLimits[1]}}'
           # silence errors and pass all limits etc. to recursive call here, because we might violate limits
           # with our enforced span limit
-          return limited, self._parsedDomain(limited, defailt=default, limits=limits, 
+          return limited, self._parsedDomain(limited, default=default, limits=limits, 
                                              spanLimits=spanLimits, isRecursive=True)[1]
 
     # return original string and parsed domain
@@ -217,6 +225,9 @@ class PointSourceProxy(GenericSourceProxy):
     if mode == 'fans':
       raysPerFan = min([obj.RaysPerFan, maxRaysPerFan])
 
+      # reset flag to report fan mode once
+      self._reportedFullFanMode = None
+
       # create obj.Fans ray fans oriented in phi0
       totalFanCount = int(min([obj.Fans, maxFanCount]))
       for fanIndex, _phi in enumerate(self._parsedFanPhi0(obj) + linspace(0, pi, totalFanCount+1)[:-1]):
@@ -235,11 +246,14 @@ class PointSourceProxy(GenericSourceProxy):
                       # is taken as absolute value because of the negative-theta-hack:
                       obj.PowerDensity.replace('theta', 'abs(theta)'),
                       variable='theta',
-                      variableDomain=(-l2,l2), 
-                      numericalResolution=obj.ThetaResolutionNumericMode)
+                      variableDomain=(-l2,l2),
+                      numericalResolution=float(obj.ThetaResolutionNumericMode))
+          # TODO: compile twice, once with _phi, once with _phi+pi, then add method to fetch the
+          #       numerical densities from both compiles, merge both densities, 
+          #       find grid of combined
           vrv.compile(phi=_phi)
           _posNegThetas = vrv.findGrid(N=raysPerFan)
-          #io.verb(f'{_posNegThetas=}')
+          #io.verb(f'{_posNegThetas=}, {-l2=}, {l2=}')
 
           # store whether most central ray has positive of negative theta to
           # decide later where to place rayIndex==0
@@ -269,7 +283,7 @@ class PointSourceProxy(GenericSourceProxy):
                         obj.PowerDensity,
                         variable='theta',
                         variableDomain=(l1,l2), 
-                        numericalResolution=obj.ThetaResolutionNumericMode)
+                        numericalResolution=float(obj.ThetaResolutionNumericMode)/2)
             vrv.compile(phi=_phi)
             _thetas = vrv.findGrid(N=raysPerFan)
             totalRaysInFan = 2*len(_thetas)
@@ -280,17 +294,24 @@ class PointSourceProxy(GenericSourceProxy):
 
           for rayIndex, theta in enumerate(sorted(_thetas)):
 
-            if isFullFanMode:
-              # increment index if we are on the side of the fan that is 
-              # to avoid having two rayIndex==0 rays 
-              if (       (_isCentralThetaNegative and rayIndexSign == +1)
-                  or (not _isCentralThetaNegative and rayIndexSign == -1) ):
-                rayIndex += 1
+            # if number of rays is even: dont use index=zero, start with +1 and
+            # -1 on each side of the fan, respectively
+            if raysPerFan % 2 == 0:
+              rayIndex += 1
+
+            # if number of rays is odd: place index=zero on the central theta
             else:
-              # in split ray fan mode just increment the negative ray indices
-              # by one to avoid having rayIndex==0 twice
-              if rayIndexSign == -1:
-                rayIndex += 1
+              if isFullFanMode:
+                # increment index if we are on the side of the fan that is 
+                # to avoid having two rayIndex==0 rays 
+                if (       (_isCentralThetaNegative and rayIndexSign == +1)
+                    or (not _isCentralThetaNegative and rayIndexSign == -1) ):
+                  rayIndex += 1
+              else:
+                # in split ray fan mode just increment the negative ray indices
+                # by one to avoid having rayIndex==0 twice
+                if rayIndexSign == -1:
+                  rayIndex += 1
 
             # this loop may run for quite some time, keep GUI responsive by handling events
             keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -350,8 +371,8 @@ class AddPointSource(AddGenericSource):
       ('OpticalSimulationSettings', [
         *self.defaultSimulationSettings(obj),
         ('RandomNumberGeneratorMode', '?', 'String', ''),
-        ('ThetaResolutionNumericMode', 1000, 'Integer', ''),
-        ('PhiResolutionNumericMode', 3, 'Integer', ''),
+        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
+        ('PhiResolutionNumericMode', '3', 'String', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('FanPhi0', '0', 'String', 'Change this to rotate fans around optical axis.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),

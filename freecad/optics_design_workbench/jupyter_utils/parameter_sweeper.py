@@ -20,6 +20,7 @@ from atomicwrites import atomic_write
 from .. import io
 from . import freecad_document
 from . import progress
+from . import retries
 
 CLOSE_FREECAD_TIMEOUT = 90
 _ALL_OPEN_SWEEPERS = []
@@ -198,6 +199,11 @@ class ParameterSweeper:
     objects.
   '''
   def __init__(self, getParametersFunc, freecadDocumentKwargs={}):
+    # close all open sweepers when a new one is created to prevent
+    # to make life in jupyter notebooks easier
+    while len(_ALL_OPEN_SWEEPERS):
+      _ALL_OPEN_SWEEPERS[0].close()
+
     self._getParametersFunc = getParametersFunc
     self._metaParameterDict = {}
     self._freecadDocumentKwargs = freecadDocumentKwargs
@@ -359,7 +365,7 @@ class ParameterSweeper:
         success = False
         gotVal = paramDict[setKey].get()
         try:
-          if isclose(setVal, gotVal):
+          if isclose(setVal, gotVal, rtol=1e-3):
             success = True
         except Exception:
           success = (setVal == gotVal)
@@ -521,7 +527,7 @@ class ParameterSweeper:
             io.verb(f'found new best solution {bestPenalty=},\n{bestParamsDict=}\n{bestParamsArgs=}')
 
           # update non-temp document every now and then with best params so far and 
-          # save to disk to avoid loosing all on a crash
+          # save to disk to avoid losing all on a crash
           if time.time()-lastDocumentSave > saveInterval:
             lastDocumentSave = time.time()
             io.verb('autosaving current best result')
@@ -529,25 +535,25 @@ class ParameterSweeper:
             self.save()
 
           # plot history of optimization and hits of best result so far
-          if len(allParamsHist) > 5 and time.time()-lastProgressPlot > progressPlotInterval:
+          if len(allParamsHist) > 15 and time.time()-lastProgressPlot > progressPlotInterval:
             lastProgressPlot = time.time()
             progress.clearCellOutput()
 
-            fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
+            fig, ax1 = subplots(1, 1, figsize=(6,4))
             sca(ax1)
             sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
                             style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
                                         ).set(xlabel='time', ylabel='penalty')
-            gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+            allPenalties = [p[1] for p in allParamsHist]
+            l, u = min(allPenalties), quantile(allPenalties, .7)
+            if min(allPenalties) > 0 and u/l > 30:
+              ax1.semilogy()
+              ax1.set_ylim([l / (u/l)**0.05, u * (u/l)**0.05])
+            else:
+              ax1.set_ylim([l-.05*(l-u), u+0.05*(l-u)])
+            ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
-            gca().set_title(f'penalty history', fontsize=10) 
-
-            # plot hits
-            sca(ax2)
-            bestResultSoFar = freecad_document.RawFolder(allParamsHist[argmin([h[1] for h in allParamsHist])][3])
-            bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if args[0].get('simulationMode', 'true')=='fans' else []))
-            gca().set_title(f'best result so far', fontsize=10)
-            tight_layout()
+            ax1.set_title(f'penalty history ({len(runningWorkers)}/{len(workers)} workers busy)', fontsize=10)
 
             # save plot to disk
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
@@ -668,103 +674,102 @@ class ParameterSweeper:
         nonlocal lastProgressPlot, lastHistoryDump
         nonlocal bestPenaltySoFar, bestParametersSoFar, bestResultSoFar
 
-        # retry up to five times if exception is raised in the loop
-        for retryNo in range(999):
-          try:
-            # call prepare simulation if given
+        # to enhance stability: if something raises an error during the function
+        # evaluation, return a very large number
+        try:
+          # run prepare simulation-hook
+          @retries.retryOnError(subject='preparing simulation')
+          def _prepareSimulation():
             if prepareSimulation:
               prepareSimulation(self._freecadDocument, **kwargs)
+          _prepareSimulation()
 
-            # set current parameters
-            paramDict = {k: v for k,v in zip(parameters, args)}
+          # run simulation, if simulating fails, set penalty to very large number
+          paramDict = {k: v for k,v in zip(parameters, args)}
+          @retries.retryOnError(subject='setting parameters and running simulation',
+                                maxRetries=4, callbackAfterRetries=2, callback=self.close)
+          def _runSimulation():
             self.set(**paramDict)
+            return self._freecadDocument.runSimulation(simulationMode, **simulationKwargs)
+          resultFolder = _runSimulation()
 
-            # run simulation and fetch result
-            resultFolder = self._freecadDocument.runSimulation(simulationMode, **simulationKwargs)
+          # plot progress if it is time (do this before the call to minimize func to make sure 
+          # any output of minimize func will be visible below the progress info)
+          if time.time()-lastProgressPlot > progressPlotInterval and len(allParamsHist) > 5:
+            lastProgressPlot = time.time()
+            progress.clearCellOutput()
 
-            # plot progress (do this before the call to minimize func to make sure any output of minimize 
-            # func will be visible below the progress info)
-            if time.time()-lastProgressPlot > progressPlotInterval and len(allParamsHist) > 5:
-              lastProgressPlot = time.time()
-              progress.clearCellOutput()
+            # plot history of optimization and hits of best result so far
+            fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
+            sca(ax1)
+            sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
+                            style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
+                                        ).set(xlabel='time', ylabel='penalty')
+            gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+                                              lambda x, p: io.secondsToStr(x-t0, length=1) ))
+            gca().set_title(f'penalty history', fontsize=10) 
 
-              # plot history of optimization and hits of best result so far
-              fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
-              sca(ax1)
-              sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
-                              style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
-                                          ).set(xlabel='time', ylabel='penalty')
-              gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
-                                                lambda x, p: io.secondsToStr(x-t0, length=1) ))
-              gca().set_title(f'penalty history', fontsize=10) 
+            # plot hits
+            sca(ax2)
+            bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
+            gca().set_title(f'best result so far', fontsize=10) 
+            tight_layout()
 
-              # plot hits
-              sca(ax2)
-              bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
-              gca().set_title(f'best result so far', fontsize=10) 
-              tight_layout()
+            # save plot to disk
+            savefig(f'{self.resultsPath()}/optimize-progress.pdf')
 
-              # save plot to disk
-              savefig(f'{self.resultsPath()}/optimize-progress.pdf')
+            # show in notebook (if not running as worker)
+            if not self.getOpenFreshCopyMode():
+              show()
 
-              # show in notebook (if not running as worker)
-              if not self.getOpenFreshCopyMode():
-                show()
+            # close figure
+            close()
 
-              # close figure
-              close()
+            # print status
+            io.info(f'optimizer running since {io.secondsToStr(time.time()-t0)}')
 
-              # print status
-              io.info(f'optimizer running since {io.secondsToStr(time.time()-t0)}')
+          # calculate penalty
+          @retries.retryOnError(subject='evaluating minimize func')
+          def _calcPenalty():
+            return minimizeFunc(resultFolder)
+          penalty = _calcPenalty()
 
-            # calculate penalty
-            penalty = minimizeFunc(resultFolder)
+          # update history lists and shorten if necessary
+          if penalty < bestPenaltySoFar:
+            io.verb(f'found new optimum: {penalty=}, {paramDict=}')
+            allParamsHist.append([time.time(), penalty, True, 
+                                  os.path.realpath(resultFolder.path()), paramDict, 
+                                  optimizeParams])
+            bestParametersSoFar = dict(paramDict)
+            bestPenaltySoFar = penalty
+            bestResultSoFar = resultFolder
+          else:
+            allParamsHist.append([time.time(), penalty, False, 
+                                  os.path.realpath(resultFolder.path()), paramDict, 
+                                  optimizeParams])
+          while len(allParamsHist) > 1e4:
+            allParamsHist[:] = allParamsHist[::2]
+          
+          # dump entire history to file if enabled
+          if historyDumpPath:
+            if time.time()-lastHistoryDump > historyDumpInterval:
+              lastHistoryDump = time.time()
+              try:
+                os.makedirs(os.path.dirname(historyDumpPath), exist_ok=True)
+                with atomic_write(historyDumpPath, mode='wb', overwrite=True) as f:
+                  cloudpickle.dump(allParamsHist, f)
+              except Exception:
+                io.warn(f'dumping progress failed:\n\n'+traceback.format_exc())
 
-            # update history lists and shorten if necessary
-            if penalty < bestPenaltySoFar:
-              io.verb(f'found new optimum: {penalty=}, {paramDict=}')
-              allParamsHist.append([time.time(), penalty, True, 
-                                    os.path.realpath(resultFolder.path()), paramDict, 
-                                    optimizeParams])
-              bestParametersSoFar = dict(paramDict)
-              bestPenaltySoFar = penalty
-              bestResultSoFar = resultFolder
-            else:
-              allParamsHist.append([time.time(), penalty, False, 
-                                    os.path.realpath(resultFolder.path()), paramDict, 
-                                    optimizeParams])
-            while len(allParamsHist) > 1e4:
-              allParamsHist[:] = allParamsHist[::2]
-            
-            # dump entire history to file if enabled
-            if historyDumpPath:
-              if time.time()-lastHistoryDump > historyDumpInterval:
-                lastHistoryDump = time.time()
-                try:
-                  os.makedirs(os.path.dirname(historyDumpPath), exist_ok=True)
-                  with atomic_write(historyDumpPath, mode='wb', overwrite=True) as f:
-                    cloudpickle.dump(allParamsHist, f)
-                except Exception:
-                  io.warn(f'dumping progress failed:\n\n'+traceback.format_exc())
+          # return the penalty value
+          return penalty
 
-            # return the penalty value
-            return penalty
+        # capture any exception, log the stack trace and return ridiculously large number
+        except Exception:
+          io.warn(f'exception was raised in optimizer iteration:\n\n'+traceback.format_exc())
+          return 1e99
 
-          # retry if something in the minimize function evaluation failed
-          except Exception:
-            if retryNo >= 5:
-              raise
-            elif retryNo >= 2:
-              io.warn(f'exception raised during optimize, restart freecad slave, sleep and retry... ({retryNo=}):\n\n'+traceback.format_exc())
-              self.close()
-              time.sleep(10)
-              self.open()
-              time.sleep(3)
-            else:
-              io.warn(f'exception raised during optimize, gonna sleep and retry... ({retryNo=}):\n\n'+traceback.format_exc())
-              time.sleep(3)
-
-      # pass wrapped function to minimizer
+      # prepare arguments for minimizer
       x0 = [self.parameters()[p] for p in parameters] 
       bounds = [self.bounds().get(p, (-inf, inf)) for p in parameters]
       io.info(f'starting optimizer with {minimizeFunc=}, {parameters=}, {simulationMode=}, '

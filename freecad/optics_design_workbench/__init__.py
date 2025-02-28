@@ -31,6 +31,10 @@ def _ensureSystemPackagesCanBeImported():
   ma, mi = sys.version_info.major, sys.version_info.minor
   found = False
 
+  # do not add system folders if we seem to run from a venv
+  if sys.prefix != sys.base_prefix:
+    return
+
   # look for site-packages folder matching current python version, or one of the three previous
   # minor python versions or the next minor python version
   for d in (0, -1, -2, -3, 1):
