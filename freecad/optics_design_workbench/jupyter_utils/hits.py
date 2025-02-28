@@ -197,7 +197,8 @@ class Hits:
 
     if planeNormal is None or xInPlaneVec is None:
       planeNormal, xInPlaneVec = self.detectPlaneNormal(points=self.hits[plotKey], 
-                                    planeNormal=planeNormal, xInPlaneVec=xInPlaneVec)
+                                                        planeNormal=planeNormal, 
+                                                        xInPlaneVec=xInPlaneVec)
     X, Y = self.planeProject3dPoints(self.hits[plotKey], planeNormal=planeNormal).T
     data = {'projected $x$':X, 'projected $y$':Y}
     if hueKey is not None:

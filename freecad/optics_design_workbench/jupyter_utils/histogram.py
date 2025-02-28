@@ -7,10 +7,10 @@ from .. import io
 
 
 class Histogram:
-  def __init__(self, X, Y, planeNormal, inPlaneXDir, radius=None,
+  def __init__(self, X, Y, planeNormal, xInPlaneVec, radius=None,
                binCoords='cartesian', origin=None, **kwargs):
     self._planeNormal = planeNormal
-    self._inPlaneXDir = inPlaneXDir
+    self._xInPlaneVec = xInPlaneVec
     if origin is None:
       origin = array([median(X), median(Y)])
     self._origin = origin
@@ -113,12 +113,12 @@ class Histogram:
       colorbar(**cbar).set_label('hit density per bin')
 
     nx, ny, nz = self._planeNormal
-    px, py, pz = self._inPlaneXDir
+    px, py, pz = self._xInPlaneVec
     ox, oy = self._origin
     if title is None:
       title = (f'plane normal = [{nx:.2f}, {ny:.2f}, {nz:.2f}],\n'
-              f'projected $x$ = [{px:.2f}, {py:.2f}, {pz:.2f}]'
-              +(f',\norigin = [{ox:.2e}, {oy:.2e}]' if not isclose(ox,0) or not isclose(oy,0) else ''))
+               f'projected $x$ = [{px:.2f}, {py:.2f}, {pz:.2f}]'
+               +(f',\norigin = [{ox:.2e}, {oy:.2e}]' if not isclose(ox,0) or not isclose(oy,0) else ''))
     gca().set_title(title, fontsize=10)
     if self._binCoords == 'cartesian':
       gca().axis('equal')
