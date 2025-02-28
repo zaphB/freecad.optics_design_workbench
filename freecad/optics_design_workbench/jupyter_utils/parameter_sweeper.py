@@ -535,7 +535,7 @@ class ParameterSweeper:
             self.save()
 
           # plot history of optimization and hits of best result so far
-          if len(allParamsHist) > 5 and time.time()-lastProgressPlot > progressPlotInterval:
+          if len(allParamsHist) > 15 and time.time()-lastProgressPlot > progressPlotInterval:
             lastProgressPlot = time.time()
             progress.clearCellOutput()
 
@@ -553,7 +553,7 @@ class ParameterSweeper:
               ax1.set_ylim([l-.05*(l-u), u+0.05*(l-u)])
             ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
-            ax1.set_title(f'penalty history', fontsize=10)
+            ax1.set_title(f'penalty history ({len(runningWorkers)}/{len(workers)} workers busy)', fontsize=10)
 
             # save plot to disk
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
