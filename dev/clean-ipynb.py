@@ -95,6 +95,8 @@ def main():
         cell["execution_count"] = None
       if 'id' in cell:
         cell['id'] = f'{i:04d}'
+      if 'metadata' in cell:
+        cell['metadata'] = {}
 
     # apply function to every cell
     for i, cell in enumerate(json_in["cells"]):
