@@ -54,6 +54,9 @@ def setupProgressTracker(**kwargs):
 def silenceProgressTracker():
   setupProgressTracker(silent=True)
 
+def progressTrackerExists():
+  return _GLOBAL_PROGRESS_TRACKER is not None and not _GLOBAL_PROGRESS_TRACKER._isQuit
+
 def progressTrackerInstance(**kwargs):
   '''
   Fetch the current global progressTrackerInstance
@@ -61,7 +64,6 @@ def progressTrackerInstance(**kwargs):
   if _GLOBAL_PROGRESS_TRACKER is None or _GLOBAL_PROGRESS_TRACKER._isQuit:
     setupProgressTracker(**kwargs)
   return _GLOBAL_PROGRESS_TRACKER
-
 
 def clearCellOutput():
   IPython.display.clear_output(True)

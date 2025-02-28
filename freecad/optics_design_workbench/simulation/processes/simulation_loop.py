@@ -89,9 +89,10 @@ def jupyterBecomeSlave():
   '''
   global _IS_MASTER_PROCESS
   if not io.isRegisteredJupyter():
-    raise ValueError(f'cannot use jupyterBecomeSlave if setupJupyterMaster was not called in advance')
-  _IS_MASTER_PROCESS = False
-  io.verb('becoming slave...')
+    io.err(f'cannot use jupyterBecomeSlave if setupJupyterMaster was not called in advance')
+  else:
+    _IS_MASTER_PROCESS = False
+    io.verb('becoming slave...')
 
 def jupyterBecomeMaster():
   '''
@@ -100,9 +101,10 @@ def jupyterBecomeMaster():
   '''
   global _IS_MASTER_PROCESS
   if not io.isRegisteredJupyter():
-    raise ValueError(f'cannot use jupyterBecomeMaster if setupJupyterMaster was not called in advance')
-  _IS_MASTER_PROCESS = True
-  io.verb('becoming master...')
+    io.err(f'cannot use jupyterBecomeMaster if setupJupyterMaster was not called in advance')
+  else:
+    _IS_MASTER_PROCESS = True
+    io.verb('becoming master...')
 
 def unsetJupyterMaster():
   '''

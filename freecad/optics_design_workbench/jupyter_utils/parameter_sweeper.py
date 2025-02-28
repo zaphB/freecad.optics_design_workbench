@@ -59,6 +59,11 @@ def _unpickleAndWork(pickledSweeperOptimizeWorker):
 
 class SweeperOptimizeWorker:
   def __init__(self, sweeper, optimizeArgs):
+    self._lastSentTerminate = 0
+    self._lastSentKill = 0
+    self._termSignalInterval = 3
+    self._killSignalInterval = 3
+    self._tryToEndWorkersSince = None
     self._optimizeArgs = optimizeArgs
 
     # set path to dump history to
@@ -125,10 +130,28 @@ class SweeperOptimizeWorker:
     return self._process.is_alive()
 
   def terminate(self):
-    return self._process.terminate()
+    # limit signal send frequency
+    if time.time()-self._lastSentTerminate > self._termSignalInterval:
+      self._lastSentTerminate = time.time()
+      self._termSignalInterval += 1
+      io.verb(f'sent terminate signal to {self}')
+      return self._process.terminate()
 
   def kill(self):
-    return self._process.kill()
+    # limit signal send frequency
+    if time.time()-self._lastSentKill > self._killSignalInterval:
+      self._killSignalInterval += 1
+      self._lastSentKill = time.time()
+      io.verb(f'sent kill signal to {self}')
+      return self._process.kill()
+
+  def escalatingQuit(self):
+    if self._tryToEndWorkersSince is None:
+      self._tryToEndWorkersSince = time.time()
+    if time.time()-self._tryToEndWorkersSince > 15:
+      self.kill()
+    else:
+      self.terminate()
 
 
 class MetaParameter:
@@ -611,14 +634,9 @@ class ParameterSweeper:
             tryToEndWorkersSince = time.time()
           
           # send kill/terminate signals depending on wait time
-          if time.time()-tryToEndWorkersSince > 10:
-            io.verb(f'issuing .kill() for {len(runningWorkers)} workers')
+          if time.time()-tryToEndWorkersSince > 0:
             for w in runningWorkers:
-              w.kill()
-          elif time.time()-tryToEndWorkersSince > 0:
-            io.verb(f'issuing .terminate() for {len(runningWorkers)} workers')
-            for w in runningWorkers:
-              w.terminate()
+              w.escalatingQuit()
 
           # limit loop speed
           time.sleep(3)
@@ -636,11 +654,15 @@ class ParameterSweeper:
           runningWorkers = [w for w in workers if w.isRunning()]
           if not len(runningWorkers):
             break
-          if time.time()-lastPrint > 3:
+          if time.time()-lastPrint > 10:
             lastPrint = time.time()
             io.warn(f'optimize strategy step ended, but still waiting for {len(runningWorkers)} workers to exit...')
+
+          # send kill/terminate signals depending on wait time
           for w in runningWorkers:
-            w.terminate()
+            w.escalatingQuit()
+
+          # limit loop speed
           time.sleep(1/2)
 
         # make sure all progress files are cleared
