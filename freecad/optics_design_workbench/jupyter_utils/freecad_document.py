@@ -726,7 +726,7 @@ class FreecadDocument:
 
         # very-important-list: raise certain errors immediately, as they indicate a broken document state:
         if any([p.lower() in line.lower() for p in (
-             'BRep_API: command not done', 'KeyboardInterrupt',)]):
+             'BRep_API: command not done', 'Revolution: Revolve axis intersects the sketch', 'KeyboardInterrupt',)]):
           raise RuntimeError(f'FreeCAD reported error: {line}')
 
         if line.strip():
