@@ -558,6 +558,12 @@ class ParameterSweeper:
             bestParamsDict = _best[4]
             bestParamsArgs = _best[5]
             io.verb(f'found new best solution {bestPenalty=},\n{bestParamsDict=}\n{bestParamsArgs=}')
+            _b = self.bounds()
+            _paramsRelToBounds = {k: (v-_b[k][0])/(_b[k][1]-_b[k][0]) 
+                                           for k,v in bestParamsDict.items()}
+            io.verb(f'params in best solution that are close to bounds: '
+                    f'{[k for k,v in _paramsRelToBounds.items() if isclose(v, 0, atol=1e-3) or isclose(v, 1, atol=1e-3)]} '
+                    f'(all params renormalized to bounds: {_paramsRelToBounds})')
 
           # update non-temp document every now and then with best params so far and 
           # save to disk to avoid losing all on a crash
@@ -716,8 +722,12 @@ class ParameterSweeper:
               prepareSimulation(self._freecadDocument, **kwargs)
           _prepareSimulation()
 
+          # extract param dict from args, un-normalize parameters that have both bounds set
+          _b = self.bounds()
+          paramDict = {k: v*(_b[k][1]-_b[k][0])+_b[k][0] if all(isfinite(_b[k])) else v 
+                                                          for k,v in zip(parameters, args)}
+
           # run simulation, if simulating fails, set penalty to very large number
-          paramDict = {k: v for k,v in zip(parameters, args)}
           @retries.retryOnError(subject='setting parameters and running simulation',
                                 maxRetries=4, callbackAfterRetries=2, callback=self.close)
           def _runSimulation():
@@ -769,6 +779,12 @@ class ParameterSweeper:
             bestParametersSoFar = dict(paramDict)
             bestPenaltySoFar = penalty
             bestResultSoFar = resultFolder
+            _b = self.bounds()
+            _paramsRelToBounds = {k: (v-_b[k][0])/(_b[k][1]-_b[k][0]) 
+                                            for k,v in paramDict.items()}
+            io.verb(f'params in best solution that are close to bounds: '
+                    f'{[k for k,v in _paramsRelToBounds.items() if isclose(v, 0, atol=1e-3) or isclose(v, 1, atol=1e-3)]} '
+                    f'(all params renormalized to bounds: {_paramsRelToBounds})')
           else:
             allParamsHist.append([time.time(), penalty, False, 
                                   os.path.realpath(resultFolder.path()), paramDict, 
@@ -795,9 +811,11 @@ class ParameterSweeper:
           io.warn(f'exception was raised in optimizer iteration:\n\n'+traceback.format_exc())
           return 1e99
 
-      # prepare arguments for minimizer
-      x0 = [self.parameters()[p] for p in parameters] 
-      bounds = [self.bounds().get(p, (-inf, inf)) for p in parameters]
+      # prepare arguments for minimizer: if params have both limits set, renormalize to (0,1) interval
+      _b = self.bounds()
+      _p = self.parameters()
+      x0 = [(_p[k]-_b[k][0])/(_b[k][1]-_b[k][0]) if all(isfinite(_b[k])) else _p[k] for k in parameters]
+      bounds = [[0,1] if all(isfinite(_b[k])) else _b[k] for k in parameters]
       io.info(f'starting optimizer with {minimizeFunc=}, {parameters=}, {simulationMode=}, '
               f'{simulationKwargs=}, {kwargs=}, {x0=}, {bounds=}')
 
