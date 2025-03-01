@@ -1,3 +1,13 @@
+'''
+
+'''
+
+__license__ = 'LGPL-3.0-or-later'
+__copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
+__authors__ = 'P. Bredol'
+__url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
+
+
 from numpy import *
 from matplotlib.pyplot import *
 import seaborn as sns
@@ -49,6 +59,11 @@ def _unpickleAndWork(pickledSweeperOptimizeWorker):
 
 class SweeperOptimizeWorker:
   def __init__(self, sweeper, optimizeArgs):
+    self._lastSentTerminate = 0
+    self._lastSentKill = 0
+    self._termSignalInterval = 3
+    self._killSignalInterval = 3
+    self._tryToEndWorkersSince = None
     self._optimizeArgs = optimizeArgs
 
     # set path to dump history to
@@ -115,10 +130,28 @@ class SweeperOptimizeWorker:
     return self._process.is_alive()
 
   def terminate(self):
-    return self._process.terminate()
+    # limit signal send frequency
+    if time.time()-self._lastSentTerminate > self._termSignalInterval:
+      self._lastSentTerminate = time.time()
+      self._termSignalInterval += 1
+      io.verb(f'sent terminate signal to {self}')
+      return self._process.terminate()
 
   def kill(self):
-    return self._process.kill()
+    # limit signal send frequency
+    if time.time()-self._lastSentKill > self._killSignalInterval:
+      self._killSignalInterval += 1
+      self._lastSentKill = time.time()
+      io.verb(f'sent kill signal to {self}')
+      return self._process.kill()
+
+  def escalatingQuit(self):
+    if self._tryToEndWorkersSince is None:
+      self._tryToEndWorkersSince = time.time()
+    if time.time()-self._tryToEndWorkersSince > 15:
+      self.kill()
+    else:
+      self.terminate()
 
 
 class MetaParameter:
@@ -525,6 +558,12 @@ class ParameterSweeper:
             bestParamsDict = _best[4]
             bestParamsArgs = _best[5]
             io.verb(f'found new best solution {bestPenalty=},\n{bestParamsDict=}\n{bestParamsArgs=}')
+            _b = self.bounds()
+            _paramsRelToBounds = {k: (v-_b[k][0])/(_b[k][1]-_b[k][0]) 
+                                           for k,v in bestParamsDict.items()}
+            io.verb(f'params in best solution that are close to bounds: '
+                    f'{[k for k,v in _paramsRelToBounds.items() if isclose(v, 0, atol=1e-3) or isclose(v, 1, atol=1e-3)]} '
+                    f'(all params renormalized to bounds: {_paramsRelToBounds})')
 
           # update non-temp document every now and then with best params so far and 
           # save to disk to avoid losing all on a crash
@@ -545,12 +584,12 @@ class ParameterSweeper:
                             style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
                                         ).set(xlabel='time', ylabel='penalty')
             allPenalties = [p[1] for p in allParamsHist]
-            l, u = min(allPenalties), quantile(allPenalties, .7)
+            l, u = min(allPenalties), quantile(allPenalties, .5)
             if min(allPenalties) > 0 and u/l > 30:
               ax1.semilogy()
-              ax1.set_ylim([l / (u/l)**0.05, u * (u/l)**0.05])
+              ax1.set_ylim([l / (u/l)**0.05, u * (u/l)**0.5])
             else:
-              ax1.set_ylim([l-.05*(l-u), u+0.05*(l-u)])
+              ax1.set_ylim([l-.05*(u-l), u+0.5*(u-l)])
             ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
             ax1.set_title(f'penalty history ({len(runningWorkers)}/{len(workers)} workers busy)', fontsize=10)
@@ -601,14 +640,9 @@ class ParameterSweeper:
             tryToEndWorkersSince = time.time()
           
           # send kill/terminate signals depending on wait time
-          if time.time()-tryToEndWorkersSince > 10:
-            io.verb(f'issuing .kill() for {len(runningWorkers)} workers')
+          if time.time()-tryToEndWorkersSince > 0:
             for w in runningWorkers:
-              w.kill()
-          elif time.time()-tryToEndWorkersSince > 0:
-            io.verb(f'issuing .terminate() for {len(runningWorkers)} workers')
-            for w in runningWorkers:
-              w.terminate()
+              w.escalatingQuit()
 
           # limit loop speed
           time.sleep(3)
@@ -626,11 +660,15 @@ class ParameterSweeper:
           runningWorkers = [w for w in workers if w.isRunning()]
           if not len(runningWorkers):
             break
-          if time.time()-lastPrint > 3:
+          if time.time()-lastPrint > 10:
             lastPrint = time.time()
             io.warn(f'optimize strategy step ended, but still waiting for {len(runningWorkers)} workers to exit...')
+
+          # send kill/terminate signals depending on wait time
           for w in runningWorkers:
-            w.terminate()
+            w.escalatingQuit()
+
+          # limit loop speed
           time.sleep(1/2)
 
         # make sure all progress files are cleared
@@ -684,8 +722,12 @@ class ParameterSweeper:
               prepareSimulation(self._freecadDocument, **kwargs)
           _prepareSimulation()
 
+          # extract param dict from args, un-normalize parameters that have both bounds set
+          _b = self.bounds()
+          paramDict = {k: v*(_b[k][1]-_b[k][0])+_b[k][0] if all(isfinite(_b[k])) else v 
+                                                          for k,v in zip(parameters, args)}
+
           # run simulation, if simulating fails, set penalty to very large number
-          paramDict = {k: v for k,v in zip(parameters, args)}
           @retries.retryOnError(subject='setting parameters and running simulation',
                                 maxRetries=4, callbackAfterRetries=2, callback=self.close)
           def _runSimulation():
@@ -700,7 +742,7 @@ class ParameterSweeper:
             progress.clearCellOutput()
 
             # plot history of optimization and hits of best result so far
-            fig, (ax1, ax2) = subplots(1, 2, figsize=(9,4))
+            fig, ax1 = subplots(1, 1, figsize=(6,4))
             sca(ax1)
             sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
                             style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
@@ -708,12 +750,6 @@ class ParameterSweeper:
             gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
             gca().set_title(f'penalty history', fontsize=10) 
-
-            # plot hits
-            sca(ax2)
-            bestResultSoFar.loadHits('*').plot(*(['fanIndex', 'fan #'] if simulationMode=='fans' else []))
-            gca().set_title(f'best result so far', fontsize=10) 
-            tight_layout()
 
             # save plot to disk
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
@@ -743,6 +779,12 @@ class ParameterSweeper:
             bestParametersSoFar = dict(paramDict)
             bestPenaltySoFar = penalty
             bestResultSoFar = resultFolder
+            _b = self.bounds()
+            _paramsRelToBounds = {k: (v-_b[k][0])/(_b[k][1]-_b[k][0]) 
+                                            for k,v in paramDict.items()}
+            io.verb(f'params in best solution that are close to bounds: '
+                    f'{[k for k,v in _paramsRelToBounds.items() if isclose(v, 0, atol=1e-3) or isclose(v, 1, atol=1e-3)]} '
+                    f'(all params renormalized to bounds: {_paramsRelToBounds})')
           else:
             allParamsHist.append([time.time(), penalty, False, 
                                   os.path.realpath(resultFolder.path()), paramDict, 
@@ -769,9 +811,11 @@ class ParameterSweeper:
           io.warn(f'exception was raised in optimizer iteration:\n\n'+traceback.format_exc())
           return 1e99
 
-      # prepare arguments for minimizer
-      x0 = [self.parameters()[p] for p in parameters] 
-      bounds = [self.bounds().get(p, (-inf, inf)) for p in parameters]
+      # prepare arguments for minimizer: if params have both limits set, renormalize to (0,1) interval
+      _b = self.bounds()
+      _p = self.parameters()
+      x0 = [(_p[k]-_b[k][0])/(_b[k][1]-_b[k][0]) if all(isfinite(_b[k])) else _p[k] for k in parameters]
+      bounds = [[0,1] if all(isfinite(_b[k])) else _b[k] for k in parameters]
       io.info(f'starting optimizer with {minimizeFunc=}, {parameters=}, {simulationMode=}, '
               f'{simulationKwargs=}, {kwargs=}, {x0=}, {bounds=}')
 

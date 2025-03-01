@@ -36,8 +36,13 @@ _PRINT_SETTER_AND_CALL_LINES = False
 # in case this process is killed
 def handler(signum, frame):
   io.info(f'signal handler called with signal {signum}')
-  for doc in _ALL_DOCUMENTS:
-    doc.close()
+  try:
+    for doc in _ALL_DOCUMENTS:
+      doc.close()
+  except Exception:
+    io.warn(f'exception raised in signal handler:\n\n'+traceback.format_exc())
+  finally:
+    exit(signum)
 
 # register signal handlers
 for sig in (signal.SIGHUP, signal.SIGTERM):
@@ -726,7 +731,7 @@ class FreecadDocument:
 
         # very-important-list: raise certain errors immediately, as they indicate a broken document state:
         if any([p.lower() in line.lower() for p in (
-             'BRep_API: command not done', 'Revolution: Revolve axis intersects the sketch', 'KeyboardInterrupt',)]):
+             'BRep_API: command not done', 'Revolution: Revolve axis intersects the sketch',)]):
           raise RuntimeError(f'FreeCAD reported error: {line}')
 
         if line.strip():
@@ -1006,8 +1011,9 @@ class FreecadDocument:
     # make sure global progress tracker instance is shut down
     # and prevent creating new ones because we are not in the 
     # the document context manager anymore
-    progress.progressTrackerInstance(doc=self).quit()
-    progress.ALLOW_PROGRESS_TACKERS = False
+    if progress.progressTrackerExists():
+      progress.progressTrackerInstance(doc=self).quit()
+      progress.ALLOW_PROGRESS_TACKERS = False
 
     # run temp dir cleanup
     self._sanitizeTempFolder()
