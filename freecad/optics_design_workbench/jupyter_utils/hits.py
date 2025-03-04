@@ -389,16 +389,17 @@ class Hits:
         estimatedPower = 1/mean( ndist[(fanI==nfI) & (nrI==interRayI)] )
 
         # if cdist is not monotonically increasing with index -> increment 
-        # caustic intensity counter
+        # caustic intensity counter:
         if cdist2 < cdist1:
           causticIntensity += abs(cdist1-cdist2)
 
-        # add estimated power and its position to result lust
-        fanDensities[fanI].append([mean([cdist1, cdist2]), estimatedPower ])
+        # if rays have the expected order, add estimated power and its position to result list:
+        else:
+          fanDensities[fanI].append([ mean([cdist1, cdist2]), estimatedPower ])
 
     # construct lambdas to interpolate found densities as a function of 
     # distance from center
-    fanDensityFuncs = [(i, lambda pos, _d=array(d).T: interp(pos, *_d)) for i, d in fanDensities.items()]
+    fanDensityFuncs = [(i, lambda pos, _d=array(d).T: interp(pos, *_d, left=0, right=0)) for i, d in fanDensities.items()]
 
     # return all results as dictionary
     return dict(fanDensities=fanDensities, fanDensityFuncs=fanDensityFuncs,
