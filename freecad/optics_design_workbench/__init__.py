@@ -60,13 +60,21 @@ def versionInfo():
   import sys
   import os
   FreeCAD = None
+  freecadVersion = None
   try:
     import FreeCAD
   except ImportError:
     pass
+  else:
+    freecadVersion = ".".join(FreeCAD.Version()[:3])
+  if freecadVersion is None:
+    from . import jupyter_utils
+    freecadVersion = jupyter_utils.freecadVersion()
   from . import detect_pyside
-  print(f'executable path:   {os.path.realpath(sys.executable)}')
-  print(f'python version:    {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')
-  print(f'freecad version:   {".".join(FreeCAD.Version()[:3]) if FreeCAD else "?"}')
-  print(f'Qt major version:  {detect_pyside.detectQtMajorVersion() or "?"}')
-  print(f'workbench version: {__version__}')
+  print(f'python version:          {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')
+  print(f'running within FreeCAD?: {"yes" if FreeCAD else "no"}')
+  print(f'FreeCAD version:         {freecadVersion or "?"}')
+  print(f'Qt major version:        {detect_pyside.detectQtMajorVersion() or "?"}')
+  print(f'workbench version:       {__version__}')
+  print(f'sys.prefix:              {sys.prefix}')
+  print(f'sys.base_prefix:         {sys.base_prefix}')
