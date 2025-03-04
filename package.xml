@@ -2,7 +2,7 @@
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
   <name>Optics Design Workbench</name>
   <description>Physically accurate forward ray tracing for optics simulation and optimization with FreeCAD workbench frontend.</description>
-  <version>0.4.6</version>
+  <version>0.4.7</version>
   <date>2025-03-04</date>
   <maintainer email="philipp.bredol@rwth-aachen.de">Philipp Bredol</maintainer>
   <depend>numpy</depend>
