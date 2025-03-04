@@ -48,11 +48,12 @@ def _mpCtx():
   return multiprocessing.get_context('forkserver')
 
 
-def _unpickleAndWork(pickledSweeperOptimizeWorker):
+def _unpickleAndWork(pickledSweeperOptimizeWorker, freecadExecutable):
   '''
   wrapper around SweeperOptimizeWorker._work method that is 
   a suitable multiprocessing.Process target
   '''
+  freecad_document.setDefaultFreecadExecutable(freecadExecutable)
   _self = pickle.loads(pickledSweeperOptimizeWorker)
   _self.work()
 
@@ -96,7 +97,9 @@ class SweeperOptimizeWorker:
 
     # setup and start child process
     self._process = _mpCtx().Process(
-                        target=_unpickleAndWork, args=(pickledSelf,), 
+                        target=_unpickleAndWork, 
+                        args=(pickledSelf, 
+                              freecad_document._DEFAULT_FREECAD_EXECUTABLE), 
                         daemon=True ) # <- kill process after parent has exited
 
   def start(self):

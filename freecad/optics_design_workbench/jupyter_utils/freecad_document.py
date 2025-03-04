@@ -79,6 +79,31 @@ def setDefaultFreecadExecutable(path):
   _DEFAULT_FREECAD_EXECUTABLE = os.path.abspath(path)
 
 
+def freecadVersion():
+  p = subprocess.Popen([_DEFAULT_FREECAD_EXECUTABLE, '-c'],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.DEVNULL,
+                        stdin=subprocess.PIPE, 
+                        text=True, bufsize=-1)
+  try:
+    time.sleep(.3)
+    p.stdin.write('import FreeCAD; print("version follows"); print(FreeCAD.Version());\n\n')
+    p.stdin.flush()
+    while True:
+      l = p.stdout.readline()
+      if 'version follows' in l:
+        l = p.stdout.readline()
+        return '.'.join([e.strip()[1:-1] for e in l[1:-1].split(',')[:3]])
+  except Exception:
+    return None
+  finally:
+    p.stdin.write('\n\nexit();\n\n'*5)
+    p.stdin.flush()
+    time.sleep(.1)
+    if p.poll() is None:
+      p.kill()
+
+
 # create aliases for FreeCAD types that just return simple numpy arrays
 # to allow converting Vectors from FreeCAD side automatically
 def Vector(*a):
@@ -360,7 +385,7 @@ class FreecadDocument:
   
   The document is intended to be used as a context manager to clean up after itself.
   '''
-  def __init__(self, path=None, freecadExecutable=None, openFreshCopy=False):
+  def __init__(self, path=None, openFreshCopy=False):
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
@@ -380,14 +405,6 @@ class FreecadDocument:
       raise ValueError(f'path to freecad project file {path} does not seem to exist')
     if not path.endswith('.FCStd'):
       raise ValueError(f'path to freecad project file {path} does end with .FCStd')
-
-    # check if freecadExecutable is valid
-    if freecadExecutable:
-      if not os.path.exists(freecadExecutable):
-        raise RuntimeError(f'path of custom freecad executable {freecadExecutable} '
-                           f'does not seem to exist')
-    else:
-      freecadExecutable = _DEFAULT_FREECAD_EXECUTABLE
 
     # if openFreshCopy is True, create temp folder, copy freecad file in there, 
     # and modify path attributes accordingly
@@ -411,7 +428,6 @@ class FreecadDocument:
 
     # save in attributes
     self._path = path
-    self._freecadExecutable = freecadExecutable
 
     # generate results folder path
     self._resultsPath = path[:-6]+'.OpticsDesign'
@@ -692,7 +708,7 @@ class FreecadDocument:
 
     # launch child process - DONT load file here or it will be loaded without 
     #                        ViewProvider objects because GUI is not yet up
-    self._p = subprocess.Popen([self._freecadExecutable, '-c'],
+    self._p = subprocess.Popen([_DEFAULT_FREECAD_EXECUTABLE, '-c'],
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 stdin=subprocess.PIPE, 
@@ -1073,9 +1089,9 @@ def openFreecadGui(*args, **kwargs):
   document = FreecadDocument(*args, **kwargs)
 
   # launch freecad process
-  p = subprocess.Popen([document._freecadExecutable, document._path],
-                       stdout=subprocess.DEVNULL, 
-                       stderr=subprocess.DEVNULL)
+  p = subprocess.Popen([_DEFAULT_FREECAD_EXECUTABLE, document._path],
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL)
   _didFinishPrint = False
   def isRunning():
     nonlocal _didFinishPrint
