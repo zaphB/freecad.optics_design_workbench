@@ -583,13 +583,14 @@ class ParameterSweeper:
             sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
                             style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
                                         ).set(xlabel='time', ylabel='penalty')
-            allPenalties = [p[1] for p in allParamsHist]
-            l, u = min(allPenalties), quantile(allPenalties, .5)
-            if min(allPenalties) > 0 and u/l > 30:
-              ax1.semilogy()
-              ax1.set_ylim([l / (u/l)**0.05, u * (u/l)**0.5])
-            else:
-              ax1.set_ylim([l-.05*(u-l), u+0.5*(u-l)])
+            _allFinitePenalties = [p[1] for p in allParamsHist if isfinite(p[1])]
+            if len(_allFinitePenalties) > 50:
+              l, u = min(_allFinitePenalties), quantile(_allFinitePenalties, .5)
+              if min(_allFinitePenalties) > 0 and u/l > 30:
+                ax1.semilogy()
+                ax1.set_ylim([l / (u/l)**0.05, u * (u/l)**0.5])
+              else:
+                ax1.set_ylim([l-.05*(u-l), u+0.5*(u-l)])
             ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
             ax1.set_title(f'penalty history ({len(runningWorkers)}/{len(workers)} workers busy)', fontsize=10)
