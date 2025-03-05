@@ -27,7 +27,7 @@ def detectQtMajorVersion():
 try:
   from PySide.QtCore import *
   from PySide.QtWidgets import *
-  io.verb('used module "PySide"')
+  #io.verb('used module "PySide"')
 
 except ImportError:
   # second attempt: detect Qt version then decide which pyside 
@@ -35,12 +35,12 @@ except ImportError:
   if detectQtMajorVersion() == 5:
     from PySide2.QtCore import *
     from PySide2.QtWidgets import *
-    io.verb('detected Qt version 5, used module "PySide2"')
+    #io.verb('detected Qt version 5, used module "PySide2"')
 
   elif detectQtMajorVersion() == 6:
     from PySide6.QtCore import *
     from PySide6.QtWidgets import *
-    io.verb('detected Qt version 6, used module "PySide6"')
+    #io.verb('detected Qt version 6, used module "PySide6"')
 
   # third attempt: try to import pyside6 first and try older 
   # versions on import error
@@ -48,11 +48,11 @@ except ImportError:
     try:
       from PySide6.QtCore import *
       from PySide6.QtWidgets import *
-      io.verb('failed to detect Qt version, used module "PySide6"')
+      #io.verb('failed to detect Qt version, used module "PySide6"')
     except ImportError:
       try:
         from PySide2.QtCore import *
         from PySide2.QtWidgets import *
-        io.verb('failed to detect Qt version, used module "PySide2"')
+        #io.verb('failed to detect Qt version, used module "PySide2"')
       except ImportError:
         pass

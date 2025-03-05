@@ -57,26 +57,42 @@ _DEFAULT_FREECAD_EXECUTABLE = 'FreeCAD'
 
 def setDefaultFreecadExecutable(path):
   global _DEFAULT_FREECAD_EXECUTABLE
-  path = os.path.expanduser(path)
 
-  # check if path exists
-  if not os.path.exists(path):
-    raise ValueError(f'path {path} does not exist')
+  # check if path points to executable file if path looks like a filesystem path
+  if '/' in path:
+    # make sure to expand user
+    path = os.path.expanduser(path)
 
-  # check if regular file
-  if not os.path.isfile(path):
-    raise ValueError(f'path {path} is not looking like a file, did '
-                     f'you specify the full path to the FreeCAD executable '
-                     f'or AppImage?')
+    # check if path exists
+    if not os.path.exists(path):
+      raise ValueError(f'path {path} does not exist in filesystem')
 
-  # check if path is executable
-  if not os.access(path, os.X_OK):
-    raise ValueError(f'path {path} is missing executable rights, did '
-                     f'you specify the full path to the FreeCAD executable '
-                     f'or AppImage?')
+    # check if regular file (if not on PATH)
+    if not isOnPath and not os.path.isfile(path):
+      raise ValueError(f'path {path} is not looking like a file, did '
+                      f'you specify the full path to the FreeCAD executable '
+                      f'or AppImage?')
+
+    # check if path is executable (if not on PATH)
+    if isOnPath and not os.access(path, os.X_OK):
+      raise ValueError(f'path {path} is missing executable rights, did '
+                      f'you specify the full path to the FreeCAD executable '
+                      f'or AppImage?')
+
+    # replace path with absolute path
+    path = os.path.abspath(path)
+
+  else:
+    try:
+      p = subprocess.run(['whereis', path], capture_output=True, text=True)
+    except Exception as e:
+      io.warn(f'failed to check whether path exists ({e.__class__.__name__}: {str(e)})')
+    else: 
+      if not len(''.join(p.stdout.split(':')[1:]).strip()):
+        raise ValueError(f'path {path} is not found by whereis')
 
   # store absolute path in global var
-  _DEFAULT_FREECAD_EXECUTABLE = os.path.abspath(path)
+  _DEFAULT_FREECAD_EXECUTABLE = path
 
 
 def freecadVersion():
