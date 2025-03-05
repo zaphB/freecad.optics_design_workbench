@@ -24,7 +24,9 @@ class OpticalGroupProxy():
     '''Do something when doing a recomputation, this method is mandatory'''
 
   def setVisibleProperties(self, obj, props):
-    dynamicProps = ['AbsorptionLength', 'RefractiveIndex', 'Reflectivity']
+    dynamicProps = ['AbsorptionLength', 'RefractiveIndex', 'Reflectivity', 'GratingType', 
+                    'GratingLinesPerMillimeter', 'GratingLinesOrientation', 
+                    'GratingDiffractionOrder']
     for p in dynamicProps:
       obj.setEditorMode(p, 0 if p in props else 3)
 
@@ -54,6 +56,12 @@ class OpticalGroupProxy():
             child.ViewObject.Transparency = 80
         obj.RecordHits = False
 
+      elif newType == 'Grating':
+        self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex',
+                                  'GratingType', 'GratingLinesPerMillimeter', 
+                                  'GratingLinesOrientation', 'GratingDiffractionOrder'])
+        obj.RecordHits = False
+
       elif newType == 'Absorber':
         self.setVisibleProperties(obj, [])
         obj.RecordHits = True
@@ -71,6 +79,13 @@ class OpticalGroupProxy():
 
       # update old type attribute of proxy
       self.oldType = newType
+    
+    if prop == 'AbsorptionLength':
+      val = getattr(obj, prop)
+      try:
+        val = float(val)
+      except ValueError:
+        setattr(obj, prop, 'inf')
 
   def onInitializeSimulation(self, obj, state, ident):
     pass
@@ -120,15 +135,26 @@ class MakeOpticalGroup:
     # create properties of object
     for section, entries in [
       ('OpticalProperties', [
-        ('OpticalType', ['Mirror', 'Lens', 'Absorber', 'Vacuum'], 'Enumeration', 
+        ('OpticalType', ['Mirror', 'Lens', 'Grating', 'Absorber', 'Vacuum'], 'Enumeration', 
               'Type of the optical element, can be reflective (=Mirror), refractive (=Lens), '
+              'grating (=Grating), '
               'fully absorbing (=Absorber) or completely transparent (=Vacuum).'),
         ('RefractiveIndex', 2, 'Float', 
               'Refractive index of the material used for ray tracing.'),
         ('Reflectivity', 1, 'Float', 
               'Reflectivity coefficient used for ray tracing.'),
-        ('AbsorptionLength', 0, 'Float', 
-              'Not implemented')]),
+        ('AbsorptionLength', 'inf', 'String', 
+              'Optical absorption length in the material in 1/mm'),
+        ('GratingType', ['Reflection', 'Transmission'], 'Enumeration', 
+              'Select whether grating should be reflective of transmissive.'),
+        ('GratingLinesPerMillimeter', 1000, 'Float', 
+              'Number of grating lines per millimeter.'),
+        ('GratingLinesOrientation', (0,0,1), 'Vector',
+              'Normal of a hypothetical set of planes that intersect the grating surface, to define '
+              'the rulings of the grating as these intersection lines'),
+        ('GratingDiffractionOrder', 1, 'Integer', 
+              'Order of diffraction at which to place refracted/transmitted rays.'),
+      ]),
       ('OpticalSimulationSettings', [
         ('RecordHits', False, 'Bool', 
               'Enable recording ray hits on this optical group to disk during simulations.'),
@@ -175,16 +201,19 @@ class MakeOpticalGroup:
                 MenuText='Make '+dict(
                             Mirror='mirrors',
                             Lens='lenses',
+                            Grating='gratings',
                             Absorber='absorbers',
                             Vacuum='detectors')[self.opticalType],
                 ToolTip='Turn selected objects into optical '+dict(
                             Mirror='mirrors',
                             Lens='lenses',
+                            Grating='gratings',
                             Absorber='absorbers',
                             Vacuum='detectors')[self.opticalType],)
 
 def loadGroups():
   Gui.addCommand('Make mirror', MakeOpticalGroup('Mirror'))
   Gui.addCommand('Make lens', MakeOpticalGroup('Lens'))
+  Gui.addCommand('Make grating', MakeOpticalGroup('Grating'))
   Gui.addCommand('Make absorber', MakeOpticalGroup('Absorber'))
   Gui.addCommand('Make detector', MakeOpticalGroup('Vacuum'))

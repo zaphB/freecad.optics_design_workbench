@@ -203,7 +203,8 @@ class PointSourceProxy(GenericSourceProxy):
     rayMetadata.update(metadata)
 
     # return actual ray object
-    return ray.Ray(obj, gorigin, gdirection, initPower=power, metadata=rayMetadata)
+    return ray.Ray(obj, gorigin, gdirection, wavelength=obj.Wavelength, 
+                   initPower=power, metadata=rayMetadata)
 
 
   def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
@@ -365,7 +366,7 @@ class AddPointSource(AddGenericSource):
         ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
         ('FocalLength', 0, 'Float', 'Distance of the ray origin from the location of the light source. '
                   'Negative values result in a converging beam.'),
-        ('ThetaDomain', '0, pi/2', 'String', ''),
+        ('ThetaDomain', '0, pi/4', 'String', ''),
         ('PhiDomain', '0, 2*pi', 'String', ''),
       ]),
       ('OpticalSimulationSettings', [

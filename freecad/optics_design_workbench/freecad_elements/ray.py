@@ -25,7 +25,7 @@ class Ray():
   Class representing an individual ray.
   '''
   def __init__(self, lightSource, initPoint, initDirection, 
-               initPower=1, wavelength=1, metadata={}):
+               wavelength, initPower=1, metadata={}):
     self.lightSource = lightSource
     self.initPoint = initPoint
     self.initDirection = initDirection
@@ -116,6 +116,14 @@ class Ray():
       # add yield latest segment
       yield (prevPoint, currentPoint), prevPower, prevMedium, colorChange
 
+      # update ray power if medium is absorptive
+      if hasattr(prevMedium, 'AbsorptionLength'):
+        _absLength = float(prevMedium.AbsorptionLength)
+        if _absLength == 0:
+          currentPower = 0
+        elif isfinite(_absLength):
+          currentPower = exp( -sqrt(sum( (prevPoint-currentPoint)**2 ))/_absLength )
+
       # calculate normal and whether ray is facing the object from the outside or the inside
       normal, isEntering = self.getNormal(face, prevPoint, currentPoint)
 
@@ -146,8 +154,9 @@ class Ray():
         # ray enters lens
         if isEntering:
           if currentMedium is not None:
-            raise ValueError('ray entered lens while already being inside a lens, '
-                             'get rid of any overlapping lenses in your project')
+            raise ValueError('ray entered lens while already being inside a medium, '
+                             'get rid of any overlapping lenses/transmission gratings '
+                             'in your project')
           n1 = 1
           currentMedium = obj
           n2 = currentMedium.RefractiveIndex
@@ -156,7 +165,8 @@ class Ray():
         else:
           if currentMedium is None:
             raise ValueError('ray exited lens without having entered before, '
-                             'get rid of any overlapping lenses in your project')
+                             'get rid of any overlapping lenses/transmission gratings '
+                             'in your project')
           n1 = currentMedium.RefractiveIndex
           n2 = 1
 
@@ -173,6 +183,64 @@ class Ray():
           # increment sequence index only after ray left lens 
           # (without internal reflection)
           sequenceIndex += 1
+
+      # hit grating: direction is altered according to selected diffraction order,
+      # medium never changes, entering a grating applies diffraction, leaving the
+      # grating does not do anything
+      elif obj.OpticalType == 'Grating':
+
+        if obj.GratingType == 'Reflection':
+
+          if isEntering:
+            n = currentMedium.RefractiveIndex if currentMedium else 1
+            currentDirection = self.lineGrating(
+                                      currentDirection/currentDirection.Length,
+                                      n, n, normal, obj)
+            sequenceIndex += 1
+
+          # do nothing if ray is leaving reflection grating (should never happen)
+          else:
+            pass
+        
+        elif obj.GratingType == 'Transmission':
+
+          if isEntering:
+            if currentMedium is not None:
+              raise ValueError('ray entered grating while already being inside a medium, '
+                               'get rid of any overlapping lenses/transmission gratings '
+                               'in your project')
+            n1 = 1
+            currentMedium = obj
+            n2 = currentMedium.RefractiveIndex
+            currentDirection = self.lineGrating(
+                                      currentDirection/currentDirection.Length,
+                                      n1, n2, normal, obj)
+
+          # apply lens-like refraction if ray is leaving transmission grating
+          else:
+            if currentMedium is None:
+              raise ValueError('ray exited grating without having entered before, '
+                               'get rid of any overlapping lenses/transmission gratings '
+                               'in your project')
+            n1 = currentMedium.RefractiveIndex
+            n2 = 1
+
+            # update ray direction according to Snell's law
+            currentDirection, isTotalReflection = self.snellsLaw(
+                                          currentDirection/currentDirection.Length,
+                                          n1, n2, normal)
+
+            # if ray traveled in exit direction and not total reflection occurred,
+            # set current medium to vacuum
+            if not isTotalReflection:
+              currentMedium = None
+
+              # increment sequence index only after ray left grating
+              # (without internal reflection)
+              sequenceIndex += 1
+
+        else:
+          raise ValueError(f'invalid grating type: {obj.GratingType=}')
 
       # hit absorber: intensity is changed / ray is ended if intensity below min
       elif obj.OpticalType == 'Absorber':
@@ -292,3 +360,47 @@ class Ray():
     if root < 0: # total reflection
       return self.mirror(ray, normal), True
     return n1/n2 * normal.cross( (-normal).cross(ray)) + normal * sqrt(root), False
+
+  def lineGrating(self, ray, n1, n2, normal, obj):  # from Ludwig 1970
+    wavelength = self.initWavelength
+    order = obj.GratingDiffractionOrder
+    lpm = obj.GratingLinesPerMillimeter
+    g_g_p_vector = obj.GratingLinesOrientation
+
+    # get parameters
+    wavelength = wavelength / 1000
+    ray = ray / ray.Length
+    surf_norma = normal
+    surf_norma = surf_norma / surf_norma.Length  # normalize the surface normal
+    # hypothetical first vector determining the orientation of the grating rules. 
+    # This vector is normal to a plane that would cause the rules by intersection 
+    # with the surface of the grating.
+    g_g_p_vector = g_g_p_vector / g_g_p_vector.Length
+
+    P = g_g_p_vector.cross(surf_norma)
+    P = P / P.Length
+    D = surf_norma.cross(P)
+    D = D / D.Length
+    mu = n1 / n2
+    d = 1000 / lpm
+    T = (order * wavelength) / (n1 * d)
+    V = (mu * (ray[0] * surf_norma[0] + ray[1] * surf_norma[1] +
+                ray[2] * surf_norma[2])) / surf_norma.dot(surf_norma)
+    W = (mu**2 - 1 + T**2 - 2 * mu * T *
+          (ray[0] * D[0] + ray[1] * D[1] + ray[2] * D[2])
+          ) / surf_norma.dot(surf_norma)
+    Q = ((-2 * V + ((2 * V)**2 - 4 * W)**0.5) / 2,
+          (-2 * V - ((2 * V)**2 - 4 * W)**0.5) / 2)
+
+    if obj.GratingType == 'Reflection':
+      S_0 = mu * ray[0] - T * D[0] + max(Q) * surf_norma[0]
+      S_1 = mu * ray[1] - T * D[1] + max(Q) * surf_norma[1]
+      S_2 = mu * ray[2] - T * D[2] + max(Q) * surf_norma[2]
+    elif obj.GratingType == 'Transmission':
+      S_0 = mu * ray[0] - T * D[0] + min(Q) * surf_norma[0]
+      S_1 = mu * ray[1] - T * D[1] + min(Q) * surf_norma[1]
+      S_2 = mu * ray[2] - T * D[2] + min(Q) * surf_norma[2]
+    else:
+      raise ValueError(f'unexpected {obj.GratingType=}')
+
+    return -Vector(S_0, S_1, S_2)

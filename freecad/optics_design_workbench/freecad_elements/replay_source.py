@@ -35,7 +35,7 @@ class ReplaySourceProxy(GenericSourceProxy):
 
   def onInitializeSimulation(self, obj, state, ident):
     # reset iterator to make all rays in stock available again
-    self._yieldOriginDirectionPower.cache_clear()
+    self._yieldOriginDirectionWavelengthPower.cache_clear()
 
     # delete temp folder used for flag files to mark datafiles as consumed
     if state == 'pre-worker-launch' and ident == 'master':
@@ -67,11 +67,11 @@ class ReplaySourceProxy(GenericSourceProxy):
 
 
   @functools.cache
-  def _yieldOriginDirectionPower(self, obj):
+  def _yieldOriginDirectionWavelengthPower(self, obj):
     '''
-    This generator yields (origin, direction, power) tuples of all rays recorded on disk in
-    randomized order. The functools.cache decorator makes sure every result is only yielded
-    once. Calling the cache_clear method resets the generator. 
+    This generator yields (origin, direction, wavelength, power) tuples of all rays recorded
+    on disk in randomized order. The functools.cache decorator makes sure every result is 
+    only yielded once. Calling the cache_clear method resets the generator. 
     '''
     if not obj.ReplayFromDir:
       raise RuntimeError(f'please set a replay directory for light source {obj.Name} '
@@ -97,7 +97,11 @@ class ReplaySourceProxy(GenericSourceProxy):
             indices = list(range(len(data['powers'])))
             random.shuffle(indices)
             for i in indices:
-              yield data['points'][i], data['directions'][i], data['powers'][i]
+              _wavelength = 1
+              if len(data.get('wavelength', [])) > i:
+                _wavelength = data['wavelength'][i]
+              yield (data['points'][i], data['directions'][i], 
+                     _wavelength, data['powers'][i])
 
     # raise if not a single good datafile was found
     if not foundHitsFile:
@@ -134,14 +138,14 @@ class ReplaySourceProxy(GenericSourceProxy):
       rayCount = 0
       gpM, gpMi = self._makeRayCache(obj)[:2]
 
-      for origin, direction, power in self._yieldOriginDirectionPower(obj):
+      for origin, direction, wavelength, power in self._yieldOriginDirectionWavelengthPower(obj):
         # apply placement of lightsource to coordinates
         p1, p2 = gpM*App.Vector(origin), gpM*App.Vector(origin+direction)
         gorigin = p1
         gdirection = p2-p1
 
         # yield created ray
-        yield ray.Ray(obj, gorigin, gdirection, initPower=power)
+        yield ray.Ray(obj, gorigin, gdirection, wavelength=wavelength, initPower=power)
 
         # make sure to exit if enough rays for this iteration were placed
         rayCount += 1
