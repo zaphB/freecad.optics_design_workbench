@@ -172,7 +172,7 @@ class MakeSimulationSettings:
               'detections) that a ray may have with optical objects.'),
         ('DistanceTolerance', '0.01', 'String', 'If a ray is closer to a surface than this tolerance, '
               'it is considered to intersect with the surface.'),
-        ('MaxRayLength', 100, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
+        ('MaxRayLength', 1000, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
               'may be up to MaxIntersections*MaxRayLength. This is not a strict '
               'limit but rather a possibility for the ray tracer to save time by ignoring '
               'objects that are farther away from a given ray origin than this limit. Longer ray '

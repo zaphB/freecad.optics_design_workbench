@@ -26,6 +26,7 @@ class OpticsDesignWorkbench(Gui.Workbench):
         # optical elements
         'Make mirror', 
         'Make lens', 
+        'Make grating', 
 
         # detectors
         'Make absorber', 

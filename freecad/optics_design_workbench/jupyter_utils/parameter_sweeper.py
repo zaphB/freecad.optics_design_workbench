@@ -328,7 +328,7 @@ class ParameterSweeper:
 
   def open(self):
     with self._freecadDocumentLock():
-      if self._freecadDocument is None:
+      if self._freecadDocument is None or not self._freecadDocument.isRunning():
         # append self to global sweeper list
         _ALL_OPEN_SWEEPERS.append(self)
 
