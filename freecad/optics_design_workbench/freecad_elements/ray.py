@@ -286,7 +286,7 @@ class Ray():
         #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
         if ( ( not isfinite(maxRayLength)
                 or any([(sbb.getPoint(i)-start).Length
-                                  < maxRayLength 
+                                  < 10*maxRayLength 
                                         for i in range(8)]) )
             and sbb.intersect(start, direction) ):
 

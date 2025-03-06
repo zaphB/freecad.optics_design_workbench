@@ -68,13 +68,13 @@ def setDefaultFreecadExecutable(path):
       raise ValueError(f'path {path} does not exist in filesystem')
 
     # check if regular file (if not on PATH)
-    if not isOnPath and not os.path.isfile(path):
+    if not os.path.isfile(path):
       raise ValueError(f'path {path} is not looking like a file, did '
                       f'you specify the full path to the FreeCAD executable '
                       f'or AppImage?')
 
     # check if path is executable (if not on PATH)
-    if isOnPath and not os.access(path, os.X_OK):
+    if not os.access(path, os.X_OK):
       raise ValueError(f'path {path} is missing executable rights, did '
                       f'you specify the full path to the FreeCAD executable '
                       f'or AppImage?')
