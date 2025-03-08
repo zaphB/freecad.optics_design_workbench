@@ -819,7 +819,7 @@ class ParameterSweeper:
       _b = self.bounds()
       _p = self.parameters()
       x0 = [(_p[k]-_b[k][0])/(_b[k][1]-_b[k][0]) if all(isfinite(_b[k])) else _p[k] for k in parameters]
-      bounds = [[0,1] if all(isfinite(_b[k])) else _b[k] for k in parameters]
+      bounds = [[-.001,1.001] if all(isfinite(_b[k])) else _b[k] for k in parameters]
       io.info(f'starting optimizer with {method=} {minimizeFunc=}, {parameters=}, {simulationMode=}, '
               f'{simulationKwargs=}, {kwargs=}, {x0=}, {bounds=}')
 
@@ -831,7 +831,7 @@ class ParameterSweeper:
           return scipy.optimize.differential_evolution(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizerKwargs) 
         if method:
           minimizerKwargs['method'] = method
-        return scipy.optimize.minimize(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizerKwargs) 
+        return scipy.optimize.minimize(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizerKwargs)
 
       # before returning, make sure parameters for global optimum are set
       finally:

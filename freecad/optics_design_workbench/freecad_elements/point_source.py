@@ -13,6 +13,7 @@ except ImportError:
   pass
 
 from numpy import *
+import scipy.optimize
 import sympy as sy
 
 from .generic_source import *
@@ -144,6 +145,80 @@ class PointSourceProxy(GenericSourceProxy):
           obj.setEditorMode('RadiusDomain', 0)
           obj.setEditorMode('ThetaResolutionNumericMode', 3)
           obj.setEditorMode('RadiusResolutionNumericMode', 0)
+
+    # update divergence if focal length, emission density expression or other 
+    # dependent property changed
+    if prop in ('FocalLength', 'PowerDensity', 'ThetaDomain', 'ThetaResolutionNumericMode'):
+      f = getattr(obj, 'FocalLength', None)
+      expr = getattr(obj, 'PowerDensity', None)
+      prevDivergence = getattr(obj, 'Divergence', None)
+      if f is not None and expr is not None:
+        f = float(f)
+        if not isfinite(f):
+          setattr(obj, 'Divergence', '0')
+        else:
+          # set divergence to read only if variables other than r exist
+          # in expression
+          if [str(s) for s in sy.sympify(expr).free_symbols] == ['r']:
+            obj.setEditorMode('Divergence', 0)
+          else:
+            obj.setEditorMode('Divergence', 1)
+
+          # create theta-only expression and find divergence angle
+          expr = sy.sympify(expr).subs('r', sy.sympify(f'(tan(theta)*{f})'))
+          syms = [str(s) for s in expr.free_symbols]
+          if syms == ['theta'] and self.parsedThetaDomain(obj)[0] == 0:
+            maxPower = sy.lambdify('theta', expr)(0)
+            try:
+              divergenceAngle = scipy.optimize.bisect(sy.lambdify('theta', expr - maxPower/e), 
+                                                      0, self.parsedThetaDomain(obj)[1])
+            except Exception:
+              io.warn(f'failed to find 1/e angle in emission power expression {expr} within theta '
+                      f'domain {self.parsedThetaDomain(obj)}, does the power emission decrease for '
+                      f'theta>0? is the theta domain large enough?')
+              setattr(obj, 'Divergence', '-')
+            else:
+              if (prevDivergence is None 
+                    or prevDivergence == '-' 
+                    or not isclose(float(eval(prevDivergence)), divergenceAngle) ):
+                setattr(obj, 'Divergence', f'{-sign(f)*divergenceAngle/pi:.6g}*pi')
+          else:
+            setattr(obj, 'Divergence', '-')
+
+    # update focal length if divergence changed (this can only be done if 
+    # power emission is parametrized by radius only)
+    if prop == 'Divergence':
+      divergence = getattr(obj, 'Divergence', None)
+      if divergence is not None and divergence != '-':
+        newDivergenceAngle = float(eval(divergence))
+
+      # try to find 1/e radius of power density
+      f = getattr(obj, 'FocalLength', None)
+      expr = getattr(obj, 'PowerDensity', None)
+      if f is not None and expr is not None:
+        f = float(f)
+        expr = sy.sympify(expr)
+        syms = [str(s) for s in expr.free_symbols]
+        if syms == ['r'] and self.parsedRadiusDomain(obj)[0] == 0:
+          maxPower = sy.lambdify('r', expr)(0)
+          try:
+            oneOverERadius = scipy.optimize.bisect(sy.lambdify('r', expr - maxPower/e), 
+                                                   0, self.parsedRadiusDomain(obj)[1])
+          except Exception:
+            io.warn(f'failed to find 1/e angle in emission power expression {expr} within theta '
+                    f'domain {self.parsedThetaDomain(obj)}, does the power emission decrease for '
+                    f'theta>0? is the theta domain large enough?')
+            setattr(obj, 'Divergence', '-')
+          else:
+            if isclose(newDivergenceAngle, 0):
+              setattr(obj, 'FocalLength', 'inf')
+            else:
+              newFocalLength = -oneOverERadius/tan(newDivergenceAngle)
+              if not isclose(newFocalLength, f, rtol=1e-5):
+                setattr(obj, 'FocalLength', f'{newFocalLength:.6g}')
+        else:
+          setattr(obj, 'FocalLength', getattr(obj, 'FocalLength'))
+
 
   def _rvArgs(self, obj, densityString, variableDomain=None):
     useTheta = isfinite(float(obj.FocalLength))
@@ -528,11 +603,12 @@ class AddPointSource(AddGenericSource):
         ('FocalLength', '0', 'String', 'Distance from the ray origin at which all rays (would) intersect. '
                   'Positive values result in converging, negative values result in a diverging '
                   'beam. For a parallel light source use "inf".'),
-        ('Divergence', '-', 'String', 'Angle at which a ray at 1/e^2 intensity diverges from optical '
-                  'axis. This option is only available if the only unknown in the Power Density '
-                  'expression is "r" (no theta, phi, x, y), if Power Density drops below 1/e^2 for a '
+        ('Divergence', '-', 'String', 'Angle at which a rays at 1/e emission power diverge from the '
+                  'optical axis. This option is writable only if the only unknown in the Power Density '
+                  'expression is "r" (no theta, phi, x, y), if Power Density drops below 1/e for a '
                   'finite r and if Focal Length is finite. Changing divergence will update Focal Length '
-                  'and vice versa.'),
+                  'and vice versa. The option is readable if "theta" exists in the Power Density '
+                  'expression.'),
         ('ThetaDomain', '0, pi/4', 'String', 'Min and max value for polar angle theta to consider.'),
         ('RadiusDomain', '0, 10', 'String', 'Min and max value for azimuthal angle phi to consider.'),
         ('PhiDomain', '0, 2*pi', 'String', 'Min and max value for radial distance r to consider.'),
