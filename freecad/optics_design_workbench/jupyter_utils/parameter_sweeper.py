@@ -66,6 +66,7 @@ class SweeperOptimizeWorker:
     self._killSignalInterval = 3
     self._tryToEndWorkersSince = None
     self._optimizeArgs = optimizeArgs
+    self._wasStarted = False
 
     # set path to dump history to
     self._historyDumpPath = os.path.abspath(f'{sweeper.resultsPath()}/tmp/optimize-hist-{int(time.time()*1e3)}-{int(random.random()*1e5)}-pid{os.getpid()}-thread{threading.get_ident()}.pkl')
@@ -83,26 +84,32 @@ class SweeperOptimizeWorker:
 
     # Make sure sweeper sweeper document is closed to avoid inheriting
     # the opened FreecadDocument attributes to the child process.
-    # Also remove the threading lock object, which cannot be passed to 
-    # the child process (lock will be recreated next time it is needed)
-    self._sweeperInstance = sweeper
-    self._sweeperInstance.close()
-    self._sweeperInstance._freecadLock = None
+    # Also remove the threading lock object (and make sure to own it 
+    # beforehand), which cannot be passed to the child process.
+    # The lock will be recreated next time it is needed.
+    with sweeper.freecadDocumentLock():
+      self._sweeperInstance = sweeper
+      self._sweeperInstance.close()
+      self._sweeperInstance._freecadLock = None
 
-    # Pickle sweeper instance and optimize args func using cloudpickle,
-    # because they are usually defined in a jupyter notebook.
-    # The multiprocessing module uses built-in pickle and will not be able
-    # to pass functions defined in the jupyter notebook to its workers. 
-    pickledSelf = cloudpickle.dumps(self)
+      # Pickle sweeper instance and optimize args func using cloudpickle,
+      # because they are usually defined in a jupyter notebook.
+      # The multiprocessing module uses built-in pickle and will not be able
+      # to pass functions defined in the jupyter notebook to its workers. 
+      pickledSelf = cloudpickle.dumps(self)
 
-    # setup and start child process
-    self._process = _mpCtx().Process(
-                        target=_unpickleAndWork, 
-                        args=(pickledSelf, 
-                              freecad_document._DEFAULT_FREECAD_EXECUTABLE), 
-                        daemon=True ) # <- kill process after parent has exited
+      # setup and start child process
+      self._process = _mpCtx().Process(
+                          target=_unpickleAndWork, 
+                          args=(pickledSelf, 
+                                freecad_document._DEFAULT_FREECAD_EXECUTABLE), 
+                          daemon=True ) # <- kill process after parent has exited
+
+  def freshClone(self):
+    return SweeperOptimizeWorker(self._sweeperInstance, self._optimizeArgs)
 
   def start(self):
+    self._wasStarted = True
     self._process.start()
 
   def work(self):
@@ -128,6 +135,9 @@ class SweeperOptimizeWorker:
               f'failed:\n\n'+traceback.format_exc())
     # return history
     return self._history
+
+  def wasStarted(self):
+    return self._wasStarted
 
   def isRunning(self):
     return self._process.is_alive()
@@ -272,7 +282,7 @@ class ParameterSweeper:
     # reset self.parameters cache to make sure meta params appear on next call
     self.parameters.cache_clear()
 
-  def _freecadDocumentLock(self):
+  def freecadDocumentLock(self):
     if self._freecadLock is None:
       self._freecadLock = threading.RLock()
     return self._freecadLock
@@ -286,7 +296,7 @@ class ParameterSweeper:
       time.sleep(1/3)
 
   def save(self):
-    with self._freecadDocumentLock():
+    with self.freecadDocumentLock():
       if self._freecadDocument:
         self._freecadDocument.save()
 
@@ -294,7 +304,7 @@ class ParameterSweeper:
     self.close()
 
   def close(self):
-    with self._freecadDocumentLock():
+    with self.freecadDocumentLock():
       try:
         if self._freecadDocument:
           self._freecadDocument.close()
@@ -327,7 +337,7 @@ class ParameterSweeper:
     return self._freecadDocumentKwargs.get('openFreshCopy', None)
 
   def open(self):
-    with self._freecadDocumentLock():
+    with self.freecadDocumentLock():
       if self._freecadDocument is None or not self._freecadDocument.isRunning():
         # append self to global sweeper list
         _ALL_OPEN_SWEEPERS.append(self)
@@ -347,7 +357,7 @@ class ParameterSweeper:
         self._closeDocumentAfterInactivityThread.start()
 
   def freecadDocument(self):
-    with self._freecadDocumentLock():
+    with self.freecadDocumentLock():
       self.open()
       return self._freecadDocument
 
@@ -356,9 +366,8 @@ class ParameterSweeper:
     return self.freecadDocument().resultsPath()
 
   def _parameterNodeDict(self):
-    with self._freecadDocumentLock():
-      self.open()
-      res = self._getParametersFunc(self._freecadDocument)
+    with self.freecadDocumentLock():
+      res = self._getParametersFunc(self.freecadDocument())
       res.update(self._metaParameterDict)
       if not len(res):
         raise ValueError(f'getParametersFunc return empty dict, a ParameterSweeper '
@@ -367,11 +376,11 @@ class ParameterSweeper:
 
   @functools.cache
   def parameters(self):
-    with self._freecadDocumentLock():
+    with self.freecadDocumentLock():
       return {k: v.get() for k,v in self._parameterNodeDict().items()}
 
   def set(self, **kwargs):
-    with self._freecadDocumentLock():
+    with self.freecadDocumentLock():
       boundsDict = self.bounds()
       paramDict = self._parameterNodeDict()
 
@@ -442,16 +451,18 @@ class ParameterSweeper:
   def bounds(self):
     return {k: self._bounds.get(k, (-inf, inf)) for k in self.parameters().keys()}
 
-  def optimizeStrategyBegin(self):
+  def optimizeStrategyBegin(self, **kwargs):
     self._optimizeStepsArgCache = {}
-    self._optimizeStepsPosArgCache = {}
+    self._optimizeStepsPosArgCache = kwargs
 
   def optimizeStrategyStep(self, *args, 
                            progressCallback=None, 
                            relWaitForParallel=None, 
                            absWaitForParallel=None, 
                            progressPlotInterval=None,
-                           saveInterval=None):
+                           saveInterval=None,
+                           maxWorkerReviveCount=None,
+                           workerReviveDelay=None,):
     '''
     Pass one or more dictionaries with optimize args to run
     optimization steps with varied free parameters, methods, etc. in parallel
@@ -493,6 +504,8 @@ class ParameterSweeper:
     absWaitForParallel = self._optimizeStepsPosArgCache.get('absWaitForParallel', 300)
     progressPlotInterval = self._optimizeStepsPosArgCache.get('progressPlotInterval', 60)
     saveInterval = self._optimizeStepsPosArgCache.get('saveInterval', 5*60)
+    maxWorkerReviveCount = self._optimizeStepsPosArgCache.get('maxWorkerReviveCount', 30)
+    workerReviveDelay = self._optimizeStepsPosArgCache.get('workerReviveDelay', 300)
 
     # add cache contents to all arg dicts
     for kwargs in args:
@@ -524,6 +537,8 @@ class ParameterSweeper:
       io.verb(f'setting up worker processes...')
       for kwargs in args:
         workers.append(SweeperOptimizeWorker(self, kwargs))
+        workers[-1].restartCount = 0
+      jobCount = len(workers)
       
       # start worker processes (do creation of workers and starting in separate loops to avoid
       # stretching the period of worker launch induced window flickering for too long)
@@ -538,7 +553,7 @@ class ParameterSweeper:
       try:
         # monitor workers until happy
         lastWorkerFinished = inf
-        runningWorkers = list(workers)
+        activeWorkers = list(workers)
         bestPenalty = inf
         lastPenaltyImprovement = 0
         tryToEndWorkersSince = inf
@@ -570,11 +585,15 @@ class ParameterSweeper:
 
           # update non-temp document every now and then with best params so far and 
           # save to disk to avoid losing all on a crash
-          if time.time()-lastDocumentSave > saveInterval:
+          if time.time()-lastDocumentSave > saveInterval and bestParamsDict is not None:
             lastDocumentSave = time.time()
             io.verb('autosaving current best result')
-            self.set(**bestParamsDict)
-            self.save()
+            try:
+              self.set(**bestParamsDict)
+              self.save()
+            except Exception:
+              io.warn(f'trying to save best params so far to document raised exception:\n\n'+traceback.format_exc())
+              self.close()
 
           # plot history of optimization and hits of best result so far
           if len(allParamsHist) > 15 and time.time()-lastProgressPlot > progressPlotInterval:
@@ -596,7 +615,7 @@ class ParameterSweeper:
                 ax1.set_ylim([l-.05*(u-l), u+0.5*(u-l)])
             ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
-            ax1.set_title(f'penalty history ({len(runningWorkers)}/{len(workers)} workers busy)', fontsize=10)
+            ax1.set_title(f'penalty history ({len(activeWorkers)}/{jobCount} workers busy)', fontsize=10)
 
             # save plot to disk
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
@@ -608,22 +627,58 @@ class ParameterSweeper:
             close()
 
             # print status
-            io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}, {len(runningWorkers)}/{len(workers)} workers busy')
+            io.info(f'optimize strategy step running since {io.secondsToStr(time.time()-t0)}, {len(activeWorkers)}/{len(workers)} workers busy')
 
             # run custom progress callback if given
-            if progressCallback:
-              progressCallback(bestParams=bestParamsDict, history=allParamsHist)
+            if progressCallback and bestParamsDict is not None:
+              try:
+                progressCallback(bestParams=bestParamsDict, history=allParamsHist)
+              except Exception:
+                io.warn(f'progressCallback raised exception:\n\n'+traceback.format_exc())
             lastProgressPlot = time.time()
 
           # update running workers list
-          for w in runningWorkers:
-            if not w.isRunning():
-              io.verb(f'worker {w} finished')
+          for i, w in enumerate(activeWorkers):
+            if not w.isRunning() and w.wasStarted():
+              io.verb(f'worker {w} finished (was restarted {w.restartCount} times so far)')
               lastWorkerFinished = time.time()
-          runningWorkers = [w for w in runningWorkers if w.isRunning()]
+
+              # create fresh clone of finished worker if more than one other worker is still running
+              # and if best penalty improved recently
+              if (not getattr(w, 'wasCloned', False)
+                  and w.restartCount < maxWorkerReviveCount
+                  and len([w for w in activeWorkers if w.isRunning()]) > 1):
+
+                # mark old worker as cloned
+                w.wasCloned = True
+                
+                # create new worker object from finished one and append to lists
+                newWorker = w.freshClone()
+                newWorker.startAt = time.time()+workerReviveDelay
+                newWorker.restartCount = w.restartCount + 1
+                activeWorkers.append(newWorker)
+                workers.append(newWorker)
+
+          # start workers that have 'startAt' attribute set if their time has come
+          for w in activeWorkers:
+            if not w.wasStarted() and getattr(w, 'startAt', inf) > time.time():
+              # try to save current best params to file, such that new worker will use latest params
+              if bestParamsDict is not None:
+                try:
+                  self.set(**bestParamsDict)
+                  self.save()
+                except Exception:
+                  io.warn(f'trying to save best params so far to document raised exception:\n\n'+traceback.format_exc())
+                  self.close()
+              # starting worker
+              io.info(f'worker {w} was started (this is restart #{w.restartCount} of this job)')
+              w.start()
+          
+          # keep only workers that are either running or are still waiting to be started
+          activeWorkers = [w for w in activeWorkers if w.isRunning() or not w.wasStarted()]
 
           # end loop if all workers finished
-          if not len(runningWorkers):
+          if not len(activeWorkers):
             io.verb(f'all workers finished, exiting...')
             break
 
@@ -645,7 +700,11 @@ class ParameterSweeper:
           
           # send kill/terminate signals depending on wait time
           if time.time()-tryToEndWorkersSince > 0:
-            for w in runningWorkers:
+            # remove workers that have not been started yet
+            activeWorkers = [w for w in activeWorkers if w.isRunning() and w.wasStarted()]
+
+            # send escalating quit commands to remaining workers
+            for w in activeWorkers:
               w.escalatingQuit()
 
           # limit loop speed
@@ -655,21 +714,25 @@ class ParameterSweeper:
       finally:
         io.info(f'optimize strategy step ended, {bestParamsDict=}')
         if bestParamsDict:
-          self.set(**bestParamsDict)
-          self.save()
+          try:
+            self.set(**bestParamsDict)
+            self.save()
+          except Exception:
+            io.warn(f'trying to save best params so far to document raised exception:\n\n'+traceback.format_exc())
+            self.close()
 
         # wait for all workers to finish
         lastPrint = time.time()
         while True:
-          runningWorkers = [w for w in workers if w.isRunning()]
-          if not len(runningWorkers):
+          activeWorkers = [w for w in workers if w.isRunning()]
+          if not len(activeWorkers):
             break
           if time.time()-lastPrint > 10:
             lastPrint = time.time()
-            io.warn(f'optimize strategy step ended, but still waiting for {len(runningWorkers)} workers to exit...')
+            io.warn(f'optimize strategy step ended, but still waiting for {len(activeWorkers)} workers to exit...')
 
           # send kill/terminate signals depending on wait time
-          for w in runningWorkers:
+          for w in activeWorkers:
             w.escalatingQuit()
 
           # limit loop speed
@@ -695,26 +758,28 @@ class ParameterSweeper:
                prepareSimulation=None, simulationKwargs={},
                minimizerKwargs={}, progressPlotInterval=30, 
                method=None, historyDumpPath=None, 
-               historyDumpInterval=inf, **kwargs):
+               historyDumpInterval=inf, 
+               freecadRestartInterval=3*60*60, **kwargs):
     # save optimize params to variable
     optimizeParams = {k:v for k,v in locals().items() if k not in ('self',)}
 
     # setup progress and timing vars
     t0 = time.time()
     lastProgressPlot = 0
+    lastFreecadRestart = time.time()
     lastHistoryDump = time.time()
     minimizeFuncHist = []
     allParamsHist = []
     bestPenaltySoFar, bestParametersSoFar, bestResultSoFar = inf, None, None
 
     parameters = list(parameters)
-    with self._freecadDocumentLock():
-      self.open()
+    with self.freecadDocumentLock():
 
       # wrap minimize func, run simulation before and pass additional args
       def _simulateAndCalcMinimizeFunc(args):
         nonlocal lastProgressPlot, lastHistoryDump
         nonlocal bestPenaltySoFar, bestParametersSoFar, bestResultSoFar
+        nonlocal lastFreecadRestart
 
         # to enhance stability: if something raises an error during the function
         # evaluation, return a very large number
@@ -723,7 +788,8 @@ class ParameterSweeper:
           @retries.retryOnError(subject='preparing simulation')
           def _prepareSimulation():
             if prepareSimulation:
-              prepareSimulation(self._freecadDocument, **kwargs)
+              with self.freecadDocumentLock():
+                prepareSimulation(self.freecadDocument(), **kwargs)
           _prepareSimulation()
 
           # extract param dict from args, un-normalize parameters that have both bounds set
@@ -736,7 +802,8 @@ class ParameterSweeper:
                                 maxRetries=4, callbackAfterRetries=2, callback=self.close)
           def _runSimulation():
             self.set(**paramDict)
-            return self._freecadDocument.runSimulation(simulationMode, **simulationKwargs)
+            with self.freecadDocumentLock():
+              return self.freecadDocument().runSimulation(simulationMode, **simulationKwargs)
           resultFolder = _runSimulation()
 
           # plot progress if it is time (do this before the call to minimize func to make sure 
@@ -807,19 +874,30 @@ class ParameterSweeper:
               except Exception:
                 io.warn(f'dumping progress failed:\n\n'+traceback.format_exc())
 
+          # close document (will be reopened next time it is needed), 
+          # i.e. restart background freecad if it is time
+          if time.time()-lastFreecadRestart > freecadRestartInterval:
+            lastFreecadRestart = time.time()
+            self.close()
+
           # return the penalty value
           return penalty
 
         # capture any exception, log the stack trace and return ridiculously large number
         except Exception:
           io.warn(f'exception was raised in optimizer iteration:\n\n'+traceback.format_exc())
+          
+          # make sure freecad background process is restarted after exception
+          self.close()
+
+          # return extremely large number
           return 1e99
 
       # prepare arguments for minimizer: if params have both limits set, renormalize to (0,1) interval
       _b = self.bounds()
       _p = self.parameters()
       x0 = [(_p[k]-_b[k][0])/(_b[k][1]-_b[k][0]) if all(isfinite(_b[k])) else _p[k] for k in parameters]
-      bounds = [[-.001,1.001] if all(isfinite(_b[k])) else _b[k] for k in parameters]
+      bounds = [[-1e-8,1+1e-8] if all(isfinite(_b[k])) else _b[k] for k in parameters]
       io.info(f'starting optimizer with {method=} {minimizeFunc=}, {parameters=}, {simulationMode=}, '
               f'{simulationKwargs=}, {kwargs=}, {x0=}, {bounds=}')
 

@@ -167,7 +167,7 @@ class PointSourceProxy(GenericSourceProxy):
           # create theta-only expression and find divergence angle
           expr = sy.sympify(expr).subs('r', sy.sympify(f'(tan(theta)*{f})'))
           syms = [str(s) for s in expr.free_symbols]
-          if syms == ['theta'] and self.parsedThetaDomain(obj)[0] == 0:
+          if not isclose(f, 0) and syms == ['theta'] and self.parsedThetaDomain(obj)[0] == 0:
             maxPower = sy.lambdify('theta', expr)(0)
             try:
               divergenceAngle = scipy.optimize.bisect(sy.lambdify('theta', expr - maxPower/e), 
