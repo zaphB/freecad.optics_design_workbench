@@ -18,6 +18,7 @@ import threading
 import uuid
 import shutil
 from atomicwrites import atomic_write
+import glob
 
 from .. import freecad_elements
 from .. import io
@@ -68,6 +69,101 @@ def getLatestRunFolderPath():
   if index < 0:
     return None
   return f'{getResultsFolderPath()}/{generateSimulationFolderName(index)}'
+
+def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
+                         updateGuiCallback=lambda: None):
+  '''
+  Find all simulation result files of kind "kind" in path "basePath". Search
+  is recursive in "basePath" and all results with relative paths matching 
+  "pattern" are returned. Pattern can contain glob patterns such as * and **.
+  
+  As as side effect of the search, pkl files found in the same folders are
+  chunked up to a filesize of "optimalFilesize" to speed up loading them.
+  Since this chunking may take some time, do not expect this function to
+  finish instantaneously. To use this from GUI contexts, pass the GUI update
+  function as updateGuiCallback. updateGuiCallback will be called as often as
+  possible.
+  '''
+  if pattern == '*':
+    pattern = '**'
+  def _makeGlob():
+    return glob.iglob(f'{basePath}/{pattern}/*-{kind}.pkl', recursive=True)
+
+  # group all files to consider by folder
+  byFolder = {}
+  for path in _makeGlob():
+    updateGuiCallback()
+    base, name = os.path.split(path)
+    if base not in byFolder.keys():
+      byFolder[base] = []
+    try:
+      _stat = os.stat(path)
+      mtime = _stat.st_mtime
+      size = _stat.st_size
+    except Exception:
+      mtime = time.time()
+      size = 1
+    byFolder[base].append([name, mtime, size])
+
+  # find files that look well suited for merging
+  for base, namesTimesSizes in byFolder.items():
+    updateGuiCallback()
+    mergeList = []
+    sizeInList = 0
+    def mergeAllInList():
+      # only do something if more than one file in list
+      if len(mergeList) > 1:
+        # load and merge all files in list
+        merged = {}
+        for name in mergeList:
+          updateGuiCallback()
+          try:
+            with open(f'{base}/{name}', 'rb') as _f:
+              data = pickle.load(_f)
+          except Exception as e:
+            io.warn(f'failed to read {kind} file {base}/{name}: {e.__class__.__name__} "{e}"')
+          else:
+            # merge file content with merged dict
+            for k, v in data.items():
+              _updateResultEntry(merged, k, v)
+        
+        # overwrite first file in list with total results
+        with atomic_write(f'{base}/{mergeList[0]}',
+                          mode='wb', overwrite=True) as f:
+          pickle.dump(merged, f)
+
+        # delete all remaining files in list
+        for name in mergeList[1:]:
+          updateGuiCallback()
+          os.remove(f'{base}/{name}')
+
+      # reset list
+      updateGuiCallback()
+      mergeList.clear()
+
+    # only consider files that did not change in the last hour
+    for name, size in sorted([(n, s) for n, t, s in namesTimesSizes if time.time()-t > 60*60],
+                              key=lambda e: e[0]):
+      updateGuiCallback()
+      # if this file would make the current merge collection much larger than optimal
+      # size -> merge without current file
+      if sizeInList+size > 1.5*optimalFilesize:
+        mergeAllInList()
+
+      # add current file to list and merge if collection is larger than optimal size
+      mergeList.append(name)
+      sizeInList += size
+      if sizeInList > optimalFilesize:
+        mergeAllInList()
+
+    # merge leftover files no matter the total size
+    updateGuiCallback()
+    mergeAllInList()
+
+  # return all cleaned up paths
+  updateGuiCallback()
+  return _makeGlob()  
+
 
 def _getFolderBase():
   # check whether current file is saved
@@ -502,3 +598,9 @@ class SimulationResults:
 
     # mark as done
     self._cleanedUp = True
+
+  def chunkFiles(self, **kwargs):
+    kwargs['basePath'] = f'{self.basePath}/{self.simulationRunFolder}'
+    kwargs['pattern'] = '**'
+    kwargs['kind'] = '*'
+    findPathsAndSanitize(**kwargs)

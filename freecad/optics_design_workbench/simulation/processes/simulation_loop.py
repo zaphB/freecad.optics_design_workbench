@@ -388,6 +388,8 @@ def runSimulation(action, slaveInfo={}):
         tracemalloc.start()
         lastTracemallocReport = time.time()
 
+      lastResultChunking = time.time()
+
       while True:
         # do ray-tracing for all light sources
         lightSourceExists = False
@@ -416,7 +418,7 @@ def runSimulation(action, slaveInfo={}):
             for _stat in _top_stats[:10]:
               io.verb(f'  > {_stat}')
         
-        # make sure simulation is canceled if not light source exists
+        # make sure simulation is canceled if no light source exists
         if not lightSourceExists:
           io.err(f'no light source exists in current project, cannot trace any rays.')
           raise freecad_elements.SimulationEnded()
@@ -430,9 +432,14 @@ def runSimulation(action, slaveInfo={}):
           store.writeDiskIfNeeded()
 
           if isMasterProcess():
-            # make sure progress is updated in master process (this will also trigger 
-            # place finished file if one of the specified end criteria is reached)
+            # make sure progress is updated in master process (this will also place the finished 
+            # file if one of the specified end criteria is reached)
             store.getProgress()
+        
+            # chunk result files every five hours to make loading faster
+            if time.time()-lastResultChunking > 5*60*60:
+              lastResultChunking = time.time()
+              store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
 
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
         if not continuous:
@@ -466,8 +473,8 @@ def runSimulation(action, slaveInfo={}):
     timer.timeout.connect(updateProgress)
     timer.start(300)
 
-    # this busy-loop makes the timer useless, but it is needed because cleanup is done
-    # in the finally block. Maybe restructure this in the future to improve performance
+    # this busy-loop makes the timer useless, but it is needed because cleanup is done in
+    # the finally block. Maybe restructure this in the future to improve GUI responsiveness
     while isWorkerRunning():
       time.sleep(1e-2)
       freecad_elements.keepGuiResponsive()

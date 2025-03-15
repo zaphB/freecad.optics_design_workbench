@@ -375,9 +375,10 @@ class Hits:
     
     # construct per fan estimated power density
     fanDensities = {}
-    causticIntensity = 0
+    causticIntensities = {}
     for fanI in sorted(list(set(nfI))):
       fanDensities[fanI] = []
+      causticIntensities[fanI] = []
       for interRayI in sorted(nrI[fanI==nfI]):
         # find two center dists of rays around interRayI (.6 to ensure that neighbors for 
         # interRayI==0 are correctly found as +1 and -1, not 0 and 0 )
@@ -391,7 +392,7 @@ class Hits:
         # if cdist is not monotonically increasing with index -> increment 
         # caustic intensity counter:
         if cdist2 < cdist1:
-          causticIntensity += abs(cdist1-cdist2)
+          causticIntensities[fanI].append([cdist2, cdist1, estimatedPower])
 
         # if rays have the expected order, add estimated power and its position to result list:
         else:
@@ -399,17 +400,26 @@ class Hits:
 
     # construct lambdas to interpolate found densities as a function of 
     # distance from center
-    fanDensityFuncs = [(i, lambda pos, _d=array(d).T: interp(pos, *_d, left=0, right=0)) for i, d in fanDensities.items()]
+    fanDensityFuncs = { i: lambda pos, _d=array(d).T: interp(pos, *_d, left=0, right=0) for i, d in fanDensities.items() }
+
+    # construct lambdas to interpolate found caustic densities in a range p1 and p2 of distance from center
+    causticIntensityFuncs = { i: lambda p1, p2, _d=array(d): sum([p for r1,r2,p in _d 
+                                                                        if r1<=max([p1,p2]) and min([p1,p2])<=r2 ])
+                                                                                       for i, d in causticIntensities.items() }
 
     # return all results as dictionary
     return dict(fanDensities=fanDensities, fanDensityFuncs=fanDensityFuncs,
-                causticIntensity=causticIntensity, pCenter=pCenter)
+                causticIntensities=causticIntensities, causticIntensityFuncs=causticIntensityFuncs,
+                pCenter=pCenter)
     
   def fanEstimatedPowerDensities(self, pCenter=None):
-    return [(i, array(d).T) for i, d in self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['fanDensities'].items()]
+    return {i: array(d).T for i, d in self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['fanDensities'].items() }
   
   def fanEstimatedPowerDensityFuncs(self, pCenter=None):
     return self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['fanDensityFuncs']
 
-  def fanEstimatedCausticIntensity(self, pCenter=None):
-    return self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['causticIntensity']
+  def fanEstimatedCausticIntensities(self, pCenter=None):
+    return {i: array(d).T for i, d in self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['causticIntensities'].items() }
+
+  def fanEstimatedCausticIntensityFuncs(self, pCenter=None):
+    return self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['causticIntensityFuncs']
