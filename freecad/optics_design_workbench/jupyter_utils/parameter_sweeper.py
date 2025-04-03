@@ -504,8 +504,8 @@ class ParameterSweeper:
     absWaitForParallel = self._optimizeStepsPosArgCache.get('absWaitForParallel', 300)
     progressPlotInterval = self._optimizeStepsPosArgCache.get('progressPlotInterval', 60)
     saveInterval = self._optimizeStepsPosArgCache.get('saveInterval', 5*60)
-    maxWorkerReviveCount = self._optimizeStepsPosArgCache.get('maxWorkerReviveCount', 30)
-    workerReviveDelay = self._optimizeStepsPosArgCache.get('workerReviveDelay', 300)
+    maxWorkerReviveCount = self._optimizeStepsPosArgCache.get('maxWorkerReviveCount', 3)
+    workerReviveDelay = self._optimizeStepsPosArgCache.get('workerReviveDelay', 1800)
 
     # add cache contents to all arg dicts
     for kwargs in args:
