@@ -125,7 +125,7 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
           else:
             # merge file content with merged dict
             for k, v in data.items():
-              _updateResultEntry(merged, k, v)
+              updateResultEntry(merged, k, v)
         
         # overwrite first file in list with total results
         with atomic_write(f'{base}/{mergeList[0]}',
@@ -177,6 +177,35 @@ def _getFolderBase():
     fname = fname[:-6]
   folderName = f'{fname}.OpticsDesign'
   return base, fname, folderName
+
+
+def updateResultEntry(result, key, value):
+  v = value
+  k = key
+
+  # key not yet existing: just save
+  if k not in result.keys():
+    result[k] = v
+
+  # string + string = string if identical, else list of two strings
+  elif type(v) in (str, str_) and type(result) in (str, str_):
+    if v == result[k]:
+      pass
+    else:
+      result[k] = [result[k], v]
+
+  # string + list = add string to list if not existing yet
+  elif type(v) in (str, str_) and type(result) not in (str, str_) and hasattr(result[k], '__iter__'):
+    if v not in result[k]:
+      result[k] = list(result[k]) + [v]
+
+  # list/array + list/array = concatenate
+  elif len(result[k]) == 0:
+    result[k] = v
+  elif len(v) == 0:
+    pass
+  else:
+    result[k] = concatenate([result[k], v], axis=0)
 
 
 class SimulationResultsSingleRay:

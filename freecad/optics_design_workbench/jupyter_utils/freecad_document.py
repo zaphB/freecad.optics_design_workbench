@@ -1174,34 +1174,6 @@ def rawFolderByIndex(index=-1, basePath='.'):
 def latestRawFolder(**kwargs):
   return rawFolderByIndex(index=-1, **kwargs)
 
-def _updateResultEntry(result, key, value):
-  v = value
-  k = key
-
-  # key not yet existing: just save
-  if k not in result.keys():
-    result[k] = v
-
-  # string + string = string if identical, else list of two strings
-  elif type(v) in (str, str_) and type(result) in (str, str_):
-    if v == result[k]:
-      pass
-    else:
-      result[k] = [result[k], v]
-
-  # string + list = add string to list if not existing yet
-  elif type(v) in (str, str_) and type(result) not in (str, str_) and hasattr(result[k], '__iter__'):
-    if v not in result[k]:
-      result[k] = list(result[k]) + [v]
-
-  # list/array + list/array = concatenate
-  elif len(result[k]) == 0:
-    result[k] = v
-  elif len(v) == 0:
-    pass
-  else:
-    result[k] = concatenate([result[k], v], axis=0)
-
 
 class RawFolder:
   '''
@@ -1308,7 +1280,7 @@ class RawFolder:
       else:
         # merge hitData content with result dict
         for k, v in data.items():
-          _updateResultEntry(result, k, v)
+          simulation.updateResultEntry(result, k, v)
 
     return result
 
@@ -1336,7 +1308,7 @@ class RawFolderRange:
     result = {}
     for res in [r.loadHits(*args, **kwargs) for r in self]:
       for k, v in res.items():
-        _updateResultEntry(result, k, v)
+        simulation.updateResultEntry(result, k, v)
     return hits.Hits(result)
 
   @functools.wraps(RawFolder.loadRays)
@@ -1344,5 +1316,5 @@ class RawFolderRange:
     result = {}
     for res in [r.loadRays(*args, **kwargs) for r in self]:
       for k, v in res.items():
-        _updateResultEntry(result, k, v)
+        simulation.updateResultEntry(result, k, v)
     return result
