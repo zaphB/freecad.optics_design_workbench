@@ -13,6 +13,8 @@ import subprocess
 import os
 import sys
 import signal
+import time
+import random
 
 from ... import io
 from .. import results_store
@@ -26,7 +28,6 @@ class WorkerProcess:
   simulation type is going on and which result folder to use and will run the 
   simulation_loop on its own.
   '''
-
   def __init__(self, simulationType, simulationRunFolder):
     # set index for worker process for easy identification in cli logs
     global _WORKER_INDEX
@@ -38,6 +39,10 @@ class WorkerProcess:
     self.simulationFilePath = os.path.realpath(processes.simulatingDocument().getFileName())
     self.simulationRunFolder = simulationRunFolder
     self._isRunning = True
+
+    # schedule end of life to circumvent FreeCAD memory leaks, schedule random
+    # random lifetime to avoid synchronously killing and restarting all workers
+    self.endOfLife = time.time() + (10+2*random.random())*60*60
 
     # try to extract freecad executable path: first check APPIMAGE environment variable,
     # to find out if running appimage, then try executable found in sys.executable,

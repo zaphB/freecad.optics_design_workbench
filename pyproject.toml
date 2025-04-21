@@ -33,7 +33,7 @@ dependencies = [
   "jupyterlab", # <- jupyter lab ist just here because we usually want to work with jupyter, not because it is strictly necessary to use the package
 ]
 
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
   {name = "Philipp Bredol", email = "philipp.bredol@rwth-aachen.de"}
 ]
