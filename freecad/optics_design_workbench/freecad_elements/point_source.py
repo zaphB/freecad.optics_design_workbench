@@ -390,7 +390,7 @@ class PointSourceProxy(GenericSourceProxy):
     return parsed
 
 
-  def makeRay(self, obj, theta, phi, power=1, metadata={}):
+  def _makeRay(self, obj, theta, phi, power=1, metadata={}):
     '''
     Create new ray object with origin and direction given in global coordinates
     '''
@@ -436,16 +436,8 @@ class PointSourceProxy(GenericSourceProxy):
     '''
     This generator yields each ray to be traced for one simulation iteration.
     '''
-    rays = []
-
     # make sure GUI does not freeze
     keepGuiResponsiveAndRaiseIfSimulationDone()
-
-    # determine number of rays to place
-    raysPerIteration = 100
-    if settings := find.activeSimulationSettings():
-      raysPerIteration = settings.RaysPerIteration
-    raysPerIteration *= obj.RaysPerIterationScale
 
     # fan-mode: generate fans of rays in spherical coordinates
     if mode == 'fans':
@@ -548,14 +540,20 @@ class PointSourceProxy(GenericSourceProxy):
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # add lines corresponding to this ray to total ray list
-            yield self.makeRay(obj=obj, theta=theta, phi=phi, 
-                               metadata=dict(fanIndex=fanIndex, 
-                                             rayIndex=rayIndex*rayIndexSign,
-                                             totalFanCount=totalFanCount,
-                                             totalRaysInFan=totalRaysInFan))
+            yield self._makeRay(obj=obj, theta=theta, phi=phi, 
+                                metadata=dict(fanIndex=fanIndex, 
+                                              rayIndex=rayIndex*rayIndexSign,
+                                              totalFanCount=totalFanCount,
+                                              totalRaysInFan=totalRaysInFan))
 
     # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
     elif mode == 'true' or mode == 'pseudo':
+
+      # determine number of rays to place
+      raysPerIteration = 100
+      if settings := find.activeSimulationSettings():
+        raysPerIteration = settings.RaysPerIteration
+      raysPerIteration *= obj.RaysPerIterationScale
 
       # create/get random variable for theta and phi and draw samples 
       if mode == 'true':
@@ -569,7 +567,7 @@ class PointSourceProxy(GenericSourceProxy):
         keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # create and trace ray
-        yield self.makeRay(obj=obj, theta=theta, phi=phi)
+        yield self._makeRay(obj=obj, theta=theta, phi=phi)
 
     else:
       raise ValueError(f'unexpected ray placement mode {mode}')

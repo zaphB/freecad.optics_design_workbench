@@ -32,11 +32,198 @@ class SurfaceSourceProxy(GenericSourceProxy):
     pass
 
 
+  def _makeRay(self, obj, origin, faceTangent, faceNormal, 
+               theta, phi, power=1, metadata={}):
+    '''
+    Create new ray object with origin and direction given in global coordinates
+    '''
+    # apply azimuth and polar rotation to faceNormal vector
+    direction = (Rotation(faceNormal,phi/pi*180) 
+                  * Rotation(faceTangent,theta/pi*180) 
+                  * faceNormal)
+
+    # build metadata dict
+    rayMetadata = dict(initPhi=phi, initTheta=theta)
+    rayMetadata.update(metadata)
+
+    # return actual ray object
+    return ray.Ray(obj, origin, direction, wavelength=obj.Wavelength, 
+                   initPower=power, metadata=rayMetadata)
+
+
+  def _getDistTol(self, distTol=None):
+    if distTol is None:
+      distTol = 1e-2
+      if settings := find.activeSimulationSettings():
+        distTol = float(settings.DistanceTolerance)
+    return max([distTol, 1e-6])
+
+
+  def _makeSurfaceGrid(self, obj, face, totalGridPoints,
+                       uniformParam=None, fillFactor=1, 
+                       effectiveSizes=None, recursionDepth=0):
+    '''
+    Prepare a list of (u,v) points that have approximately equal distance on a given
+    face, most parameters will be found out and refined in a number of recursive calls
+    '''
+    # calculate distance tolerance
+    distTolerance = self._getDistTol()
+
+    # setup limits and sizes dicts (if not given)
+    _r = face.ParameterRange
+    limits = dict(u=(_r[0], _r[1]), v=(_r[2], _r[3]))
+    paramSizes = dict(u=_r[1]-_r[0], v=_r[3]-_r[2])
+    if effectiveSizes is None:
+      effectiveSizes = paramSizes
+
+    # decide which param to put first, param with longer span in front by default, 
+    # but if uniform param is known put uniform param first
+    paramOrder = 'uv' if effectiveSizes['u']>=effectiveSizes['v'] else 'vu'
+    if uniformParam is not None:
+      paramOrder = uniformParam+{'u':'v', 'v':'u'}[uniformParam]
+
+    # generate very simple rectilinear grid with minimum 5x5 points, p1 and p2 correspond to u and v as given by
+    # value of paramOrder
+    P1, P2 = [ linspace(limits[p][0], limits[p][1], 
+                        max([5, int(round(sqrt(effectiveSizes[p]/effectiveSizes[_p] * totalGridPoints/fillFactor))) ])) 
+                                                                  for p, _p in zip(paramOrder, reversed(paramOrder)) ]
+    p1Step = P1[1]-P1[0]
+    p2Step = P2[1]-P2[0]
+
+    # convenience functions to map p1 and p2 to u and v
+    uv = lambda p1, p2: (p1,p2) if paramOrder=='uv' else (p2,p1)
+    p1p2 = lambda u, v: (u,v) if paramOrder=='uv' else (v,u)
+
+    # calculate locations of all mesh points and find out whether they are actually part of the mesh
+    points = [[ face.valueAt(*uv(p1,p2)) for p2 in P2 ] for p1 in P1 ]
+    isValid = [[ Part.Vertex(p).distToShape(face)[0] < distTolerance for p in row] for row in points ]
+
+    # calculate updated value for fillfactor
+    validCount = sum([sum([1 if v else 0 for v in row]) for row in isValid ])
+    fillFactor = validCount / (len(P1)*len(P2))
+    print(f'{len(P1)=} {len(P2)=} {fillFactor=} {validCount=}')
+
+    # calculate derivatives at all valid locations, place (None,None) placeholders outside of face
+    derivatives = [[ p1p2(*face.derivative1At(*uv(p1,p2))) if isValid[i][j] else (None,None) 
+                                                                    for j,p2 in enumerate(P2) ]
+                                                                          for i,p1 in enumerate(P1) ]
+    derivP1 = [[ d[0].Length if d[0] is not None else None for d in row ] for row in derivatives ]
+    derivP2 = [[ d[1].Length if d[1] is not None else None for d in row ] for row in derivatives ]
+
+    # check whether p1 is uniform, if yes -> update value of uniformParam
+    _dAvg = mean([ mean([ d for d in row if d is not None ]) for row in derivP1 ])
+    isUniformP1 = [[ abs(d-_dAvg)*p1Step < distTolerance for d in row ] for row in derivP1 ]
+    if isUniformP1:
+      uniformParam = paramOrder[0]
+    else:
+      _dAvg = mean([ mean([ d for d in row if d is not None ]) for row in derivP2 ])
+      isUniformP2 = [[ abs(d-_dAvg)*p2Step < distTolerance for d in row ] for row in derivP2 ]
+      if isUniformP2:
+        uniformParam = paramOrder[1]
+      # neither of the two looks uniform? reset uniform paramValue to None
+      else:
+        uniformParam = None
+
+    # recalculate effective sizes of p1 and p2 axes using averaged derivatives
+    effTotalLengthP1 = sum([ mean([ d for d in row if d is not None ]) for row in derivP1 ])*p1Step
+    effTotalLengthP2 = sum([ mean([ d for d in row if d is not None ]) for row in zip(*derivP2) ])*p2Step
+    effectiveSizes = {paramOrder[0]: effTotalLengthP1, paramOrder[1]: effTotalLengthP2}
+
+    # recurse three times to refine fillFactor, effectiveSizes and uniformParam values 
+    if recursionDepth < 3:
+      return self._makeSurfaceGrid(obj, face, totalGridPoints, 
+                                   uniformParam=uniformParam,
+                                   fillFactor=fillFactor,
+                                   effectiveSizes=effectiveSizes,
+                                   recursionDepth=recursionDepth+1)
+
+    return [(uv(p1,p2), points[i][j], uv(*derivatives[i][j]))
+                            for i,p1 in enumerate(P1) 
+                                  for j,p2 in enumerate(P2) if isValid[i][j]]
+
+
   def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
     '''
     This generator yields each ray to be traced for one simulation iteration.
     '''
-    pass
+    # calculate distance tolerance
+    distTolerance = self._getDistTol()
+
+    # make sure GUI does not freeze
+    keepGuiResponsiveAndRaiseIfSimulationDone()
+
+    # fan-mode: generate fans of rays in spherical coordinates
+    if mode == 'fans':
+
+      # determine how many rays to place in fan mode
+      rayCountFanMode = obj.RayCountFanMode
+
+      # identify all faces that take part in the emission, split total 
+      # emitted rays according to face area
+      allFaces = []
+      for (part, faces) in obj.ActiveSurfaces:
+        if faces and len(faces):
+          # if faces were explicitly selected, add them to total list
+          selectedFaces = [getattr(part.Shape, f) for f in faces if f]
+          if len(selectedFaces):
+            allFaces.extend(selectedFaces)
+
+          # if not faces were explicitly selected, add all faces of the body the list
+          else:
+            allFaces.extend(part.Shape.Faces)
+
+      # calculate weight of each face by its area
+      _allAreas = [f.Area for f in allFaces]
+      allWeights = array(_allAreas)/sum(_allAreas)
+
+      # function that rounds ray counts to integers 1, 4, 9 or greater
+      # these are the reasonable numbers of rays to place per pace
+      customRound = lambda x: round(x) if x>9 else [1,4,9][argmin(abs(x-array([1,4,9])))]
+
+      # check if placing rays by weight but at least one per face exceeds
+      # total ray count 
+      _rayCount = sum([customRound(w*rayCountFanMode) for w in allWeights])
+      skipFaceFraction = max([0, 1-rayCountFanMode/_rayCount])
+      if skipFaceFraction > 0.3:
+        warnings.warn(f'cannot place rays an all surfaces, because this would require to '
+                      f'place {rayCount=} rays, which exceeds {rayCountFanMode=}. '
+                      f'Skipping {1e2*skipFaceFraction:.0f}% of faces.')
+      else:
+        skipFaceFraction = 0
+
+      # iterate over all weights and faces
+      faceI = 0
+      for weight, face in zip(allWeights, allFaces):
+
+        # skip a portion of faces given by skipFaceFraction
+        if skipFaceFraction > 0:
+          _step = skipFaceFraction / weight*len(allFaces)
+          if round(faceI) != round(faceI+_step):
+            continue
+          faceI += _step
+
+        # decide how may rays to place, at low fidelity use either 1, 4, 9, after that increase smoothly
+        raysOnFace = customRound(weight*rayCountFanMode)
+
+        # generate grid of surface points attempting regular spacing
+        print(f'placing {raysOnFace=} rays on face {face}')
+        for (u,v), point, (du,dv) in self._makeSurfaceGrid(obj, face, raysOnFace):
+          yield self._makeRay(obj, 
+                              origin=point, 
+                              faceTangent=du if du.Length>10*distTolerance else [du,dv][argmax([du.Length, dv.Length])],
+                              faceNormal=face.normalAt(u,v),
+                              theta=0, phi=0)
+
+    # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
+    elif mode == 'true' or mode == 'pseudo':
+
+      # determine how many rays to place in one iteration
+      raysPerIteration = 100
+      if settings := find.activeSimulationSettings():
+        raysPerIteration = settings.RaysPerIteration
+      raysPerIteration *= obj.RaysPerIterationScale
+
+      raise ValueError('not implemented')
 
 
 #####################################################################################################
@@ -54,8 +241,9 @@ class AddSurfaceSource(AddGenericSource):
     # create properties of object
     for section, entries in [
       ('OpticalEmission', [
-        ('ActiveSurfaces', [], 'LinkSubList', 'List of surfaces if child elements that '
-                  'we want to emit rays from. Empty list implies that all faces emit.'),
+        ('ActiveSurfaces', [], 'LinkSubList', 'List of surfaces that we want to emit rays from. '
+                               'Selecting bodies without specifying individual faces implies '
+                               'that all faces of the body emit.'),
         ('LocalPowerDensity', 'cos(theta)', 'String',  
                   'Emitted optical power per solid angle at each surface element. '
                   'The expression may contain any mathematical '
@@ -68,7 +256,8 @@ class AddSurfaceSource(AddGenericSource):
         *self.defaultSimulationSettings(obj),
         ('ThetaRandomNumberGeneratorMode', '?', 'String', ''),
         ('ThetaResolutionNumericMode', '1e6', 'String', ''),
-        ('TotalFansRays', 100, 'Integer', 'Number of rays to place in fan mode.'),
+        ('RayCountFanMode', 100, 'Integer', 'Total number of rays to distribute over all '
+                                 'emitting surfaces in fan mode.'),
        ]),
     ]:
       for name, default, kind, tooltip in entries:
@@ -82,9 +271,6 @@ class AddSurfaceSource(AddGenericSource):
 
     # make mode readonly
     obj.setEditorMode('ThetaRandomNumberGeneratorMode', 1)
-
-    # add selection to group
-    obj.ElementList = Gui.Selection.getSelection()
 
     return obj
 
