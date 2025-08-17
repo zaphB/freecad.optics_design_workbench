@@ -7,7 +7,7 @@
    viewBox="0 0 16.933333 16.933334"
    version="1.1"
    id="svg8"
-   inkscape:version="1.3.2 (091e20ef0f, 2023-11-25, custom)"
+   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
    sodipodi:docname="add-mirror.svg"
    inkscape:export-filename="C:\Users\Ali\Documents\inkscape\freecad\pyrate\pyrate_logo_3_256x256.png"
    inkscape:export-xdpi="1536"
@@ -22,6 +22,30 @@
    xmlns:dc="http://purl.org/dc/elements/1.1/">
   <defs
      id="defs2">
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect9"
+       is_visible="true"
+       lpeversion="1.3"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false"
+       uniform="false" />
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect1"
+       is_visible="true"
+       lpeversion="1.3"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false"
+       uniform="false" />
     <linearGradient
        id="linearGradient1245"
        inkscape:collect="always">
@@ -392,15 +416,15 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="7.9195959"
-     inkscape:cx="20.013647"
-     inkscape:cy="29.736366"
+     inkscape:cx="19.950513"
+     inkscape:cy="39.901026"
      inkscape:document-units="px"
      inkscape:current-layer="layer1"
      showgrid="false"
-     inkscape:window-width="3836"
-     inkscape:window-height="2093"
-     inkscape:window-x="0"
-     inkscape:window-y="32"
+     inkscape:window-width="1916"
+     inkscape:window-height="2104"
+     inkscape:window-x="1920"
+     inkscape:window-y="0"
      inkscape:window-maximized="1"
      units="px"
      inkscape:showpageshadow="2"
@@ -423,6 +447,13 @@
      inkscape:groupmode="layer"
      id="layer1"
      transform="translate(0,-280.06666)">
+    <path
+       style="fill:#ffffff;stroke:#ffffff;stroke-width:0.0264583"
+       d="M 14.365738,1.1358955 C 12.338944,0.83521729 10.31215,0.53453907 8.2853556,0.23386084 6.8487532,0.55681799 5.4122081,0.87976223 3.9756343,1.2027129 3.0624453,1.9822647 2.1492925,2.7617852 1.2361216,3.5413213 1.3029403,5.0224697 1.3697564,6.5035588 1.4365738,7.9846773 1.1915718,10.211968 0.9465796,12.43917 0.70158252,14.666416 c 0.46773108,0.50114 0.93544338,1.00226 1.40316508,1.503391 3.0847977,0.08909 6.1694717,0.17818 9.2542074,0.267269 1.169328,-1.057963 2.338609,-2.115883 3.507913,-3.173825 0.523413,-1.715014 1.046805,-3.4299593 1.570208,-5.1449388 C 16.281166,6.6371638 16.125262,5.1560747 15.969355,3.6749562 15.434805,2.8285856 14.900277,1.9822491 14.365738,1.1358955 Z"
+       id="path9"
+       inkscape:path-effect="#path-effect9"
+       inkscape:original-d="M 14.365738,1.1358955 C 12.338944,0.83521729 10.31215,0.53453907 8.2853556,0.23386084 6.8487532,0.55681799 5.4122081,0.87976223 3.9756343,1.2027129 3.0624453,1.9822647 2.1492925,2.7617852 1.2361216,3.5413213 1.3029403,5.0224697 1.3697564,6.5035588 1.4365738,7.9846773 1.1915718,10.211968 0.9465796,12.43917 0.70158252,14.666416 c 0.46773108,0.50114 0.93544338,1.00226 1.40316508,1.503391 3.0847977,0.08909 6.1694717,0.17818 9.2542074,0.267269 1.169328,-1.057963 2.338609,-2.115883 3.507913,-3.173825 0.523413,-1.715014 1.046805,-3.4299593 1.570208,-5.1449388 C 16.281166,6.6371638 16.125262,5.1560747 15.969355,3.6749562 15.434805,2.8285856 14.900277,1.9822491 14.365738,1.1358955 Z"
+       transform="translate(0,280.06666)" />
     <path
        style="fill:#000000;stroke-width:0.264583"
        id="path2"

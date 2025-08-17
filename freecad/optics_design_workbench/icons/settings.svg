@@ -7,7 +7,7 @@
    viewBox="0 0 16.933333 16.933334"
    version="1.1"
    id="svg8"
-   inkscape:version="1.3.2 (091e20ef0f, 2023-11-25, custom)"
+   inkscape:version="1.4.2 (ebf0e940d0, 2025-05-08)"
    sodipodi:docname="settings.svg"
    inkscape:export-filename="C:\Users\Ali\Documents\inkscape\freecad\pyrate\pyrate_logo_3_256x256.png"
    inkscape:export-xdpi="1536"
@@ -22,6 +22,18 @@
    xmlns:dc="http://purl.org/dc/elements/1.1/">
   <defs
      id="defs2">
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect11"
+       is_visible="true"
+       lpeversion="1.3"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false"
+       uniform="false" />
     <linearGradient
        id="linearGradient1245"
        inkscape:collect="always">
@@ -391,16 +403,16 @@
      borderopacity="1.0"
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
-     inkscape:zoom="15.839192"
-     inkscape:cx="18.340582"
-     inkscape:cy="35.828848"
+     inkscape:zoom="11.2"
+     inkscape:cx="39.285714"
+     inkscape:cy="43.660714"
      inkscape:document-units="px"
-     inkscape:current-layer="layer1"
+     inkscape:current-layer="layer2"
      showgrid="false"
-     inkscape:window-width="3836"
-     inkscape:window-height="2093"
-     inkscape:window-x="0"
-     inkscape:window-y="32"
+     inkscape:window-width="1916"
+     inkscape:window-height="2104"
+     inkscape:window-x="1920"
+     inkscape:window-y="0"
      inkscape:window-maximized="1"
      units="px"
      inkscape:showpageshadow="2"
@@ -417,6 +429,17 @@
       </cc:Work>
     </rdf:RDF>
   </metadata>
+  <g
+     inkscape:groupmode="layer"
+     id="layer2"
+     inkscape:label="Layer 2">
+    <path
+       style="fill:#ffffff;stroke-width:0.493466"
+       d="M 9.2052954,0.48821931 C 8.2761039,0.44884672 6.9374381,0.54334078 5.8822468,0.86620099 4.8270555,1.1890612 4.0553697,1.7402654 3.3624071,2.4371675 2.6694445,3.1340696 2.0552456,3.9766246 1.6615186,5.1145048 1.2677917,6.252385 1.094556,7.6855161 1.3662336,9.142314 c 0.2716776,1.456798 0.9882431,2.937175 1.9686313,4.00024 0.9803882,1.063064 2.2245352,1.708761 3.6301498,2.173359 1.4056145,0.464599 2.9726095,0.748076 4.3467223,0.81107 1.374113,0.063 2.555265,-0.09449 3.460839,-1.17332 0.905574,-1.078827 1.535522,-3.078911 1.752069,-4.783755 C 16.741192,8.4650638 16.544333,7.0555556 16.170289,5.8349971 15.796244,4.6144385 15.24504,3.5828993 14.38277,2.7875688 13.5205,1.9922383 12.347222,1.4331596 11.500708,1.0669936 10.654194,0.70082757 10.134487,0.52759189 9.2052954,0.48821931 Z"
+       id="path11"
+       inkscape:path-effect="#path-effect11"
+       inkscape:original-d="M 9.6147694,0.35435268 C 8.2761039,0.44884675 6.9374381,0.54334078 5.5987724,0.63783484 4.8270555,1.1890612 4.0553697,1.7402654 3.2836682,2.2914807 2.6694446,3.1340696 2.0552456,3.9766246 1.4410342,4.8191966 1.2677917,6.252385 1.0945561,7.6855161 0.92131697,9.1186756 1.6379112,10.599112 2.3544767,12.079489 3.0710567,13.559896 4.3152532,14.205618 5.5594,14.851315 6.8035717,15.497024 8.3706292,15.780512 9.9376243,16.063988 11.504651,16.347471 12.68585,16.189977 13.867002,16.03249 15.048177,15.875 15.67815,13.874836 16.308098,11.874752 16.938058,9.8746281 16.741192,8.4650638 16.544333,7.0555556 16.347471,5.6460196 15.796244,4.6144388 15.24504,3.5828995 14.693825,2.5513393 13.5205,1.9922384 12.347222,1.4331597 11.173921,0.87406995 10.654194,0.7008274 10.134487,0.52759177 9.6147694,0.35435268 Z" />
+  </g>
   <g
      inkscape:label="Layer 1"
      inkscape:groupmode="layer"
