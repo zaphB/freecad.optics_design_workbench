@@ -85,8 +85,8 @@ class SurfaceSourceProxy(GenericSourceProxy):
     # generate very simple rectilinear grid with minimum 5x5 points, p1 and p2 correspond to u and v as given by
     # value of paramOrder
     P1, P2 = [ linspace(limits[p][0], limits[p][1], 
-                        max([5, int(round(sqrt(effectiveSizes[p]/effectiveSizes[_p] * totalGridPoints/fillFactor))) ])) 
-                                                                  for p, _p in zip(paramOrder, reversed(paramOrder)) ]
+                        max([5, 1+int( 2*round( sqrt(effectiveSizes[p]/effectiveSizes[_p] * totalGridPoints/fillFactor)/2 )) ]) )
+                                                                                    for p, _p in zip(paramOrder, reversed(paramOrder)) ]
     p1Step = P1[1]-P1[0]
     p2Step = P2[1]-P2[0]
 
@@ -98,26 +98,29 @@ class SurfaceSourceProxy(GenericSourceProxy):
     points = [[ face.valueAt(*uv(p1,p2)) for p2 in P2 ] for p1 in P1 ]
     isValid = [[ Part.Vertex(p).distToShape(face)[0] < distTolerance for p in row] for row in points ]
 
-    # calculate updated value for fillfactor
-    validCount = sum([sum([1 if v else 0 for v in row]) for row in isValid ])
-    fillFactor = validCount / (len(P1)*len(P2))
-    print(f'{len(P1)=} {len(P2)=} {fillFactor=} {validCount=}')
-
     # calculate derivatives at all valid locations, place (None,None) placeholders outside of face
     derivatives = [[ p1p2(*face.derivative1At(*uv(p1,p2))) if isValid[i][j] else (None,None) 
                                                                     for j,p2 in enumerate(P2) ]
                                                                           for i,p1 in enumerate(P1) ]
     derivP1 = [[ d[0].Length if d[0] is not None else None for d in row ] for row in derivatives ]
     derivP2 = [[ d[1].Length if d[1] is not None else None for d in row ] for row in derivatives ]
+    areaElems = [[ dp1*dp2 for dp1, dp2 in zip(dP1, dP2) ] for dP1, dP2 in zip(derivP1, derivP2) ]
 
-    # check whether p1 is uniform, if yes -> update value of uniformParam
-    _dAvg = mean([ mean([ d for d in row if d is not None ]) for row in derivP1 ])
-    isUniformP1 = [[ abs(d-_dAvg)*p1Step < distTolerance for d in row ] for row in derivP1 ]
+    # check whether p1 (or p2) looks uniform, if yes -> update value of uniformParam
+    _mean = lambda A: (lambda _A: mean(_A) if len(_A) else None)([a for a in A if a is not None])
+    _max = lambda A: (lambda _A: max(_A) if len(_A) else None)([a for a in A if a is not None])
+    _sum = lambda A: sum([a for a in A if a is not None])
+    _dAvgs = [ _mean(row) for row in areaElems ]
+    isUniformP1 = all([all([ abs(d-dAvg)*p1Step*p2Step < distTolerance**2 for d in row if d is not None ])
+                                                                 for dAvg, row in zip(_dAvgs, areaElems) ])
+    #print(f'{paramOrder=}, {isUniformP1=}')
     if isUniformP1:
       uniformParam = paramOrder[0]
     else:
-      _dAvg = mean([ mean([ d for d in row if d is not None ]) for row in derivP2 ])
-      isUniformP2 = [[ abs(d-_dAvg)*p2Step < distTolerance for d in row ] for row in derivP2 ]
+      _dAvgs = [ _mean(row) for row in zip(*areaElems) ]
+      isUniformP2 = all([all([ abs(d-dAvg)*p1Step*p2Step < distTolerance**2 for d in row if d is not None ]) 
+                                                                for dAvg, row in zip(_dAvgs, zip(*areaElems)) ])
+      #print(f'{paramOrder=}, {isUniformP2=}')
       if isUniformP2:
         uniformParam = paramOrder[1]
       # neither of the two looks uniform? reset uniform paramValue to None
@@ -125,20 +128,56 @@ class SurfaceSourceProxy(GenericSourceProxy):
         uniformParam = None
 
     # recalculate effective sizes of p1 and p2 axes using averaged derivatives
-    effTotalLengthP1 = sum([ mean([ d for d in row if d is not None ]) for row in derivP1 ])*p1Step
-    effTotalLengthP2 = sum([ mean([ d for d in row if d is not None ]) for row in zip(*derivP2) ])*p2Step
+    effTotalLengthP1 = _sum([ _max(row) for row in derivP1 ])*p1Step
+    effTotalLengthP2 = _sum([ _max(row) for row in zip(*derivP2) ])*p2Step
     effectiveSizes = {paramOrder[0]: effTotalLengthP1, paramOrder[1]: effTotalLengthP2}
+
+    # if first param is uniform, check whether p1Step times derivative in p1 direction matches 
+    # design value, thin down if not the case
+    print(f'{paramOrder}, {paramSizes}')
+    if uniformParam is not None:
+      for i,row in enumerate(derivP2):
+        effectiveRowLen = max([1e-20, p2Step*_sum([dp2 for dp2 in row if dp2 is not None])])
+        keepEveryNthEntry = 2**round(log2(effTotalLengthP2/effectiveRowLen))
+        #print(f'{i}, {effectiveRowLen=}, {effTotalLengthP2=}, {effectiveRowLen/effTotalLengthP2=} {keepEveryNthEntry=}')
+        # if keepEveryNth is greater than count, keep only first one
+        if keepEveryNthEntry > len(isValid[i]):
+          for j in range(1, len(isValid[i])):
+            isValid[i][j] = False
+
+        # set isValid to false for entries that we do not want to keep
+        else:
+          for j in range(len(isValid[i])):
+            if j%keepEveryNthEntry != 0:
+              isValid[i][j] = False
+
+    # calculate updated value for fillfactor
+    validCount = sum([sum([1 if v else 0 for v in row]) for row in isValid ])
+    updatedFillFactor = validCount / (len(P1)*len(P2))
+    #print(f'{len(P1)=} {len(P2)=} {fillFactor=}, {updatedFillFactor=} {validCount=}')
 
     # recurse three times to refine fillFactor, effectiveSizes and uniformParam values 
     if recursionDepth < 3:
       return self._makeSurfaceGrid(obj, face, totalGridPoints, 
                                    uniformParam=uniformParam,
-                                   fillFactor=fillFactor,
+                                   # avoid fillFactor jumping to zero if none if the initial rays is on the face
+                                   fillFactor=max([fillFactor/10, updatedFillFactor]),
                                    effectiveSizes=effectiveSizes,
                                    recursionDepth=recursionDepth+1)
 
+    # remove outer points if requested very few points and too many were created
+    dropEveryCandidates = [lambda i,j: False, lambda i,j: i%2==0 or j%2==0, lambda i,j: ((i+1)//2)%2==0 or ((j+1)//2)%2==0]
+    validCount = sum([sum([1 if v else 0 for v in row]) for row in isValid ])
+    while len(dropEveryCandidates) and totalGridPoints < 20 and validCount > totalGridPoints:
+      drop = dropEveryCandidates.pop(0)
+      isValid = [[ (isValid[i][j] 
+                    and not drop(i,j))
+                             for j,p in enumerate(row) ] for i,row in enumerate(points) ]
+      validCount = sum([sum([1 if v else 0 for v in row]) for row in isValid ])
+
+    # return all validated u,v pairs, also return points and derivatives for potential reuse
     return [(uv(p1,p2), points[i][j], uv(*derivatives[i][j]))
-                            for i,p1 in enumerate(P1) 
+                            for i,p1 in enumerate(P1)
                                   for j,p2 in enumerate(P2) if isValid[i][j]]
 
 
