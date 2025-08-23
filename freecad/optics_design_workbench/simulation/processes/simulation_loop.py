@@ -481,6 +481,8 @@ def runSimulation(action, slaveInfo={}):
 
     timer = QTimer()
     def updateProgress():
+      nonlocal lastResultChunking
+      
       if store and isMasterProcess():
         # make sure progress is updated (this will also place cancel/done files if one 
         # of the specified end criteria is reached)

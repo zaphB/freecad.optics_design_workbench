@@ -18,6 +18,7 @@ import sympy as sy
 
 from .generic_source import *
 from .common import *
+from ..simulation.tracing_cache import *
 from . import ray
 from . import find
 from .. import simulation
@@ -57,7 +58,7 @@ class PointSourceProxy(GenericSourceProxy):
       
       # inter-update theta and radius domains if possible, avoid recursion by only
       # updating the hidden one of the two domains when the non-hidden one changes
-      if isfinite(float(obj.FocalLength)):
+      if isfinite(float(getattr(obj, 'FocalLength', 1))):
         if prop == 'ThetaDomain':
           if l1 < pi/2-1e-5 and l2 < pi/2-1e-5 and not isclose(float(obj.FocalLength), 0):
             r1, r2 = abs(tan(l1)*float(obj.FocalLength)), abs(tan(l2)*float(obj.FocalLength))

@@ -34,6 +34,7 @@ class SurfaceSourceProxy(PointSourceProxy):
     # first call onChanged of point source
     super().onChanged(obj, prop)
 
+    # parse UV map sampling settings
     if prop in ('UVSamplingInitialResolution', 'UVSamplingMaxRelAreaElementChange'):
       default = {'UVSamplingInitialResolution': '5', 'UVSamplingMaxRelAreaElementChange': '0.1'}[prop]
       raw = getattr(obj, prop)
@@ -41,6 +42,13 @@ class SurfaceSourceProxy(PointSourceProxy):
         parsed = float(raw)
       except Exception:
         setattr(obj, prop, default)
+
+
+  def onInitializeSimulation(self, obj, state, ident):
+    # reset cached face uv maps on every simulation start
+    io.verb('clearing self._sampleAreaElementsOnFace cache')
+    self._sampleAreaElementsOnFace.cache_clear()
+    self._cachedSelectedFace.cache_clear()
 
 
   def parsedPhiDomain(self, obj):
@@ -119,7 +127,8 @@ class SurfaceSourceProxy(PointSourceProxy):
                                                                           for i,p1 in enumerate(P1) ]
     derivP1 = [[ d[0].Length if d[0] is not None else None for d in row ] for row in derivatives ]
     derivP2 = [[ d[1].Length if d[1] is not None else None for d in row ] for row in derivatives ]
-    areaElems = [[ dp1*dp2 for dp1, dp2 in zip(dP1, dP2) ] for dP1, dP2 in zip(derivP1, derivP2) ]
+    areaElems = [[ dp1*dp2 if dp1 is not None and dp2 is not None else None
+                             for dp1, dp2 in zip(dP1, dP2) ] for dP1, dP2 in zip(derivP1, derivP2) ]
 
     # check whether p1 (or p2) looks uniform, if yes -> update value of uniformParam
     _mean = lambda A: (lambda _A: mean(_A) if len(_A) else None)([a for a in A if a is not None])
@@ -149,7 +158,7 @@ class SurfaceSourceProxy(PointSourceProxy):
 
     # if first param is uniform, check whether p1Step times derivative in p1 direction matches 
     # design value, thin down if not the case
-    print(f'{paramOrder}, {paramSizes}')
+    #print(f'{paramOrder}, {paramSizes}')
     if uniformParam is not None:
       for i,row in enumerate(derivP2):
         effectiveRowLen = max([1e-20, p2Step*_sum([dp2 for dp2 in row if dp2 is not None])])
@@ -195,19 +204,28 @@ class SurfaceSourceProxy(PointSourceProxy):
                             for i,p1 in enumerate(P1)
                                   for j,p2 in enumerate(P2) if isValid[i][j]]
 
-
   @functools.cache
   def _sampleAreaElementsOnFace(self, obj, face):
+    io.verb(f'generating grid of finite area element sizes on {self}, {obj=}, {obj.Name=}, {face}, ')
     # calculate distance tolerance
     distTolerance = self._getDistTol()
 
     # get u and v limits and spans
     uMin, uMax, vMin, vMax = face.ParameterRange
     uSpan, vSpan = uMax-uMin, vMax-vMin
-    
-    # create simple rectilinear grid to begin with
-    initResolution = max([ 3, int(round(float(obj.UVSamplingInitialResolution))) ])
-    U, V = linspace(uMin, uMax, initResolution), linspace(vMin, vMax, initResolution)
+
+    # define little subroutine with caching to speed up
+    @functools.cache
+    def _calcP(u, v):
+      return face.valueAt(u, v)
+
+    @functools.cache
+    def _isOnFace(p):
+      return Part.Vertex(p).distToShape(face)[0] < distTolerance
+
+    @functools.cache
+    def _calcDeriv(u, v):
+      return face.derivative1At(u,v)
 
     # calculate points and area elements of the initial grid
     def calcPdA(U, V):
@@ -217,15 +235,34 @@ class SurfaceSourceProxy(PointSourceProxy):
         dA.append([])
         P.append([])
         for v in V:
-          p = face.valueAt(u,v)
+          # this loop may run for quite some time, keep GUI responsive by handling events
+          keepGuiResponsiveAndRaiseIfSimulationDone()
+
+          # calc points and derivatives and construct result array
+          p = _calcP(u, v)
           P[-1].append(p)
-          if Part.Vertex(p).distToShape(face)[0] < distTolerance:
-            du, dv = face.derivative1At(u,v)
+          if _isOnFace(tuple(p)):
+            du, dv = _calcDeriv(u, v)
             dA[-1].append(du.cross(dv).Length)
           else:
-            dA[-1].append(0)
+            dA[-1].append(nan)
       dA, P = array(dA), array(P)
       return P, dA
+
+    # create simple rectilinear grid to begin with, increase sampling density until at least 9 valid points are found
+    resolution = max([ 3, int(round(float(obj.UVSamplingInitialResolution))) ])
+    while True:
+      # this loop may run for quite some time, keep GUI responsive by handling events
+      keepGuiResponsiveAndRaiseIfSimulationDone()
+
+      U, V = linspace(uMin, uMax, resolution), linspace(vMin, vMax, resolution)
+      P, dA = calcPdA(U, V)
+      validCount = sum(dA==dA)
+      if validCount >= 9:
+        break
+      resolution *= 2
+      if resolution > 1e2:
+        raise ValueError(f'failed to sample UV mesh on face {face}, because no valid u,v value pair could be determined')
 
     # find row/col with largest curvature (but still lying within face) -> insert new cols/rows to enhance resolution
     maxAreaElementDiff = float(obj.UVSamplingMaxRelAreaElementChange)
@@ -234,37 +271,43 @@ class SurfaceSourceProxy(PointSourceProxy):
       P, dA = calcPdA(U, V)
 
       # calc relative difference of neighboring area elements
-      areaDiffs1 = abs(( (dA[1:,:]-dA[:-1,:]) / mean(dA) ).max(axis=1))
-      areaDiffs2 = abs(( (dA[:,1:]-dA[:,:-1]) / mean(dA) ).max(axis=0))
+      def _nanToNinf(A):
+        A[A!=A] = -inf
+        return A 
+      _meanA = mean(dA[isfinite(dA)])
+      areaDiffs1 = _nanToNinf(abs(( (dA[1:,:]-dA[:-1,:]) / _meanA ))).max(axis=1)
+      areaDiffs2 = _nanToNinf(abs(( (dA[:,1:]-dA[:,:-1]) / _meanA ))).max(axis=0)
       maxDiff1, maxDiff2 = areaDiffs1.max(), areaDiffs2.max()
 
-      print(f'refining uv sampling {U.shape=}, {V.shape=}, {maxDiff1=}, {maxDiff2=}')
+      # this loop may run for quite some time, keep GUI responsive by handling events
+      keepGuiResponsiveAndRaiseIfSimulationDone()
+      io.verb(f'refining UV-grid of finite area element sizes {len(U)=}, {len(V)=}, {maxDiff1=:.1e}, {maxDiff2=:.1e}')
 
       # end loop if biggest diff between neighboring area elements is <maxAreaElementDiff
       if max([maxDiff1, maxDiff2]) < maxAreaElementDiff:
         break
 
       # raise error if size of U,V mesh gets out of hand
-      if len(U)*len(V) > 1e8:
+      if max([len(U), len(V)]) > 1e4:
         raise ValueError(f'failed to sample UV mesh on face {face}, try relaxing the UVSamplingMaxRelAreaElementChange condition to higher values')
 
       # insert new U coordinates in ax=1
       if areaDiffs1.max() > areaDiffs2.max():
         maxI = argmax(areaDiffs1)
-        iFrom = max([maxI-1, 0])
-        iTo = min([maxI+2, len(areaDiffs1)])
-        newU = linspace(U[iFrom], U[iTo], 21)
-        if isclose(newU[1], newU[0], rtol=1e-3):
+        iFrom = max([maxI-2, 0])
+        iTo = min([maxI+3, len(areaDiffs1)])
+        newU = linspace(U[iFrom], U[iTo], max([21, len(U)//4]) )
+        if isclose(newU[1], newU[0], rtol=1e-9):
           raise ValueError(f'failed to sample UV mesh on face {face}, try relaxing the UVSamplingMaxRelAreaElementChange condition to higher values')
         U = concatenate([U[:iFrom], newU, U[iTo+1:]])
         
       # insert new V coordinates in ax=2
       else:
         maxI = argmax(areaDiffs2)
-        iFrom = max([maxI-1, 0])
-        iTo = min([maxI+2, len(areaDiffs2)])
-        newV = linspace(V[iFrom], V[iTo], 21)
-        if isclose(newV[1], newV[0], rtol=1e-3):
+        iFrom = max([maxI-2, 0])
+        iTo = min([maxI+3, len(areaDiffs2)])
+        newV = linspace(V[iFrom], V[iTo], max([21, len(V)//4]) )
+        if isclose(newV[1], newV[0], rtol=1e-9):
           raise ValueError(f'failed to sample UV mesh on face {face}, try relaxing the UVSamplingMaxRelAreaElementChange condition to higher values')
         V = concatenate([V[:iFrom], newV, V[iTo+1:]])
 
@@ -276,16 +319,36 @@ class SurfaceSourceProxy(PointSourceProxy):
     #pcolormesh(U, V, dA.T)
     #xlabel('u'); ylabel('v'); colorbar().set_label('dA')
     #show()
-    return U, V, dA, 
+    dA[dA!=dA] = 0
+    return U, V, dA
 
 
   def _drawRandomPositionOnFace(self, obj, face):
-    U, V, dA = self._sampleAreaElementsOnFace(obj, face)
-    rv = distributions.SampledVectorRandomVariable(variableRanges=[U, V], gridProbs=dA)
-    u, v = rv.draw()
-    origin = face.valueAt(u, v)
+    distTolerance = self._getDistTol()
+
+    # keep rolling until we found a point on the surface
+    while True:
+      U, V, dA = self._sampleAreaElementsOnFace(obj, face)
+      rv = distributions.SampledVectorRandomVariable(variableRanges=[U, V], gridProbs=dA, 
+                                                    warnIfDiscretizationStepAbove=1)
+      u, v = rv.draw()
+      origin = face.valueAt(u, v)
+
+      # only exit loop if u,v pair is actually located on face
+      if Part.Vertex(origin).distToShape(face)[0] < distTolerance:
+        break
+
+      # this loop may run for quite some time, keep GUI responsive by handling events
+      keepGuiResponsiveAndRaiseIfSimulationDone()
+
     du, dv = face.derivative1At(u, v)
+    #print(f'{origin=}, {u=}, {v=}, {du=}, {dv=}')
     return origin, u, v, du, dv
+
+
+  @functools.cache
+  def _cachedSelectedFace(self, part, attrName):
+    return getattr(cachedShape(part), attrName)
 
 
   def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
@@ -304,13 +367,13 @@ class SurfaceSourceProxy(PointSourceProxy):
     for (part, faces) in obj.ActiveSurfaces:
       if faces and len(faces):
         # if faces were explicitly selected, add them to total list
-        selectedFaces = [getattr(part.Shape, f) for f in faces if f]
+        selectedFaces = [self._cachedSelectedFace(part, f) for f in faces if f]
         if len(selectedFaces):
           allFaces.extend(selectedFaces)
 
         # if not faces were explicitly selected, add all faces of the body the list
         else:
-          allFaces.extend(part.Shape.Faces)
+          allFaces.extend(cachedFaces(cachedShape(part)))
 
     # calculate weight of each face by its area
     _allAreas = [f.Area for f in allFaces]
@@ -352,7 +415,7 @@ class SurfaceSourceProxy(PointSourceProxy):
         raysOnFace = customRound(weight*rayCountFanMode)
 
         # generate grid of surface points attempting regular spacing
-        print(f'placing {raysOnFace=} rays on face {face}')
+        io.verb(f'placing {raysOnFace=} rays on face {face}')
         for (u,v), point, (du,dv) in self._makeSurfaceGrid(obj, face, raysOnFace):
           yield self._makeRay(obj, 
                               origin=point, 
@@ -394,8 +457,6 @@ class SurfaceSourceProxy(PointSourceProxy):
                             faceTangent=du if du.Length>10*distTolerance else [du,dv][argmax([du.Length, dv.Length])],
                             faceNormal=face.normalAt(u,v),
                             theta=theta, phi=phi)
-
-      raise ValueError('not implemented')
 
 
 #####################################################################################################
@@ -445,7 +506,7 @@ class AddSurfaceSource(AddGenericSource):
       obj.ViewObject.Proxy = SurfaceSourceViewProxy()
 
     # make mode readonly
-    obj.setEditorMode('ThetaRandomNumberGeneratorMode', 1)
+    obj.setEditorMode('RandomNumberGeneratorMode', 1)
 
     return obj
 

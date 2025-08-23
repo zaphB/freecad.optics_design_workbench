@@ -381,7 +381,7 @@ class VectorRandomVariable:
     return lambYs
 
 
-  def draw(self, N=None, constants=None):
+  def draw(self, N=None, constants=None, _noVarOrderCheck=False):
     '''
     Draw random numbers (or vectors) following the distribution represented by this object.
 
@@ -444,14 +444,15 @@ class VectorRandomVariable:
     # if variable order is specified, return as array with first dimension ordered as given
     # first make sure variableOrdering has 1:1 match with _variables
     _varNames = [str(v) for v in self._variables]
-    for v in self._variableOrder:
-      if v not in _varNames:
-        raise ValueError(f'variable {v} is given in variable ordering, but does not seem to '
-                         f'exist in expression {self._probabilityDensityExpr}')
-      _varNames.remove(v)
-    if len(_varNames):
-      raise ValueError(f'variables {_varNames} exist in expression {self._probabilityDensityExpr}'
-                       f' but do not exist in {self._variableOrder}; are all constants specified?')
+    if not _noVarOrderCheck:
+      for v in self._variableOrder:
+        if v not in _varNames:
+          raise ValueError(f'variable {v} is given in variable ordering, but does not seem to '
+                          f'exist in expression {self._probabilityDensityExpr}')
+        _varNames.remove(v)
+      if len(_varNames):
+        raise ValueError(f'variables {_varNames} exist in expression {self._probabilityDensityExpr}'
+                        f' but do not exist in {self._variableOrder}; are all constants specified?')
 
     # construct ordering index and return
     _orderingIndex = [[str(v) for v in self._variables].index(_v) for _v in self._variableOrder]
@@ -668,7 +669,12 @@ class ScalarRandomVariable(VectorRandomVariable):
 
 
 class SampledVectorRandomVariable(VectorRandomVariable):
-  def __init__(self, variableRanges, gridProbs):
+  def __init__(self, variableRanges, gridProbs, **kwargs):
+    # call superconstructor with dummy distribution to initialize
+    super().__init__('1', **kwargs)
+    self._probabilityDensityExpr = sy.sympify('1')
+
+    # convert and store variable ranges and grids for use in self._generateNumericScalarLambda
     self._variableRangesInBetween = variableRanges
     self._variableRanges = [concatenate([
             [_range[0]-(_range[1]-_range[0])/2],
@@ -676,9 +682,11 @@ class SampledVectorRandomVariable(VectorRandomVariable):
             [_range[-1]+(_range[-1]-_range[-2])/2],
           ]) for _range in variableRanges]
     self._variableGrids = meshgrid(*self._variableRangesInBetween)
-    self._gridProbs = gridProbs
-    self._variables = ['abcdefghij'[i] for i in range(len(variableRanges))]
-
+    self._gridProbs = gridProbs.T
+    self._variableOrder = 'abcdefghijklmnopqrstuvw'
+    self._variables = [self._variableOrder[i] for i in range(len(variableRanges))]
+    self._variableOrder = self._variableOrder[:len(self._variables)]
+    
   def compile(self, **kwargs):
     'always compile in numeric mode'
     self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
@@ -688,3 +696,6 @@ class SampledVectorRandomVariable(VectorRandomVariable):
     return self._lambdasFromSampled(self._variableGrids, self._gridProbs, varI, 
                                     variableRangesInBetween=self._variableRangesInBetween,
                                     variableRanges=self._variableRanges)
+
+  def draw(self, *args, **kwargs):
+    return super().draw(*args, **kwargs, _noVarOrderCheck=True)
