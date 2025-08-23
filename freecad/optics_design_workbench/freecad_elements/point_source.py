@@ -221,13 +221,13 @@ class PointSourceProxy(GenericSourceProxy):
 
 
   def _rvArgs(self, obj, densityString, variableDomain=None):
-    useTheta = isfinite(float(obj.FocalLength))
-    useRadius = not isfinite(float(obj.FocalLength))
+    useTheta = isfinite(float(getattr(obj, 'FocalLength', 1)))
+    useRadius = not isfinite(float(getattr(obj, 'FocalLength', 1)))
     usePhi = variableDomain is None
     if useTheta:
       # raise error if focal length is zero and r,x or y exist in density expression (except for
       # characters in function names)
-      if isclose(float(obj.FocalLength), 0):
+      if isclose(float(getattr(obj, 'FocalLength', 1)), 0):
         for c in 'rxy':
           if c in ( densityString.replace('exp', '').replace('arcsin', '').replace('arccos', '')
                                 .replace('arctan', '').replace('arctan2', '').replace('arccot', '')
@@ -237,7 +237,7 @@ class PointSourceProxy(GenericSourceProxy):
                              f'is forbidden if focal length is zero.')
 
       # substitute r,x,y by theta,phi expressions
-      f = f'{abs(float(obj.FocalLength)):.8e}'
+      f = f'{abs(float(getattr(obj, 'FocalLength', 1))):.8e}'
       densityString = (sy.sympify(densityString)
                           .subs('r', sy.sympify(f'(tan(theta)*{f})'))
                           .subs('x', sy.sympify(f'(tan(theta)*cos(phi)*{f})'))
@@ -251,7 +251,7 @@ class PointSourceProxy(GenericSourceProxy):
                 phi=self.parsedPhiDomain(obj)),
             numericalResolutions=dict(
                 theta=float(obj.ThetaResolutionNumericMode),
-                phi=float(obj.PhiResolutionNumericMode))
+                phi=float(getattr(obj, 'PhiResolutionNumericMode', 10)))
         )
       else:
         return dict(
@@ -300,7 +300,7 @@ class PointSourceProxy(GenericSourceProxy):
       NON_SERIALIZABLE_STORE[self] = {}
     
     if NON_SERIALIZABLE_STORE[self].get('vrv', None) is None:
-      # attach to obj and not to self, because attributes of self should be serializable
+      # module global variable and not to self, because attributes of self should be serializable
       NON_SERIALIZABLE_STORE[self]['vrv'] = (
             distributions.VectorRandomVariable(
                 **self._rvArgs(obj,

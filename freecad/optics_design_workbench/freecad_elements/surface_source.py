@@ -15,8 +15,10 @@ except ImportError:
 from numpy import *
 import scipy.optimize
 import sympy as sy
+import functools
 
 from .generic_source import *
+from .point_source import PointSourceProxy
 from .common import *
 from . import ray
 from . import find
@@ -25,11 +27,24 @@ from .. import distributions
 from .. import io
 
 #####################################################################################################
-class SurfaceSourceProxy(GenericSourceProxy):
+class SurfaceSourceProxy(PointSourceProxy):
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
-    pass
+    # first call onChanged of point source
+    super().onChanged(obj, prop)
+
+    if prop in ('UVSamplingInitialResolution', 'UVSamplingMaxRelAreaElementChange'):
+      default = {'UVSamplingInitialResolution': '5', 'UVSamplingMaxRelAreaElementChange': '0.1'}[prop]
+      raw = getattr(obj, prop)
+      try:
+        parsed = float(raw)
+      except Exception:
+        setattr(obj, prop, default)
+
+
+  def parsedPhiDomain(self, obj):
+    return (0, 2*pi)
 
 
   def _makeRay(self, obj, origin, faceTangent, faceNormal, 
@@ -181,6 +196,98 @@ class SurfaceSourceProxy(GenericSourceProxy):
                                   for j,p2 in enumerate(P2) if isValid[i][j]]
 
 
+  @functools.cache
+  def _sampleAreaElementsOnFace(self, obj, face):
+    # calculate distance tolerance
+    distTolerance = self._getDistTol()
+
+    # get u and v limits and spans
+    uMin, uMax, vMin, vMax = face.ParameterRange
+    uSpan, vSpan = uMax-uMin, vMax-vMin
+    
+    # create simple rectilinear grid to begin with
+    initResolution = max([ 3, int(round(float(obj.UVSamplingInitialResolution))) ])
+    U, V = linspace(uMin, uMax, initResolution), linspace(vMin, vMax, initResolution)
+
+    # calculate points and area elements of the initial grid
+    def calcPdA(U, V):
+      P = []
+      dA = []
+      for u in U:
+        dA.append([])
+        P.append([])
+        for v in V:
+          p = face.valueAt(u,v)
+          P[-1].append(p)
+          if Part.Vertex(p).distToShape(face)[0] < distTolerance:
+            du, dv = face.derivative1At(u,v)
+            dA[-1].append(du.cross(dv).Length)
+          else:
+            dA[-1].append(0)
+      dA, P = array(dA), array(P)
+      return P, dA
+
+    # find row/col with largest curvature (but still lying within face) -> insert new cols/rows to enhance resolution
+    maxAreaElementDiff = float(obj.UVSamplingMaxRelAreaElementChange)
+    while True:
+      # update P and dA arrays
+      P, dA = calcPdA(U, V)
+
+      # calc relative difference of neighboring area elements
+      areaDiffs1 = abs(( (dA[1:,:]-dA[:-1,:]) / mean(dA) ).max(axis=1))
+      areaDiffs2 = abs(( (dA[:,1:]-dA[:,:-1]) / mean(dA) ).max(axis=0))
+      maxDiff1, maxDiff2 = areaDiffs1.max(), areaDiffs2.max()
+
+      print(f'refining uv sampling {U.shape=}, {V.shape=}, {maxDiff1=}, {maxDiff2=}')
+
+      # end loop if biggest diff between neighboring area elements is <maxAreaElementDiff
+      if max([maxDiff1, maxDiff2]) < maxAreaElementDiff:
+        break
+
+      # raise error if size of U,V mesh gets out of hand
+      if len(U)*len(V) > 1e8:
+        raise ValueError(f'failed to sample UV mesh on face {face}, try relaxing the UVSamplingMaxRelAreaElementChange condition to higher values')
+
+      # insert new U coordinates in ax=1
+      if areaDiffs1.max() > areaDiffs2.max():
+        maxI = argmax(areaDiffs1)
+        iFrom = max([maxI-1, 0])
+        iTo = min([maxI+2, len(areaDiffs1)])
+        newU = linspace(U[iFrom], U[iTo], 21)
+        if isclose(newU[1], newU[0], rtol=1e-3):
+          raise ValueError(f'failed to sample UV mesh on face {face}, try relaxing the UVSamplingMaxRelAreaElementChange condition to higher values')
+        U = concatenate([U[:iFrom], newU, U[iTo+1:]])
+        
+      # insert new V coordinates in ax=2
+      else:
+        maxI = argmax(areaDiffs2)
+        iFrom = max([maxI-1, 0])
+        iTo = min([maxI+2, len(areaDiffs2)])
+        newV = linspace(V[iFrom], V[iTo], 21)
+        if isclose(newV[1], newV[0], rtol=1e-3):
+          raise ValueError(f'failed to sample UV mesh on face {face}, try relaxing the UVSamplingMaxRelAreaElementChange condition to higher values')
+        V = concatenate([V[:iFrom], newV, V[iTo+1:]])
+
+    # plot results for debugging
+    #from matplotlib.pyplot import pcolormesh, show, xlabel, ylabel, colorbar, plot, figure
+    #plot(V[:-1], areaDiffs2)
+    #show()
+    #figure()
+    #pcolormesh(U, V, dA.T)
+    #xlabel('u'); ylabel('v'); colorbar().set_label('dA')
+    #show()
+    return U, V, dA, 
+
+
+  def _drawRandomPositionOnFace(self, obj, face):
+    U, V, dA = self._sampleAreaElementsOnFace(obj, face)
+    rv = distributions.SampledVectorRandomVariable(variableRanges=[U, V], gridProbs=dA)
+    u, v = rv.draw()
+    origin = face.valueAt(u, v)
+    du, dv = face.derivative1At(u, v)
+    return origin, u, v, du, dv
+
+
   def _generateRays(self, obj, mode, maxFanCount=inf, maxRaysPerFan=inf, **kwargs):
     '''
     This generator yields each ray to be traced for one simulation iteration.
@@ -191,29 +298,29 @@ class SurfaceSourceProxy(GenericSourceProxy):
     # make sure GUI does not freeze
     keepGuiResponsiveAndRaiseIfSimulationDone()
 
-    # fan-mode: generate fans of rays in spherical coordinates
+    # identify all faces that take part in the emission, split total 
+    # emitted rays according to face area
+    allFaces = []
+    for (part, faces) in obj.ActiveSurfaces:
+      if faces and len(faces):
+        # if faces were explicitly selected, add them to total list
+        selectedFaces = [getattr(part.Shape, f) for f in faces if f]
+        if len(selectedFaces):
+          allFaces.extend(selectedFaces)
+
+        # if not faces were explicitly selected, add all faces of the body the list
+        else:
+          allFaces.extend(part.Shape.Faces)
+
+    # calculate weight of each face by its area
+    _allAreas = [f.Area for f in allFaces]
+    allWeights = array(_allAreas)/sum(_allAreas)
+
+    # fan-mode: generate rays with face-normal orientation and approximately uniform spacing on the surface
     if mode == 'fans':
 
       # determine how many rays to place in fan mode
       rayCountFanMode = obj.RayCountFanMode
-
-      # identify all faces that take part in the emission, split total 
-      # emitted rays according to face area
-      allFaces = []
-      for (part, faces) in obj.ActiveSurfaces:
-        if faces and len(faces):
-          # if faces were explicitly selected, add them to total list
-          selectedFaces = [getattr(part.Shape, f) for f in faces if f]
-          if len(selectedFaces):
-            allFaces.extend(selectedFaces)
-
-          # if not faces were explicitly selected, add all faces of the body the list
-          else:
-            allFaces.extend(part.Shape.Faces)
-
-      # calculate weight of each face by its area
-      _allAreas = [f.Area for f in allFaces]
-      allWeights = array(_allAreas)/sum(_allAreas)
 
       # function that rounds ray counts to integers 1, 4, 9 or greater
       # these are the reasonable numbers of rays to place per pace
@@ -253,7 +360,8 @@ class SurfaceSourceProxy(GenericSourceProxy):
                               faceNormal=face.normalAt(u,v),
                               theta=0, phi=0)
 
-    # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
+    # true/pseudo random mode: place rays randomly distributed over the surface with 
+    # angular distribution given by LocalPowerDensity
     elif mode == 'true' or mode == 'pseudo':
 
       # determine how many rays to place in one iteration
@@ -261,6 +369,31 @@ class SurfaceSourceProxy(GenericSourceProxy):
       if settings := find.activeSimulationSettings():
         raysPerIteration = settings.RaysPerIteration
       raysPerIteration *= obj.RaysPerIterationScale
+
+      # prepare random variable
+      vrv = self._getVrv(obj)
+
+      # repeat raysPerIteration times
+      for _ in range(int(round(raysPerIteration))):
+
+        # randomly select face, weigh probability using face area
+        face = random.choice(allFaces, p=allWeights)
+
+        # roll random position on the selected surface
+        origin, u, v, du, dv = self._drawRandomPositionOnFace(obj, face)
+
+        # create/get random variable for theta and phi and draw samples 
+        theta, phi = vrv.draw()
+
+        # this loop may run for quite some time, keep GUI responsive by handling events
+        keepGuiResponsiveAndRaiseIfSimulationDone()
+
+        # create and return ray
+        yield self._makeRay(obj, 
+                            origin=origin, 
+                            faceTangent=du if du.Length>10*distTolerance else [du,dv][argmax([du.Length, dv.Length])],
+                            faceNormal=face.normalAt(u,v),
+                            theta=theta, phi=phi)
 
       raise ValueError('not implemented')
 
@@ -283,7 +416,7 @@ class AddSurfaceSource(AddGenericSource):
         ('ActiveSurfaces', [], 'LinkSubList', 'List of surfaces that we want to emit rays from. '
                                'Selecting bodies without specifying individual faces implies '
                                'that all faces of the body emit.'),
-        ('LocalPowerDensity', 'cos(theta)', 'String',  
+        ('PowerDensity', 'cos(theta)', 'String',  
                   'Emitted optical power per solid angle at each surface element. '
                   'The expression may contain any mathematical '
                   'function contained in the numpy module and the polar angle "theta" '
@@ -293,8 +426,11 @@ class AddSurfaceSource(AddGenericSource):
       ]),
       ('OpticalSimulationSettings', [
         *self.defaultSimulationSettings(obj),
-        ('ThetaRandomNumberGeneratorMode', '?', 'String', ''),
+        ('RandomNumberGeneratorMode', '?', 'String', ''),
         ('ThetaResolutionNumericMode', '1e6', 'String', ''),
+        ('UVSamplingInitialResolution', '5', 'String', ''),
+        ('UVSamplingMaxRelAreaElementChange', '0.1', 'String', ''),
+        ('ThetaDomain', '0,pi/2', 'String', ''),
         ('RayCountFanMode', 100, 'Integer', 'Total number of rays to distribute over all '
                                  'emitting surfaces in fan mode.'),
        ]),

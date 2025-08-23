@@ -278,9 +278,18 @@ class VectorRandomVariable:
       variableRangesInBetween.append((_range[1:]+_range[:-1])/2)
     variableGrids = meshgrid(*variableRangesInBetween)
 
-    # evaluate expression
+    # evaluate expression on grid
     exprLam = sy.lambdify(self._variables, expr)
     gridProbs = exprLam(*variableGrids)
+    return self._lambdasFromSampled(variableGrids, gridProbs, varI, expr=expr,
+                                    variableRanges=variableRanges,
+                                    variableRangesInBetween=variableRangesInBetween)
+
+
+  def _lambdasFromSampled(self, variableGrids, gridProbs, varI, expr=None,
+                          variableRanges=None, variableRangesInBetween=None):
+    if variableRangesInBetween is None:
+      variableRangesInBetween = [ (_range[1:]+_range[:-1])/2 for _range in variableRanges]
 
     # if gridProbs is scalar replace it with array of same shape as variable grid
     if not hasattr(gridProbs, 'shape'):
@@ -656,3 +665,26 @@ class ScalarRandomVariable(VectorRandomVariable):
 
   def draw(self, N=None, **kwargs):
     return super().draw(N=N, **kwargs)[0]
+
+
+class SampledVectorRandomVariable(VectorRandomVariable):
+  def __init__(self, variableRanges, gridProbs):
+    self._variableRangesInBetween = variableRanges
+    self._variableRanges = [concatenate([
+            [_range[0]-(_range[1]-_range[0])/2],
+            (_range[:-1]+_range[1:])/2,
+            [_range[-1]+(_range[-1]-_range[-2])/2],
+          ]) for _range in variableRanges]
+    self._variableGrids = meshgrid(*self._variableRangesInBetween)
+    self._gridProbs = gridProbs
+    self._variables = ['abcdefghij'[i] for i in range(len(variableRanges))]
+
+  def compile(self, **kwargs):
+    'always compile in numeric mode'
+    self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
+    self._mode = 'numeric'
+
+  def _generateNumericScalarLambda(self, varI):
+    return self._lambdasFromSampled(self._variableGrids, self._gridProbs, varI, 
+                                    variableRangesInBetween=self._variableRangesInBetween,
+                                    variableRanges=self._variableRanges)
