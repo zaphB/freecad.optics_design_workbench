@@ -88,7 +88,10 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
     pattern = '**'
   io.verb(f'finding all result files in {basePath}/{pattern}/*-{kind}.pkl')
   def _makeGlob():
-    return glob.iglob(f'{basePath}/{pattern}/*-{kind}.pkl', recursive=True)
+    for p in glob.iglob(f'{basePath}/{pattern}/*-{kind}.pkl', recursive=True):
+      # skip progress folder
+      if not p.startswith(f'{basePath}/progress'):
+        yield p
 
   # group all files to consider by folder
   byFolder = {}

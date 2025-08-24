@@ -231,9 +231,11 @@ class SurfaceSourceProxy(PointSourceProxy):
     def calcPdA(U, V):
       P = []
       dA = []
+      valid = []
       for u in U:
         dA.append([])
         P.append([])
+        valid.append([])
         for v in V:
           # this loop may run for quite some time, keep GUI responsive by handling events
           keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -241,13 +243,16 @@ class SurfaceSourceProxy(PointSourceProxy):
           # calc points and derivatives and construct result array
           p = _calcP(u, v)
           P[-1].append(p)
-          if _isOnFace(tuple(p)):
-            du, dv = _calcDeriv(u, v)
-            dA[-1].append(du.cross(dv).Length)
-          else:
-            dA[-1].append(nan)
+          valid[-1].append(_isOnFace(tuple(p)))
+          du, dv = _calcDeriv(u, v)
+
+          # IMPORTANT: do not get the idea to set area elements outside of shape to NaN or similar,
+          #            this will degrade the random number generator resolution close to the face
+          #            boundaries! Therefore we have to calculate area elements for the entire UV-space,
+          #            even the UV points that are not on the face, i.e. valid[i,j]==False
+          dA[-1].append(du.cross(dv).Length)
       dA, P = array(dA), array(P)
-      return P, dA
+      return P, dA, valid
 
     # create simple rectilinear grid to begin with, increase sampling density until at least 9 valid points are found
     resolution = max([ 3, int(round(float(obj.UVSamplingInitialResolution))) ])
@@ -256,8 +261,8 @@ class SurfaceSourceProxy(PointSourceProxy):
       keepGuiResponsiveAndRaiseIfSimulationDone()
 
       U, V = linspace(uMin, uMax, resolution), linspace(vMin, vMax, resolution)
-      P, dA = calcPdA(U, V)
-      validCount = sum(dA==dA)
+      P, dA, valid = calcPdA(U, V)
+      validCount = sum(valid)
       if validCount >= 9:
         break
       resolution *= 2
@@ -268,15 +273,12 @@ class SurfaceSourceProxy(PointSourceProxy):
     maxAreaElementDiff = float(obj.UVSamplingMaxRelAreaElementChange)
     while True:
       # update P and dA arrays
-      P, dA = calcPdA(U, V)
+      P, dA, valid = calcPdA(U, V)
 
       # calc relative difference of neighboring area elements
-      def _nanToNinf(A):
-        A[A!=A] = -inf
-        return A 
       _meanA = mean(dA[isfinite(dA)])
-      areaDiffs1 = _nanToNinf(abs(( (dA[1:,:]-dA[:-1,:]) / _meanA ))).max(axis=1)
-      areaDiffs2 = _nanToNinf(abs(( (dA[:,1:]-dA[:,:-1]) / _meanA ))).max(axis=0)
+      areaDiffs1 = abs(( (dA[1:,:]-dA[:-1,:]) / _meanA )).max(axis=1)
+      areaDiffs2 = abs(( (dA[:,1:]-dA[:,:-1]) / _meanA )).max(axis=0)
       maxDiff1, maxDiff2 = areaDiffs1.max(), areaDiffs2.max()
 
       # this loop may run for quite some time, keep GUI responsive by handling events
@@ -319,7 +321,6 @@ class SurfaceSourceProxy(PointSourceProxy):
     #pcolormesh(U, V, dA.T)
     #xlabel('u'); ylabel('v'); colorbar().set_label('dA')
     #show()
-    dA[dA!=dA] = 0
     return U, V, dA
 
 
