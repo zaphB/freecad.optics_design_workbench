@@ -78,16 +78,20 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
   "pattern" are returned. Pattern can contain glob patterns such as * and **.
   
   As as side effect of the search, pkl files found in the same folders are
-  chunked up to a filesize of "optimalFilesize" to speed up loading them.
-  Since this chunking may take some time, do not expect this function to
-  finish instantaneously. To use this from GUI contexts, pass the GUI update
-  function as updateGuiCallback. updateGuiCallback will be called as often as
-  possible.
+  chunked up to a filesize of "optimalFilesize" to speed up loading them the 
+  next time. Since this chunking may take some time, do not expect this 
+  function to finish instantaneously. To use this from GUI contexts, pass
+  the GUI update function as updateGuiCallback. updateGuiCallback will be
+  called as often as possible.
   '''
   if pattern == '*':
     pattern = '**'
+  io.verb(f'finding all result files in {basePath}/{pattern}/*-{kind}.pkl')
   def _makeGlob():
-    return glob.iglob(f'{basePath}/{pattern}/*-{kind}.pkl', recursive=True)
+    for p in glob.iglob(f'{basePath}/{pattern}/*-{kind}.pkl', recursive=True):
+      # skip progress folder
+      if not p.startswith(f'{basePath}/progress'):
+        yield p
 
   # group all files to consider by folder
   byFolder = {}
@@ -142,7 +146,7 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
       mergeList.clear()
 
     # only consider files that did not change in the last hour
-    for name, size in sorted([(n, s) for n, t, s in namesTimesSizes if time.time()-t > 60*60],
+    for name, size in sorted([(n, s) for n, t, s in namesTimesSizes if time.time()-t > 5*60],
                               key=lambda e: e[0]):
       updateGuiCallback()
       # if this file would make the current merge collection much larger than optimal

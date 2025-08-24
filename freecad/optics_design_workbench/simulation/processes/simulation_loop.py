@@ -363,11 +363,12 @@ def runSimulation(action, slaveInfo={}):
 
       # actually launch workers
       for workerNo in range(backgroundWorkers):
-        _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, simulationRunFolder=simulationRunFolder))
+        _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
+                                                                  simulationRunFolder=simulationRunFolder))
         freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
 
     # doing post-worker-launch init
-    io.verb(f'doing post-worker-lauch init of all components...')
+    io.verb(f'doing post-worker-launch init of all components...')
     for obj in itertools.chain(freecad_elements.find.lightSources(), 
                                 freecad_elements.find.relevantOpticalObjects()):
       obj.Proxy.onInitializeSimulation(obj=obj, state='post-worker-launch', ident='master' if isMasterProcess() else 'worker')
@@ -436,10 +437,34 @@ def runSimulation(action, slaveInfo={}):
             # file if one of the specified end criteria is reached)
             store.getProgress()
         
-            # chunk result files every five hours to make loading faster
-            if time.time()-lastResultChunking > 5*60*60:
+            # chunk result files every hour to make loading the results faster later
+            if time.time()-lastResultChunking > 60*60:
+              io.verb(f'chunking result files...')
               lastResultChunking = time.time()
               store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
+
+            # kill and restart workers after they reach their end-of-life that to 
+            # circumvent memory leaks
+            for worker in _BACKGROUND_PROCESSES:
+              if time.time() > worker.endOfLife:
+                io.verb(f'killing worker {worker} that reached end of life...')
+                _t0 = time.time()
+                while worker.isRunning():
+                  if time.time()-_t0 < 7:
+                    w.quit()
+                  elif time.time()-_t0 < 10:
+                    w.terminate()
+                  else:
+                    w.kill()
+                break
+            # start new worker after old one was killed
+            while len(_BACKGROUND_PROCESSES) < backgroundWorkers:
+              _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
+                                                      simulationRunFolder=simulationRunFolder))
+
+        # keep GUI responsive and limit loop speed
+        time.sleep(1e-2)
+        freecad_elements.keepGuiResponsive()
 
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
         if not continuous:
@@ -452,13 +477,41 @@ def runSimulation(action, slaveInfo={}):
     # mainloop B: do not do simulation work if we are the master and draw is False, just
     #             poll progress instead, do not use a loop, but a QTimer
     io.verb(f'gui process is lazy and just tracks progress')
+    lastResultChunking = time.time()
 
     timer = QTimer()
     def updateProgress():
+      nonlocal lastResultChunking
+      
       if store and isMasterProcess():
         # make sure progress is updated (this will also place cancel/done files if one 
         # of the specified end criteria is reached)
         store.getProgress()
+
+        # chunk result files every hour to make loading the results faster later
+        if time.time()-lastResultChunking > 60*60:
+          io.verb(f'chunking result files...')
+          lastResultChunking = time.time()
+          store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
+
+        # kill and restart workers after they reach their end-of-life that to 
+        # circumvent memory leaks
+        for worker in _BACKGROUND_PROCESSES:
+          if time.time() > worker.endOfLife:
+            io.verb(f'killing worker {worker} that reached end of life...')
+            _t0 = time.time()
+            while worker.isRunning():
+              if time.time()-_t0 < 7:
+                w.quit()
+              elif time.time()-_t0 < 10:
+                w.terminate()
+              else:
+                w.kill()
+            break
+        # start new worker after old one was killed
+        while len(_BACKGROUND_PROCESSES) < backgroundWorkers:
+          _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
+                                                  simulationRunFolder=simulationRunFolder))
 
       # stop if canceled or done
       if isFinished():

@@ -233,8 +233,8 @@ class MakeSimulationSettings:
   def GetResources(self):
     return dict(Pixmap=find.iconpath('settings'),
                 Accel='',
-                MenuText='Inserts a simulation settings object into the project tree.',
-                ToolTip='Inserts a simulation settings object into the project tree. Multiple '
+                MenuText='Make a simulation settings object',
+                ToolTip='Add a simulation settings object to the current project. Multiple '
                         'settings objects can coexist but only one can be active at a time.')
 
 def loadSimulationSettings():
