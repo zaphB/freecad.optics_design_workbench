@@ -16,14 +16,15 @@ from numpy import *
 import scipy.optimize
 import sympy as sy
 
-from .generic_source import *
-from .common import *
-from ..simulation.tracing_cache import *
 from . import ray
 from . import find
 from .. import simulation
 from .. import distributions
 from .. import io
+
+from .generic_source import *
+from .common import *
+from ..simulation.tracing_cache import *
 
 #####################################################################################################
 class PointSourceProxy(GenericSourceProxy):
@@ -238,7 +239,7 @@ class PointSourceProxy(GenericSourceProxy):
                              f'is forbidden if focal length is zero.')
 
       # substitute r,x,y by theta,phi expressions
-      f = f'{abs(float(getattr(obj, 'FocalLength', 1))):.8e}'
+      f = f'{abs(float(getattr(obj, "FocalLength", 1))):.8e}'
       densityString = (sy.sympify(densityString)
                           .subs('r', sy.sympify(f'(tan(theta)*{f})'))
                           .subs('x', sy.sympify(f'(tan(theta)*cos(phi)*{f})'))
