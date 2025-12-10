@@ -153,13 +153,17 @@ class Ray():
       elif obj.OpticalType == 'Lens':
         # ray enters lens
         if isEntering:
+          # from medium to medium
           if currentMedium is not None:
-            raise ValueError('ray entered lens while already being inside a medium, '
-                             'get rid of any overlapping lenses/transmission gratings '
-                             'in your project')
-          n1 = 1
-          currentMedium = obj
-          n2 = currentMedium.RefractiveIndex
+            n1 = currentMedium.RefractiveIndex
+            currentMedium = obj
+            n2 = currentMedium.RefractiveIndex
+
+          # from vacuum to medium
+          else:
+            n1 = 1
+            currentMedium = obj
+            n2 = currentMedium.RefractiveIndex
 
         # ray exits lens (or may suffer total reflection)
         else:
@@ -176,8 +180,9 @@ class Ray():
                                       n1, n2, normal)
 
         # if ray traveled in exit direction and not total reflection occurred,
-        # set current medium to vacuum
-        if not isEntering and not isTotalReflection:
+        # set current medium to vacuum, also make sure that the ray was exiting
+        # the body of the current medium
+        if not isEntering and not isTotalReflection and currentMedium == obj:
           currentMedium = None
 
           # increment sequence index only after ray left lens 
