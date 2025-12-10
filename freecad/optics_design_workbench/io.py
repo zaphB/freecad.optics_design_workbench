@@ -65,11 +65,11 @@ def _init(forceReInit=False):
 
     # isMasterProcess() returns True => we are the master process => open master log
     elif processes.isMasterProcess():
-      setLogfile(_getLogDir()+'/'+_LOGFILE_NAME)
+      setLogfile(os.path.join(_getLogDir(), _LOGFILE_NAME))
 
     # isMasterProcess() returns False => we are not the master process => open slave log
     else:
-      setLogfile(_getLogDir()+'/'+_LOGFILE_NAME[:-4]+f'.pid{os.getpid()}')
+      setLogfile(os.path.join(_getLogDir(), _LOGFILE_NAME[:-4]+f'.pid{os.getpid()}'))
 
   if _LOG_DIR is None:
     return
@@ -77,11 +77,11 @@ def _init(forceReInit=False):
   os.makedirs(_LOG_DIR, exist_ok=True)
   for oldlog in [f for f in os.listdir(_LOG_DIR)
                     if f != _LOGFILE_NAME and f.startswith(_LOGFILE_NAME)]:
-    os.makedirs(_LOG_DIR+'/'+_ROTATE_DIR, exist_ok=True)
-    os.rename(_LOG_DIR+'/'+oldlog, _LOG_DIR+'/'+_ROTATE_DIR+'/'+oldlog)
+    os.makedirs(os.path.join(_LOG_DIR, _ROTATE_DIR), exist_ok=True)
+    os.rename(os.path.join(_LOG_DIR, oldlog), os.path.join(_LOG_DIR, _ROTATE_DIR, oldlog))
 
   if not _IS_INIT:
-    h = handlers.TimedRotatingFileHandler(_LOG_DIR+'/'+_LOGFILE_NAME, when='W6')
+    h = handlers.TimedRotatingFileHandler(os.path.join(_LOG_DIR, _LOGFILE_NAME), when='W6')
     h.setFormatter(
           logging.Formatter(
               r'%(asctime)s.%(msecs)03d000000 %(levelname)s: '
@@ -105,7 +105,7 @@ def setLogfile(name):
       h.close()
   name = os.path.abspath(str(name))
   baseDir = None
-  if '/' in name:
+  if len(os.path.split(name)) > 1:
     baseDir, name = os.path.split(name)
   if not name.endswith('.log'):
     name += '.log'
@@ -141,14 +141,14 @@ def gatherSlaveFiles():
         # rename file to prevent new lines being written while we parse it
         # the slave process will recreate its own logfile if new messages appear
         while True:
-          tmpName = f'{_LOG_DIR}/{int(random.random()*1e12)}.log'
+          tmpName = os.path.join(_LOG_DIR, f'{int(random.random()*1e12)}.log')
           if not os.path.exists(tmpName):
             break
-        os.rename(_LOG_DIR+'/'+f, tmpName)
+        os.rename(os.path.join(_LOG_DIR, f), tmpName)
 
         # append file to main log
         with open(tmpName, 'r') as inFile:
-          with open(_LOG_DIR+'/'+_LOGFILE_NAME, 'a') as outFile:
+          with open(os.path.join(_LOG_DIR, _LOGFILE_NAME), 'a') as outFile:
             for line in inFile:
               outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}\n')
         
