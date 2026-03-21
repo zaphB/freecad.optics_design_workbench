@@ -99,7 +99,8 @@ class Ray():
       numIntersections += 1
 
       # find next intersection
-      intersect = self.findNearestIntersection(currentPoint, currentDirection, 
+      intersect = self.findNearestIntersection(currentPoint, currentDirection,
+                                               currentMedium=currentMedium,
                                                maxRayLength=maxRayLength, 
                                                sequenceIndex=sequenceIndex)
       if intersect is None:
@@ -267,7 +268,7 @@ class Ray():
         distTol = float(settings.DistanceTolerance)
     return max([distTol, 1e-6])
 
-  def findNearestIntersection(self, start, direction, maxRayLength, distTol=None, sequenceIndex=None):
+  def findNearestIntersection(self, start, direction, currentMedium, maxRayLength, distTol=None, sequenceIndex=None):
     '''
     Find the closest relevant optical object intersecting with the ray
     of given start and direction. Start and direction are expected to be
@@ -325,10 +326,18 @@ class Ray():
                         and vert.distToShape(face)[0] < distTol):
                     intersects.append([group, face, vec, (vec-start).Length])
 
-    # return intersection that is closest to start (if any)
-    if len(intersects):
-      return sorted(intersects, key=lambda e: e[-1])[0][:-1]
-  
+    # return intersection that is closest to start (if any), if multiple intersections 
+    # exist that are closer than 2*distTol to the the closest intersection, prefer the
+    # furthest, and the ones that have nothing to do with the current medium 
+    minDist = inf
+    result = None
+    for group, face, vec, distance in sorted(intersects, key=lambda e: e[-1]):
+      minDist = min([minDist, distance])
+      if distance > minDist + 2*distTol:
+        break
+      if result is None or group != currentMedium:
+        result = (group, face, vec)
+    return result
   
   def getNormal(self, nearest_part, origin, neworigin, epsLength=1e-6):
     '''
