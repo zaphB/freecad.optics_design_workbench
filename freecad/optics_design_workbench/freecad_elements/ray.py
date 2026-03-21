@@ -168,11 +168,13 @@ class Ray():
 
         # ray exits lens (or may suffer total reflection)
         else:
+          # currentMedium=None will only occur in rare cases, e.g. a ray just
+          # touching a sharp corner of a lens, in these cases ignoring the lens
+          # (because n1 is set to 1) is fine. 
           if currentMedium is None:
-            raise ValueError('ray exited lens without having entered before, '
-                             'get rid of any overlapping lenses/transmission gratings '
-                             'in your project')
-          n1 = currentMedium.RefractiveIndex
+            n1 = 1
+          else:
+            n1 = currentMedium.RefractiveIndex
           n2 = 1
 
         # update ray direction according to Snell's law
@@ -225,10 +227,9 @@ class Ray():
           # apply lens-like refraction if ray is leaving transmission grating
           else:
             if currentMedium is None:
-              raise ValueError('ray exited grating without having entered before, '
-                               'get rid of any overlapping lenses/transmission gratings '
-                               'in your project')
-            n1 = currentMedium.RefractiveIndex
+              n1 = 1
+            else:
+              n1 = currentMedium.RefractiveIndex
             n2 = 1
 
             # update ray direction according to Snell's law
@@ -328,15 +329,20 @@ class Ray():
 
     # return intersection that is closest to start (if any), if multiple intersections 
     # exist that are closer than 2*distTol to the the closest intersection, prefer the
-    # furthest, and the ones that have nothing to do with the current medium 
+    # closest, and the ones that have nothing to do with the current medium 
     minDist = inf
     result = None
     for group, face, vec, distance in sorted(intersects, key=lambda e: e[-1]):
       minDist = min([minDist, distance])
+      # end loop if we are further away from closest intersection than 2*distTol
       if distance > minDist + 2*distTol:
         break
+      # overwrite result if no result yet of if intersection is not with current medium
       if result is None or group != currentMedium:
         result = (group, face, vec)
+      # stop looking after intersection not with current medium was found
+      if group != currentMedium:
+        break
     return result
   
   def getNormal(self, nearest_part, origin, neworigin, epsLength=1e-6):
