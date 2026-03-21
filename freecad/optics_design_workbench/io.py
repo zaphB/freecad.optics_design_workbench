@@ -10,6 +10,7 @@ import os
 import datetime
 import random
 import warnings
+import pickle
 
 _LOG_DIR                    = None
 _LOGFILE_NAME               = f'optics_design_workbench.log'
@@ -235,3 +236,14 @@ def secondsToStr(secs, length=2):
     if res or num:
       res.append(str(num) + label)
   return ' '.join(res[:length]) or '0s'
+
+
+# unpickler that is robust with respect to numpy.core/numpy._core
+class RobustUnpickler(pickle.Unpickler):
+  def find_class(self, module, name):
+    if module.startswith('numpy._core'):
+      module = 'numpy.core'+module[11:]
+    return super().find_class(module, name)
+
+def unpickle(file):
+  return RobustUnpickler(file).load()

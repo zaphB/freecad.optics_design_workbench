@@ -86,11 +86,13 @@ class SimulationSettingsProxy():
       try:
         val = float(val)
       except ValueError:
-        setattr(obj, prop, '0.01')
+        setattr(obj, prop, '1e-6')
       else:
         # limit range
-        if val < 1e-12:
-          setattr(obj, prop, '1e-12')
+        if val > 1.1:
+          setattr(obj, prop, '1')
+        if val < .9e-9:
+          setattr(obj, prop, '1e-9')
 
     # if sequential mode objects are altered, make sure empties are removed
     if 'SequentialMode' in prop:
@@ -170,7 +172,7 @@ class MakeSimulationSettings:
               'and pseudo random modes.'),
         ('MaxIntersections', 100, 'Float', 'Maximum number of intersections (reflections/refractions/'
               'detections) that a ray may have with optical objects.'),
-        ('DistanceTolerance', '0.01', 'String', 'If a ray is closer to a surface than this tolerance, '
+        ('DistanceTolerance', '1e-6', 'String', 'If a ray is closer to a surface than this tolerance, '
               'it is considered to intersect with the surface.'),
         ('MaxRayLength', 1000, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
               'may be up to MaxIntersections*MaxRayLength. This is not a strict '

@@ -50,11 +50,15 @@ Repository = "https://github.com/zaphB/freecad.optics_design_workbench.git"
 dev = [
     "pytest>=8.3.4",
     "pytest-monitor",
+    "pytest-sugar",
     "jupyter",
     "ipykernel",
 ]
 
 [tool.pytest.ini_options]
-minversion = "6.0"
-addopts = "-ra -q"
-testpaths = ["test"]
+pythonpath = [
+  'freecad/optics_design_workbench',
+]
+addopts = [
+  "--import-mode=importlib",
+]

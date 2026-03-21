@@ -285,7 +285,7 @@ def runSimulation(action, slaveInfo={}):
 
     # determine whether to draw rays or not
     draw = True
-    drawContinuous = False
+    drawContinuous = True
     if settings := freecad_elements.find.activeSimulationSettings():
       drawContinuous = settings.ShowRaysInContinuousMode
     if action in ('pseudo', 'true'):
@@ -298,15 +298,17 @@ def runSimulation(action, slaveInfo={}):
     # determine number if workers to spawn (single for single shot simulations, 
     # according to settings for more than one iteration)
     workers = 1
-    if continuous and (settings := freecad_elements.find.activeSimulationSettings()):
-      if settings.WorkerProcessCount == 'num_cpus':
-        workers = cpuCount()
-      else:
-        workers = int(settings.WorkerProcessCount)
+    if continuous:
+      workers = cpuCount()
+      if settings := freecad_elements.find.activeSimulationSettings():
+        if settings.WorkerProcessCount == 'num_cpus':
+          workers = cpuCount()
+        else:
+          workers = int(settings.WorkerProcessCount)
 
     # find limits if any to stop simulation
-    endAfterIterations = 10
-    endAfterRays = inf
+    endAfterIterations = inf
+    endAfterRays = 1e4
     endAfterHits = inf
     if settings := freecad_elements.find.activeSimulationSettings():
       _parse = lambda x: int(round(float(x))) if x!='inf' else inf

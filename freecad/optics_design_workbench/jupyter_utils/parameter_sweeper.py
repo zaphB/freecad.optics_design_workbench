@@ -128,7 +128,7 @@ class SweeperOptimizeWorker:
     try:
       if os.path.exists(self.historyDumpPath()):
         with open(self.historyDumpPath(), 'rb') as f:
-          self._history = pickle.load(f)
+          self._history = io.unpickle(f)
         os.remove(self.historyDumpPath())
     except Exception:      
       io.verb(f'fetching history from {self.historyDumpPath()} '

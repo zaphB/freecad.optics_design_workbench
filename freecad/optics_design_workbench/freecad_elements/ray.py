@@ -99,7 +99,8 @@ class Ray():
       numIntersections += 1
 
       # find next intersection
-      intersect = self.findNearestIntersection(currentPoint, currentDirection, 
+      intersect = self.findNearestIntersection(currentPoint, currentDirection,
+                                               currentMedium=currentMedium,
                                                maxRayLength=maxRayLength, 
                                                sequenceIndex=sequenceIndex)
       if intersect is None:
@@ -167,11 +168,13 @@ class Ray():
 
         # ray exits lens (or may suffer total reflection)
         else:
+          # currentMedium=None will only occur in rare cases, e.g. a ray just
+          # touching a sharp corner of a lens, in these cases ignoring the lens
+          # (because n1 is set to 1) is fine. 
           if currentMedium is None:
-            raise ValueError('ray exited lens without having entered before, '
-                             'get rid of any overlapping lenses/transmission gratings '
-                             'in your project')
-          n1 = currentMedium.RefractiveIndex
+            n1 = 1
+          else:
+            n1 = currentMedium.RefractiveIndex
           n2 = 1
 
         # update ray direction according to Snell's law
@@ -224,10 +227,9 @@ class Ray():
           # apply lens-like refraction if ray is leaving transmission grating
           else:
             if currentMedium is None:
-              raise ValueError('ray exited grating without having entered before, '
-                               'get rid of any overlapping lenses/transmission gratings '
-                               'in your project')
-            n1 = currentMedium.RefractiveIndex
+              n1 = 1
+            else:
+              n1 = currentMedium.RefractiveIndex
             n2 = 1
 
             # update ray direction according to Snell's law
@@ -267,7 +269,7 @@ class Ray():
         distTol = float(settings.DistanceTolerance)
     return max([distTol, 1e-6])
 
-  def findNearestIntersection(self, start, direction, maxRayLength, distTol=None, sequenceIndex=None):
+  def findNearestIntersection(self, start, direction, currentMedium, maxRayLength, distTol=None, sequenceIndex=None):
     '''
     Find the closest relevant optical object intersecting with the ray
     of given start and direction. Start and direction are expected to be
@@ -287,8 +289,7 @@ class Ray():
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
       if hasattr(group, 'Shape'):
-        sbb = cachedBoundBox(cachedShape(group))
-        #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
+        sbb = cachedBoundBox(cachedShape(group), enlarge=distTol)
         if ( ( not isfinite(maxRayLength)
                 or any([(sbb.getPoint(i)-start).Length
                                   < 10*maxRayLength 
@@ -302,8 +303,7 @@ class Ray():
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
-            fbb = cachedBoundBox(face)
-            fbb.enlarge(distTol)
+            fbb = cachedBoundBox(face, enlarge=distTol)
             if fbb.intersect(start, direction):
 
               # find intersection points and loop through all of them
@@ -325,10 +325,23 @@ class Ray():
                         and vert.distToShape(face)[0] < distTol):
                     intersects.append([group, face, vec, (vec-start).Length])
 
-    # return intersection that is closest to start (if any)
-    if len(intersects):
-      return sorted(intersects, key=lambda e: e[-1])[0][:-1]
-  
+    # return intersection that is closest to start (if any), if multiple intersections 
+    # exist that are closer than 2*distTol to the the closest intersection, prefer the
+    # closest, and the ones that have nothing to do with the current medium 
+    minDist = inf
+    result = None
+    for group, face, vec, distance in sorted(intersects, key=lambda e: e[-1]):
+      minDist = min([minDist, distance])
+      # end loop if we are further away from closest intersection than 2*distTol
+      if distance > minDist + 2*distTol:
+        break
+      # overwrite result if no result yet of if intersection is not with current medium
+      if result is None or group != currentMedium:
+        result = (group, face, vec)
+      # stop looking after intersection not with current medium was found
+      if group != currentMedium:
+        break
+    return result
   
   def getNormal(self, nearest_part, origin, neworigin, epsLength=1e-6):
     '''
