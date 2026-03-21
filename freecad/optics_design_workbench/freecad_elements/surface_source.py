@@ -76,10 +76,10 @@ class SurfaceSourceProxy(PointSourceProxy):
 
   def _getDistTol(self, distTol=None):
     if distTol is None:
-      distTol = 1e-2
+      distTol = 1e-6
       if settings := find.activeSimulationSettings():
         distTol = float(settings.DistanceTolerance)
-    return max([distTol, 1e-6])
+    return max([distTol, 1e-9])
 
 
   def _makeSurfaceGrid(self, obj, face, totalGridPoints,

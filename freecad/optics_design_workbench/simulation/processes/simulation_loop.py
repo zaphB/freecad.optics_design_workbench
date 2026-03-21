@@ -298,11 +298,13 @@ def runSimulation(action, slaveInfo={}):
     # determine number if workers to spawn (single for single shot simulations, 
     # according to settings for more than one iteration)
     workers = 1
-    if continuous and (settings := freecad_elements.find.activeSimulationSettings()):
-      if settings.WorkerProcessCount == 'num_cpus':
-        workers = cpuCount()
-      else:
-        workers = int(settings.WorkerProcessCount)
+    if continuous:
+      workers = cpuCount()
+      if settings := freecad_elements.find.activeSimulationSettings():
+        if settings.WorkerProcessCount == 'num_cpus':
+          workers = cpuCount()
+        else:
+          workers = int(settings.WorkerProcessCount)
 
     # find limits if any to stop simulation
     endAfterIterations = inf

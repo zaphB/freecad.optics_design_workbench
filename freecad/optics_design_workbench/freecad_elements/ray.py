@@ -289,8 +289,7 @@ class Ray():
       # only care if bounding box is closer to start point than maxRayLength and 
       # if bounding box actually intersects with the ray
       if hasattr(group, 'Shape'):
-        sbb = cachedBoundBox(cachedShape(group))
-        #sbb.enlarge(distTol) => for some strange reason this causes off-centered profiles in gaussian-test, keep disabled for now...
+        sbb = cachedBoundBox(cachedShape(group), enlarge=distTol)
         if ( ( not isfinite(maxRayLength)
                 or any([(sbb.getPoint(i)-start).Length
                                   < 10*maxRayLength 
@@ -304,8 +303,7 @@ class Ray():
             keepGuiResponsiveAndRaiseIfSimulationDone()
 
             # only care if bounding box of face intersects with ray
-            fbb = cachedBoundBox(face)
-            fbb.enlarge(distTol)
+            fbb = cachedBoundBox(face, enlarge=distTol)
             if fbb.intersect(start, direction):
 
               # find intersection points and loop through all of them
