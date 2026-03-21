@@ -232,18 +232,18 @@ class PointSourceProxy(GenericSourceProxy):
       if isclose(float(getattr(obj, 'FocalLength', 1)), 0):
         for c in 'rxy':
           if c in ( densityString.replace('exp', '').replace('arcsin', '').replace('arccos', '')
-                                .replace('arctan', '').replace('arctan2', '').replace('arccot', '')
-                                .replace('arsinh', '').replace('arcosh', '').replace('artanh', '')
-                                .replace('arcoth', '') ):
+                                 .replace('arctan', '').replace('arctan2', '').replace('arccot', '')
+                                 .replace('arsinh', '').replace('arcosh', '').replace('artanh', '')
+                                 .replace('arcoth', '').replace('DiracDelta', '') ):
             raise ValueError(f'Variable {c} in power density expression {obj.PowerDensity} '
                              f'is forbidden if focal length is zero.')
 
       # substitute r,x,y by theta,phi expressions
       f = f'{abs(float(getattr(obj, "FocalLength", 1))):.8e}'
       densityString = (sy.sympify(densityString)
-                          .subs('r', sy.sympify(f'(tan(theta)*{f})'))
-                          .subs('x', sy.sympify(f'(tan(theta)*cos(phi)*{f})'))
-                          .subs('y', sy.sympify(f'(tan(theta)*sin(phi)*{f})')))
+                            .subs('r', sy.sympify(f'(tan(theta)*{f})'))
+                            .subs('x', sy.sympify(f'(tan(theta)*cos(phi)*{f})'))
+                            .subs('y', sy.sympify(f'(tan(theta)*sin(phi)*{f})')))
       if usePhi:
         return dict(
             probabilityDensity=densityString,
@@ -273,8 +273,8 @@ class PointSourceProxy(GenericSourceProxy):
 
       # substitute theta,x,y and by r,phi expressions
       densityString = (sy.sympify(densityString)
-                              .subs('x', sy.sympify(f'(r*cos(phi))'))
-                              .subs('y', sy.sympify(f'(r*sin(phi))')))
+                            .subs('x', sy.sympify(f'(r*cos(phi))'))
+                            .subs('y', sy.sympify(f'(r*sin(phi))')))
       if usePhi:
         return dict(
             probabilityDensity=densityString,

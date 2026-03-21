@@ -33,7 +33,7 @@ class Ray():
     self.initWavelength = wavelength
     self.metadata = metadata
   
-     
+  
   def traceRay(self, powerTol=1e-6, maxRayLength=None,
                maxIntersections=None, store=False,
                metadata={}):
@@ -69,9 +69,9 @@ class Ray():
     else:
       # setup defaults if no settings object exists
       if maxRayLength is None:
-        maxRayLength = 100 * self.lightSource.MaxRayLengthScale
+        maxRayLength = 1000 * self.lightSource.MaxRayLengthScale
       if maxIntersections is None:
-        maxIntersections = 10 * self.lightSource.MaxIntersectionsScale
+        maxIntersections = 100 * self.lightSource.MaxIntersectionsScale
       
       # default to empty metadata
       rayMetadata = {}
