@@ -17,7 +17,6 @@ import threading
 import queue
 import random
 import functools
-import pickle
 import shutil
 import traceback
 from atomicwrites import atomic_write
@@ -1274,7 +1273,7 @@ class RawFolder:
     for path in simulation.findPathsAndSanitize(self._path, pattern, kind):
       try:
         with open(path, 'rb') as _f:
-          data = pickle.load(_f)
+          data = io.unpickle(_f)
       except Exception as e:
         io.warn(f'failed to read {kind} file {path}: {e.__class__.__name__} "{e}"')
       else:

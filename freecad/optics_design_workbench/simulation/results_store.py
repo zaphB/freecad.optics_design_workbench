@@ -123,7 +123,7 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
           updateGuiCallback()
           try:
             with open(f'{base}/{name}', 'rb') as _f:
-              data = pickle.load(_f)
+              data = io.unpickle(_f)
           except Exception as e:
             io.warn(f'failed to read {kind} file {base}/{name}: {e.__class__.__name__} "{e}"')
           else:
@@ -553,7 +553,7 @@ class SimulationResults:
           latestFile = candidate[1]
           try:
             with open(monitorPath+'/'+latestFile, 'rb') as f:
-              progress = pickle.load(f)
+              progress = io.unpickle(f)
           except Exception:
             pass
           if progress:

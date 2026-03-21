@@ -13,7 +13,6 @@ from numpy import *
 import threading
 import time
 import os
-import pickle
 import traceback
 
 from .. import io
@@ -107,7 +106,7 @@ class _ProgressTacker:
         latest = sorted([f for f in os.listdir(f'{self.resultsFolder._path}/progress')
                                                       if f.startswith('master') ])[-1]
         with open(f'{self.resultsFolder._path}/progress/{latest}', 'rb') as _f:
-          p = pickle.load(_f)
+          p = io.unpickle(_f)
         self._previousProgressDict = p
       except (FileNotFoundError, IndexError):
         p = self._previousProgressDict or dict(

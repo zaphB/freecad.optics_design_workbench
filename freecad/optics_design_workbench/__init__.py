@@ -4,6 +4,7 @@ __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 __version__ = None
 
+
 def _determinePackageVersion():
   '''
   find out installed version of the workbench and set global variable

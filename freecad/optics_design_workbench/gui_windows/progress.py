@@ -5,7 +5,6 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
 
 from numpy import *
-import pickle
 import time
 import os
 

@@ -16,7 +16,6 @@ import tempfile
 import os
 import random
 import functools
-import pickle
 import shutil
 
 from .generic_source import *
@@ -93,7 +92,7 @@ class ReplaySourceProxy(GenericSourceProxy):
           if not self._isFileConsumed(obj, f'{r}/{f}'):
             data = {}
             with open(f'{r}/{f}', 'rb') as _f:
-              data = pickle.load(_f)
+              data = io.unpickle(_f)
             indices = list(range(len(data['powers'])))
             random.shuffle(indices)
             for i in indices:
