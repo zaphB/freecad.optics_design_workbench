@@ -29,8 +29,34 @@ from .. import io
 #####################################################################################################
 class SurfaceSourceProxy(PointSourceProxy):
 
+  def _properties(self):
+    return [
+      ('OpticalEmission', [
+        ('ActiveSurfaces', [], 'LinkSubList', 'List of surfaces that we want to emit rays from. '
+                               'Selecting bodies without specifying individual faces implies '
+                               'that all faces of the body emit.'),
+        ('PowerDensity', 'cos(theta)', 'String',  
+                  'Emitted optical power per solid angle at each surface element. '
+                  'The expression may contain any mathematical '
+                  'function contained in the numpy module and the polar angle "theta" '
+                  'to make the emission of each surface element depend on the emission angle.'
+                  'All rays placed by this light source begin on the selected surfaces.'),
+        ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
+      ]),
+      ('OpticalSimulationSettings', [
+        ('RandomNumberGeneratorMode', '?', 'String', ''),
+        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
+        ('UVSamplingInitialResolution', '5', 'String', ''),
+        ('UVSamplingMaxRelAreaElementChange', '0.1', 'String', ''),
+        ('ThetaDomain', '0,pi/2', 'String', ''),
+        ('RayCountFanMode', 100, 'Integer', 'Total number of rays to distribute over all '
+                                 'emitting surfaces in fan mode.'),
+       ]),
+    ]+super()._properties()
+
   def onChanged(self, obj, prop):
-    '''Do something when a property has changed'''
+    self._ensurePropertiesExist(obj)
+
     # first call onChanged of point source
     super().onChanged(obj, prop)
 
@@ -45,6 +71,8 @@ class SurfaceSourceProxy(PointSourceProxy):
 
 
   def onInitializeSimulation(self, obj, state, ident):
+    self._ensurePropertiesExist(obj)
+
     # reset cached face uv maps on every simulation start
     io.verb('clearing self._sampleAreaElementsOnFace cache')
     self._sampleAreaElementsOnFace.cache_clear()
@@ -468,51 +496,16 @@ class SurfaceSourceViewProxy(GenericSourceViewProxy):
 #####################################################################################################
 class AddSurfaceSource(AddGenericSource):
 
+  def __init__(self):
+    super().__init__(SurfaceSourceProxy, SurfaceSourceViewProxy, 'OpticalSurfaceSource')
+
   def Activated(self):
-    # create new feature python object
-    obj = App.activeDocument().addObject('App::LinkGroupPython', 'OpticalSurfaceSource')
-
-    # create properties of object
-    for section, entries in [
-      ('OpticalEmission', [
-        ('ActiveSurfaces', [], 'LinkSubList', 'List of surfaces that we want to emit rays from. '
-                               'Selecting bodies without specifying individual faces implies '
-                               'that all faces of the body emit.'),
-        ('PowerDensity', 'cos(theta)', 'String',  
-                  'Emitted optical power per solid angle at each surface element. '
-                  'The expression may contain any mathematical '
-                  'function contained in the numpy module and the polar angle "theta" '
-                  'to make the emission of each surface element depend on the emission angle.'
-                  'All rays placed by this light source begin on the selected surfaces.'),
-        ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
-      ]),
-      ('OpticalSimulationSettings', [
-        *self.defaultSimulationSettings(obj),
-        ('RandomNumberGeneratorMode', '?', 'String', ''),
-        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
-        ('UVSamplingInitialResolution', '5', 'String', ''),
-        ('UVSamplingMaxRelAreaElementChange', '0.1', 'String', ''),
-        ('ThetaDomain', '0,pi/2', 'String', ''),
-        ('RayCountFanMode', 100, 'Integer', 'Total number of rays to distribute over all '
-                                 'emitting surfaces in fan mode.'),
-       ]),
-    ]:
-      for name, default, kind, tooltip in entries:
-        obj.addProperty('App::Property'+kind, name, section, tooltip)
-        setattr(obj, name, default)
-
-    # register custom proxy and view provider proxy
-    obj.Proxy = SurfaceSourceProxy()
-    if App.GuiUp:
-      obj.ViewObject.Proxy = SurfaceSourceViewProxy()
+    obj = super().Activated()
 
     # make mode readonly
     obj.setEditorMode('RandomNumberGeneratorMode', 1)
 
     return obj
-
-  def IsActive(self):
-    return True
 
   def GetResources(self):
     return dict(Pixmap=self.iconpath(),

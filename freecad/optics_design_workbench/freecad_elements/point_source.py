@@ -29,8 +29,48 @@ from ..simulation.tracing_cache import *
 #####################################################################################################
 class PointSourceProxy(GenericSourceProxy):
 
+  def _properties(self):
+    return [
+      ('OpticalEmission', [
+        ('PowerDensity', 'exp(-theta^2/0.01)', 'String',  
+                  'Emitted optical power per solid angle. The expression may contain any mathematical '
+                  'function contained in the numpy module, the polar angle "theta" the azimuthal '
+                  'angle "phi", the radial distance "r" and the cartesian coordinates "x" and "y". '
+                  '"theta" and "phi" refer to a spherical coordinate system centered in the focal '
+                  'point of the light source. '
+                  '"r", "x" and "y" refer to a coordinate system in the emission plane (=plane '
+                  'orthogonal to optical axis) centered at the intersection of emission plane and '
+                  'optical axis. '
+                  'All rays placed by this light source begin in the emission plane.'),
+        ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
+        ('FocalLength', '0', 'String', 'Distance from the ray origin at which all rays (would) intersect. '
+                  'Positive values result in converging, negative values result in a diverging '
+                  'beam. For a parallel light source use "inf".'),
+        ('Divergence', '-', 'String', 'Angle at which a rays at 1/e emission power diverge from the '
+                  'optical axis. This option is writable only if the only unknown in the Power Density '
+                  'expression is "r" (no theta, phi, x, y), if Power Density drops below 1/e for a '
+                  'finite r and if Focal Length is finite. Changing divergence will update Focal Length '
+                  'and vice versa. The option is readable if "theta" exists in the Power Density '
+                  'expression.'),
+        ('ThetaDomain', '0, pi/4', 'String', 'Min and max value for polar angle theta to consider.'),
+        ('RadiusDomain', '0, 10', 'String', 'Min and max value for azimuthal angle phi to consider.'),
+        ('PhiDomain', '0, 2*pi', 'String', 'Min and max value for radial distance r to consider.'),
+      ]),
+      ('OpticalSimulationSettings', [
+        ('RandomNumberGeneratorMode', '?', 'String', ''),
+        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
+        ('RadiusResolutionNumericMode', '1e6', 'String', ''),
+        ('PhiResolutionNumericMode', '3', 'String', ''),
+        ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
+        ('FanPhi0', '0', 'String', 'Change this to rotate fans around optical axis.'),
+        ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
+      ]),
+    ]+super()._properties()
+
+
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
+    self._ensurePropertiesExist(obj)
 
     # make sure domains are valid
     if prop in ('PhiDomain', 'ThetaDomain', 'RadiusDomain'):
@@ -441,6 +481,9 @@ class PointSourceProxy(GenericSourceProxy):
     # make sure GUI does not freeze
     keepGuiResponsiveAndRaiseIfSimulationDone()
 
+    # ensure that all required properties exist for this object 
+    self._ensurePropertiesExist(obj)
+
     # fan-mode: generate fans of rays in spherical coordinates
     if mode == 'fans':
       raysPerFan = min([obj.RaysPerFan, maxRaysPerFan])
@@ -582,56 +625,11 @@ class PointSourceViewProxy(GenericSourceViewProxy):
 #####################################################################################################
 class AddPointSource(AddGenericSource):
 
+  def __init__(self):
+    super().__init__(PointSourceProxy, PointSourceViewProxy, 'OpticalPointSource')
+
   def Activated(self):
-    # create new feature python object
-    obj = App.activeDocument().addObject('App::LinkGroupPython', 'OpticalPointSource')
-
-    # create properties of object
-    for section, entries in [
-      ('OpticalEmission', [
-        ('PowerDensity', 'exp(-theta^2/0.01)', 'String',  
-                  'Emitted optical power per solid angle. The expression may contain any mathematical '
-                  'function contained in the numpy module, the polar angle "theta" the azimuthal '
-                  'angle "phi", the radial distance "r" and the cartesian coordinates "x" and "y". '
-                  '"theta" and "phi" refer to a spherical coordinate system centered in the focal '
-                  'point of the light source. '
-                  '"r", "x" and "y" refer to a coordinate system in the emission plane (=plane '
-                  'orthogonal to optical axis) centered at the intersection of emission plane and '
-                  'optical axis. '
-                  'All rays placed by this light source begin in the emission plane.'),
-        ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
-        ('FocalLength', '0', 'String', 'Distance from the ray origin at which all rays (would) intersect. '
-                  'Positive values result in converging, negative values result in a diverging '
-                  'beam. For a parallel light source use "inf".'),
-        ('Divergence', '-', 'String', 'Angle at which a rays at 1/e emission power diverge from the '
-                  'optical axis. This option is writable only if the only unknown in the Power Density '
-                  'expression is "r" (no theta, phi, x, y), if Power Density drops below 1/e for a '
-                  'finite r and if Focal Length is finite. Changing divergence will update Focal Length '
-                  'and vice versa. The option is readable if "theta" exists in the Power Density '
-                  'expression.'),
-        ('ThetaDomain', '0, pi/4', 'String', 'Min and max value for polar angle theta to consider.'),
-        ('RadiusDomain', '0, 10', 'String', 'Min and max value for azimuthal angle phi to consider.'),
-        ('PhiDomain', '0, 2*pi', 'String', 'Min and max value for radial distance r to consider.'),
-      ]),
-      ('OpticalSimulationSettings', [
-        *self.defaultSimulationSettings(obj),
-        ('RandomNumberGeneratorMode', '?', 'String', ''),
-        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
-        ('RadiusResolutionNumericMode', '1e6', 'String', ''),
-        ('PhiResolutionNumericMode', '3', 'String', ''),
-        ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
-        ('FanPhi0', '0', 'String', 'Change this to rotate fans around optical axis.'),
-        ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
-       ]),
-    ]:
-      for name, default, kind, tooltip in entries:
-        obj.addProperty('App::Property'+kind, name, section, tooltip)
-        setattr(obj, name, default)
-
-    # register custom proxy and view provider proxy
-    obj.Proxy = PointSourceProxy()
-    if App.GuiUp:
-      obj.ViewObject.Proxy = PointSourceViewProxy()
+    obj = super().Activated()
 
     # make mode readonly
     obj.setEditorMode('RandomNumberGeneratorMode', 1)

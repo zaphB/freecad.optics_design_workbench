@@ -9,6 +9,7 @@ try:
 except ImportError:
   pass
 
+from . import common
 from . import find
 from .. import simulation
 
@@ -19,9 +20,36 @@ from .. import simulation
 NON_SERIALIZABLE_STORE = {}
 
 #####################################################################################################
-class OpticalGroupProxy():
-  def execute(self, obj):
-    '''Do something when doing a recomputation, this method is mandatory'''
+class OpticalGroupProxy(common.GenericFreecadElementProxy):
+  
+  def _properties(self):
+    return [
+      ('OpticalProperties', [
+        ('OpticalType', ['Mirror', 'Lens', 'Grating', 'Absorber', 'Vacuum'], 'Enumeration', 
+              'Type of the optical element, can be reflective (=Mirror), refractive (=Lens), '
+              'grating (=Grating), '
+              'fully absorbing (=Absorber) or completely transparent (=Vacuum).'),
+        ('RefractiveIndex', 2, 'Float', 
+              'Refractive index of the material used for ray tracing.'),
+        ('Reflectivity', 1, 'Float', 
+              'Reflectivity coefficient used for ray tracing.'),
+        ('AbsorptionLength', 'inf', 'String', 
+              'Optical absorption length in the material in 1/mm'),
+        ('GratingType', ['Reflection', 'Transmission'], 'Enumeration', 
+              'Select whether grating should be reflective of transmissive.'),
+        ('GratingLinesPerMillimeter', 1000, 'Float', 
+              'Number of grating lines per millimeter.'),
+        ('GratingLinesOrientation', (0,0,1), 'Vector',
+              'Normal of a hypothetical set of planes that intersect the grating surface, to define '
+              'the rulings of the grating as these intersection lines'),
+        ('GratingDiffractionOrder', 1, 'Integer', 
+              'Order of diffraction at which to place refracted/transmitted rays.'),
+      ]),
+      ('OpticalSimulationSettings', [
+        ('RecordHits', False, 'Bool', 
+              'Enable recording ray hits on this optical group to disk during simulations.'),
+      ]),
+    ]
 
   def setVisibleProperties(self, obj, props):
     dynamicProps = ['AbsorptionLength', 'RefractiveIndex', 'Reflectivity', 'GratingType', 
@@ -32,6 +60,7 @@ class OpticalGroupProxy():
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
+    self._ensurePropertiesExist(obj)
 
     if prop == 'OpticalType':
       oldType = getattr(self, 'oldType', None)
@@ -100,7 +129,19 @@ class OpticalGroupProxy():
 
 
 #####################################################################################################
-class OpticalGroupViewProxy():
+class OpticalGroupViewProxy(common.GenericFreecadElementViewProxy):
+
+  def _properties(self):
+    return [
+      ('ColorizeRays', [
+        ('Weight', 0, 'Float', 
+              'Weight of ray colorization, should be between 0 and 1. 1 means set color '
+              'immediately, 0 means do not change color at all.'),
+        ('Color', (0.,0.,0.,0.), 'Color', 
+              'Color to mix with previous ray color during colorization. Weight determines '
+              'fraction of old and new colors in mix.'),
+      ]),
+    ]
 
   def getIcon(self):
     '''Return the icon which will appear in the tree view. This method is optional and if not defined a default icon is shown.'''
@@ -124,66 +165,15 @@ class OpticalGroupViewProxy():
 
   
 #####################################################################################################
-class MakeOpticalGroup:
+class MakeOpticalGroup(common.GenericMakeFreecadElement):
   def __init__(self, opticalType):
     self.opticalType = opticalType
+    super().__init__(OpticalGroupProxy, OpticalGroupViewProxy, f'Optical{self.opticalType}Group')
+
 
   def Activated(self):
-    # create mirror object
-    obj = App.activeDocument().addObject('App::LinkGroupPython', f'Optical{self.opticalType}Group')
-
-    # create properties of object
-    for section, entries in [
-      ('OpticalProperties', [
-        ('OpticalType', ['Mirror', 'Lens', 'Grating', 'Absorber', 'Vacuum'], 'Enumeration', 
-              'Type of the optical element, can be reflective (=Mirror), refractive (=Lens), '
-              'grating (=Grating), '
-              'fully absorbing (=Absorber) or completely transparent (=Vacuum).'),
-        ('RefractiveIndex', 2, 'Float', 
-              'Refractive index of the material used for ray tracing.'),
-        ('Reflectivity', 1, 'Float', 
-              'Reflectivity coefficient used for ray tracing.'),
-        ('AbsorptionLength', 'inf', 'String', 
-              'Optical absorption length in the material in 1/mm'),
-        ('GratingType', ['Reflection', 'Transmission'], 'Enumeration', 
-              'Select whether grating should be reflective of transmissive.'),
-        ('GratingLinesPerMillimeter', 1000, 'Float', 
-              'Number of grating lines per millimeter.'),
-        ('GratingLinesOrientation', (0,0,1), 'Vector',
-              'Normal of a hypothetical set of planes that intersect the grating surface, to define '
-              'the rulings of the grating as these intersection lines'),
-        ('GratingDiffractionOrder', 1, 'Integer', 
-              'Order of diffraction at which to place refracted/transmitted rays.'),
-      ]),
-      ('OpticalSimulationSettings', [
-        ('RecordHits', False, 'Bool', 
-              'Enable recording ray hits on this optical group to disk during simulations.'),
-      ]),
-    ]:
-      for name, default, kind, tooltip in entries:
-        obj.addProperty('App::Property'+kind, name, section, tooltip)
-        setattr(obj, name, default)
-
-    # create custom view object properties
-    for section, entries in [
-      ('ColorizeRays', [
-        ('Weight', 0, 'Float', 
-              'Weight of ray colorization, should be between 0 and 1. 1 means set color '
-              'immediately, 0 means do not change color at all.'),
-        ('Color', (0.,0.,0.,0.), 'Color', 
-              'Color to mix with previous ray color during colorization. Weight determines '
-              'fraction of old and new colors in mix.'),
-      ]),
-    ]:
-      for name, default, kind, tooltip in entries:
-        obj.ViewObject.addProperty('App::Property'+kind, name, section, tooltip)
-        setattr(obj.ViewObject, name, default)
-
-    # register custom proxy and view provider proxy
-    obj.Proxy = OpticalGroupProxy()
-    if App.GuiUp:
-      obj.ViewObject.Proxy = OpticalGroupViewProxy()
-
+    obj = super().Activated() 
+    
     # set OpticalType property again to trigger onChange handler
     obj.OpticalType = self.opticalType
 
@@ -191,9 +181,7 @@ class MakeOpticalGroup:
     obj.ElementList = Gui.Selection.getSelection()
 
     return obj
-
-  def IsActive(self):
-    return True
+  
 
   def GetResources(self):
     return dict(Pixmap=find.iconpath('add-'+self.opticalType.lower()),
