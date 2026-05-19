@@ -143,7 +143,16 @@ class Ray():
       # hit mirror: direction is mirrored at normal, 
       # medium is unchanged, power is altered according to reflectivity
       if obj.OpticalType == 'Mirror':
+        # calculate outgoing direction of ideal mirror
         currentDirection = self.mirror(currentDirection, normal)
+
+        # determine outgoing direction using mirrors reflected power density
+        
+
+        # modify outgoing direction using modify probability density
+
+
+        # reduce ray power according to reflectivity
         currentPower *= obj.Reflectivity
 
         # mirrors have exactly one reflection in sequential mode

@@ -53,8 +53,8 @@ class PointSourceProxy(GenericSourceProxy):
                   'and vice versa. The option is readable if "theta" exists in the Power Density '
                   'expression.'),
         ('ThetaDomain', '0, pi/4', 'String', 'Min and max value for polar angle theta to consider.'),
-        ('RadiusDomain', '0, 10', 'String', 'Min and max value for azimuthal angle phi to consider.'),
-        ('PhiDomain', '0, 2*pi', 'String', 'Min and max value for radial distance r to consider.'),
+        ('PhiDomain', '0, 2*pi', 'String', 'Min and max value for azimuthal angle phi to consider.'),
+        ('RadiusDomain', '0, 10', 'String', 'Min and max value for radial distance r to consider.'),
       ]),
       ('OpticalSimulationSettings', [
         ('RandomNumberGeneratorMode', '?', 'String', ''),

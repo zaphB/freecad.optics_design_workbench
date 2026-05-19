@@ -98,10 +98,9 @@ class VectorRandomVariable:
     Pretty print generated internal expressions and lambdas for debugging purposes.
     '''
     print('probability density expression: ', self._probabilityDensityExpr, ' variables: ', self._variables)
-    print(self._transformLambdas)
     for i, var in enumerate(self._variables):
       print(f'variable "{var}" '+('conditional' if i<len(self._variables)-1 else '')+f' probability density: ')
-      probDens, integral, invertedSols = self._transformLambdas[i][0]._origExpressions
+      probDens, integral, invertedSols = self._transformLambdas[i][0][0]._origExpressions
       if simplify and str not in [type(x) for x in (probDens, integral, invertedSols)]:
         probDens = probDens.simplify()
         integral = integral.simplify()
@@ -217,6 +216,9 @@ class VectorRandomVariable:
       eps = 1e-13
       for val in discreteEvents.keys():
         try:
+          # Calculate step height with DiracDeltas forced to both zero and one. Use the higher of the
+          # two results as the correct probability, but also store whether the two agree within 5*eps
+          # in the second component of discreteEvents 
           lval = _fullPartialIntegral.replace(sy.DiracDelta, lambda x,*args: 0).subs(varX, val-eps)
           rval = _fullPartialIntegral.replace(sy.DiracDelta, lambda x,*args: 0).subs(varX, val+eps)
           zeroDiracs = float((rval-lval).evalf())
@@ -234,7 +236,7 @@ class VectorRandomVariable:
       _expr = expr.replace(sy.Heaviside, lambda x,*args: 0).replace(sy.DiracDelta, lambda x,*args: 0)
       totalIntegral = sy.Integral(_expr, (var,l1,l2)).doit()
       partialIntegral = sy.Integral(_expr, (var,l1,varX)).doit()
-      totalPropContinuum = sy.Integral(self._probabilityDensityExpr.replace(sy.Heaviside, lambda x,*args: 0)
+      totalProbContinuum = sy.Integral(self._probabilityDensityExpr.replace(sy.Heaviside, lambda x,*args: 0)
                                                                    .replace(sy.DiracDelta, lambda x,*args: 0),
                                        (var,l1,l2))
 
@@ -243,7 +245,7 @@ class VectorRandomVariable:
       totalProb = None
       for val in discreteEvents.keys():
         if totalProb is None:
-          totalProb = sum([v[0] for v in discreteEvents.values() if v[1]]) + float(totalPropContinuum.doit().evalf())
+          totalProb = sum([v[0] for v in discreteEvents.values() if v[1]]) + float(totalProbContinuum.doit().evalf())
         discreteEvents[val][0] /= totalProb
 
       try:
@@ -421,7 +423,7 @@ class VectorRandomVariable:
     for lam in lambYs:
       lam._origExpressions = ('n.a.', 'n.a.', ['n.a.'])
 
-    return lambYs, []
+    return lambYs, {}
 
 
   def draw(self, N=None, constants=None, _noVarOrderCheck=False):
@@ -450,8 +452,6 @@ class VectorRandomVariable:
 
     result = []
     for i, (transforms, discreteEvents) in reversed(list(enumerate(self._transformLambdas))):
-      print(f'{transforms=}, {discreteEvents=}')
-
       #print(f'drawing var {self._variables[i]}...')
       l1, l2 = self._variableDomains.get(str(self._variables[i]), (-inf, inf))
 
@@ -464,7 +464,7 @@ class VectorRandomVariable:
       # make sure shapes match (only needed for debugging)
       if shape(vals) != (1,1) and shape(vals) != shape([rand]*len(transforms)):
         raise ValueError(f'shape mismatch {shape(vals)=} != {shape([rand]*len(transforms))=}, do '
-                         f'all arguments/attributes of this object have intended shapes?')
+                        f'all arguments/attributes of this object have intended shapes?')
 
       # find indices of resulting values that are within bounds
       valid = argwhere(logical_and(l1 <= vals, vals <= l2))
@@ -473,12 +473,29 @@ class VectorRandomVariable:
       if any(valid[:,-1] != arange(valid.shape[0])):
         raise ValueError('no/more than one valid value found in domain')
 
+      # if no valid results exist -> store nans (may be overwritten by discrete events)
+      if not len(valid):
+        result.append(nan*rand)
+
       # append valid results to list
-      print(vals, valid)
-      if N is not None:
+      elif N is not None:
         result.append(vals[tuple(valid.T)])
       else:
         result.append(vals[tuple(valid.T)][0])
+
+      # decide whether result is discrete event, overwrite result entry if this is the case
+      _items = list(discreteEvents.items())
+      discreteProbs = [p for v, (p, isTrusty) in _items]
+      discreteVals = [v for v, (p, isTrusty) in _items]
+      rands = random.random_sample(**(dict(size=1) if N is None else dict(size=N)))
+      for j, rand in enumerate(rands):
+        for i, P in enumerate(cumsum(discreteProbs)):
+          if rand <= P:
+            if N is not None:
+              result[-1][j] = discreteVals[i]
+            else:
+              result[-1] = discreteVals[i]
+            break
     
     # reverse result ordering to restore correct variable order
     result = array(result[::-1])

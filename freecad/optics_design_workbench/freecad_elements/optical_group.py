@@ -31,7 +31,38 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
               'fully absorbing (=Absorber) or completely transparent (=Vacuum).'),
         ('RefractiveIndex', 2, 'Float', 
               'Refractive index of the material used for ray tracing.'),
-        ('Reflectivity', 1, 'Float', 
+        ('ReflectedPowerDensity', 'DiracDelta(theta-theta_refl) + DiracDelta(phi-phi_refl)', 'String', 
+              'Power density distribution function for reflected light. The direction of the '
+              'resulting reflected ray '
+              'is given by theta and phi. The angles of the incoming ray are given by theta_in and, '
+              'phi_in, the angles of a ray reflected at an ideal mirror are given by theta_refl and '
+              'phi_refl. The theta=0 direction corresponds to the local face normal. Defaults to '
+              'ideal mirror behavior.'),
+        ('RefractedPowerDensity', 'DiracDelta(theta-theta_refr) + DiracDelta(phi-phi_refr)', 'String', 
+              'Power density distribution function for refracted light. The direction of the '
+              'resulting refracted ray '
+              'is given by theta and phi. The angles of the incoming ray are given by theta_in and, '
+              'phi_in, the angles of a ray reflected at an ideal dielectric boundary according to '
+              'Snell\'s law are given by theta_refr and '
+              'phi_refr. The theta=0 direction corresponds to the local face normal. '
+              'Defaults to ideal dielectric behavior.'),
+        ('PowerThetaDomain', '-pi/2, pi/2', 'String', 'Min and max value for polar angle theta to consider '
+              'when generating angles of the Reflected/Refracted Power Density.'),
+        ('PowerPhiDomain', '0, 2*pi', 'String', 'Min and max value for azimuthal angle phi to consider '
+              'when generating angles of the Reflected/Refracted Power Density.'),
+        ('RayModificationProbabilityDensity', 'DiracDelta(theta)', 'String', 
+              'Modifies outgoing rays by the given probability density function. Available '
+              'variables are theta and phi. Theta and phi rotate the resulting ray, with '
+              'theta=0 (and phi arbitrary) implying no rotation at all. The phi=0 angle '
+              'is the direction of smallest angle between reflecting/refracting surface '
+              'and the outgoing ray before modification. Defaults to no modification at all.'),
+        ('ModifyThetaDomain', '-pi/2, pi/2', 'String', 'Min and max value for polar angle theta to consider '
+              'when generating modification angles for outgoing rays according to Ray Modification '
+              'Probability Density.'),
+        ('ModifyPhiDomain', '0, 2*pi', 'String', 'Min and max value for azimuthal angle phi to consider '
+              'when generating modification angles for outgoing rays according to Ray Modification '
+              'Probability Density.'),
+        ('Reflectivity', 1, 'Float',
               'Reflectivity coefficient used for ray tracing.'),
         ('AbsorptionLength', 'inf', 'String', 
               'Optical absorption length in the material in 1/mm'),
@@ -75,11 +106,15 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
 
       # update which properties to display
       if newType == 'Mirror':
-        self.setVisibleProperties(obj, ['Reflectivity'])
+        self.setVisibleProperties(obj, ['Reflectivity', 'ReflectedPowerDensity', 'PowerThetaDomain', 
+                                        'PowerPhiDomain', 'RayModificationProbabilityDensity', 
+                                        'ModifyThetaDomain', 'ModifyPhiDomain'])
         obj.RecordHits = False
 
       elif newType == 'Lens':
-        self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex'])
+        self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex', 'RefractedPowerDensity', 
+                                        'PowerThetaDomain', 'PowerPhiDomain', 'RayModificationProbabilityDensity',
+                                        'ModifyThetaDomain', 'ModifyPhiDomain'])
         for child in obj.ElementList:
           if hasattr(child.ViewObject, 'Transparency'):
             child.ViewObject.Transparency = 80
@@ -87,8 +122,8 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
 
       elif newType == 'Grating':
         self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex',
-                                  'GratingType', 'GratingLinesPerMillimeter', 
-                                  'GratingLinesOrientation', 'GratingDiffractionOrder'])
+                                        'GratingType', 'GratingLinesPerMillimeter', 
+                                        'GratingLinesOrientation', 'GratingDiffractionOrder'])
         obj.RecordHits = False
 
       elif newType == 'Absorber':
