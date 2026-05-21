@@ -188,7 +188,7 @@ class Ray():
           n2 = 1
 
         # calculate scattered ray direction according to Snell's law
-        refractedDirection, _isTotalReflection = self.snellsLaw(
+        refractedDirection, isTotalReflection = self.snellsLaw(
                                     currentDirection/currentDirection.Length,
                                     n1, n2, normal)
 
