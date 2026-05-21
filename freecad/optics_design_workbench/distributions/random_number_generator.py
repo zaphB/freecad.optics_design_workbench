@@ -51,6 +51,7 @@ class VectorRandomVariable:
     self._variableOrder = variableOrder
     self._constantsDict = {}
     self._mode = 'not yet compiled'
+    self._needsRecompile = True
     self._warnIfDiscretizationStepAbove = warnIfDiscretizationStepAbove
 
 
@@ -72,19 +73,26 @@ class VectorRandomVariable:
     self._deadline = time.time()+timeout
     self._setConstants(**kwargs)
 
-    try:
-      # immediately go to numerical fallback if analytical is disabled
-      if disableAnalytical:
-        raise ValueError('stop')
+    # only proceed if needsRecompile flag is set
+    if self._needsRecompile:
+      #print(f'actually doing the recompilation...')
+      try:
+        # immediately go to numerical fallback if analytical is disabled
+        if disableAnalytical:
+          raise ValueError('stop')
 
-      # try analytical treatment first
-      self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
-      self._mode = 'analytic'
+        # try analytical treatment first
+        self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
+        self._mode = 'analytic'
+        self._needsRecompile = False
 
-    # fallback to numerical treatment and analytical mode did not succeed
-    except Exception:
-      self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
-      self._mode = 'numeric'
+      # fallback to numerical treatment and analytical mode did not succeed
+      except Exception:
+        if sy.sympify(self._probabilityDensity).find(sy.DiracDelta):
+          raise ValueError(f'cannot use numeric mode for expression containing DiracDelta')
+        self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
+        self._mode = 'numeric'
+        self._needsRecompile = False
 
 
   def mode(self):
@@ -96,10 +104,9 @@ class VectorRandomVariable:
     Pretty print generated internal expressions and lambdas for debugging purposes.
     '''
     print('probability density expression: ', self._probabilityDensityExpr, ' variables: ', self._variables)
-    print(self._transformLambdas)
     for i, var in enumerate(self._variables):
       print(f'variable "{var}" '+('conditional' if i<len(self._variables)-1 else '')+f' probability density: ')
-      probDens, integral, invertedSols = self._transformLambdas[i][0]._origExpressions
+      probDens, integral, invertedSols = self._transformLambdas[i][0][0]._origExpressions
       if simplify and str not in [type(x) for x in (probDens, integral, invertedSols)]:
         probDens = probDens.simplify()
         integral = integral.simplify()
@@ -115,17 +122,25 @@ class VectorRandomVariable:
 
 
   def _setConstants(self, **kwargs):
-    # store passed constants dictionary for later reference
-    self._constantsDict = kwargs
-
     # prepare expression object
     if self._probabilityDensityBaseExpr is None:
       self._probabilityDensityBaseExpr = sy.sympify(self._probabilityDensity)
     expr = self._probabilityDensityBaseExpr    
 
     # substitute constants
+    substitutedConstantsDict = {}
     for name, val in kwargs.items():
-      expr = expr.subs(name, val)
+      if name in [str(s) for s in expr.free_symbols]:
+        expr = expr.subs(name, val)
+        substitutedConstantsDict[name] = val
+
+    # return immediately if was already compiled for this set of constants
+    if not self._needsRecompile and self._constantsDict == substitutedConstantsDict:
+      #print(f'no need to recompile, constants were: {self._constantsDict}, are: {substitutedConstantsDict}')
+      return
+    # if constants changed -> set needsRecompile flag to regenerate everything
+    self._needsRecompile = True
+    #print(f'constants changed, recompiling...')
 
     # set variables attribute if not set
     self._variables = list(expr.free_symbols)
@@ -169,21 +184,21 @@ class VectorRandomVariable:
     '''
     # prepare symbols and domains
     expr = self._probabilityDensityExpr
-
     try:
       # start alarm that raises exception in this thread after timeout
       _setAlarm(self._deadline)
 
       # test whether expression looks positive
+      _expr = expr.replace(sy.DiracDelta, lambda x,*args: 0)
       isPositive = False
       try:
-        if not bool( expr < 0 ):
+        if not bool( _expr < 0 ):
           isPositive = True
       except Exception:
         pass
       if not isPositive:
         try:
-          if not bool( sy.solve(expr < 0) ):
+          if not bool( sy.solve(_expr < 0) ):
             isPositive = True
         except Exception:
           pass
@@ -202,22 +217,67 @@ class VectorRandomVariable:
       var = self._variables[varI]
       l1, l2 = self._variableDomains.get(str(var), (-inf, inf))
 
-      varX = sy.Symbol('x', real=True, **(dict(positive=True) if l1>=0
+      varX = sy.Symbol('__x', real=True, **(dict(positive=True) if l1>=0
                                     else dict(negative=True) if l2<=0
                                     else {}))
-      varY = sy.Symbol('y', real=True, nonnegative=True)
+      varY = sy.Symbol('__y', real=True, nonnegative=True)
 
-      # find total and 
-      totalIntegral = sy.Integral(expr, (var,l1,l2)).doit()
-      partialIntegral = sy.Integral(expr, (var,l1,varX)).doit()
-      
-      exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX, 
-                        simplify=False)  # do not simplify, this speeds up the solver a lot
-      if len(exprYs) == 0:
-        raise ValueError(f'expression {partialIntegral/totalIntegral} seems not to be solvable for {varX}')
-      lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY, 
-                            modules=['numpy', 'scipy'])
-                                            for exprY in exprYs]
+      # identify all heaviside-like steps in the partial integral -> these correspond to discrete results
+      _fullPartialIntegral = sy.Integral(expr, (var,l1,varX)).doit()
+      discreteEvents = {val: [None,None] for val in [s for c in _fullPartialIntegral.find(sy.Heaviside) for s in sy.solve(c.args[0])]}
+
+      # estimate probabilities of discrete events by evaluating the step heights
+      eps = 1e-13
+      for val in discreteEvents.keys():
+        try:
+          # Calculate step height with DiracDeltas forced to both zero and one. Use the higher of the
+          # two results as the correct probability, but also store whether the two agree within 5*eps
+          # in the second component of discreteEvents 
+          lval = _fullPartialIntegral.replace(sy.DiracDelta, lambda x,*args: 0).subs(varX, val-eps)
+          rval = _fullPartialIntegral.replace(sy.DiracDelta, lambda x,*args: 0).subs(varX, val+eps)
+          zeroDiracs = float((rval-lval).evalf())
+          lval = _fullPartialIntegral.replace(sy.DiracDelta, lambda x,*args: 1).subs(varX, val-eps)
+          rval = _fullPartialIntegral.replace(sy.DiracDelta, lambda x,*args: 1).subs(varX, val+eps)
+          unitDiracs = float((rval-lval).evalf())
+          if zeroDiracs < 0 or unitDiracs < 0:
+            raise ValueError(f'negative amplitude DiracDelta found in probability density')
+          discreteEvents[val] = [ max([unitDiracs, zeroDiracs]),
+                                  isclose(unitDiracs, zeroDiracs, rtol=5*eps, atol=5*eps) ]
+        except TypeError:
+          raise ValueError('can only combine DiracDelta with trivial constant probability densities')
+
+      # find total and partial integrals without any DiracDelta or Heaviside functions
+      _expr = expr.replace(sy.Heaviside, lambda x,*args: 0).replace(sy.DiracDelta, lambda x,*args: 0)
+      totalIntegral = sy.Integral(_expr, (var,l1,l2)).doit()
+      partialIntegral = sy.Integral(_expr, (var,l1,varX)).doit()
+      totalProbContinuum = sy.Integral(self._probabilityDensityExpr.replace(sy.Heaviside, lambda x,*args: 0)
+                                                                   .replace(sy.DiracDelta, lambda x,*args: 0),
+                                       (var,l1,l2))
+
+      # normalize everything such that sum(discreteEvents) probabilities is exactly the 
+      # probability to have any discrete event
+      totalProb = None
+      for val in discreteEvents.keys():
+        if totalProb is None:
+          totalProb = sum([v[0] for v in discreteEvents.values() if v[1]]) + float(totalProbContinuum.doit().evalf())
+        if totalProb:
+          discreteEvents[val][0] /= totalProb
+
+      try:
+        float(partialIntegral)
+      except Exception:
+        exprYs = sy.solve(sy.Eq(partialIntegral/totalIntegral, varY), varX, 
+                          simplify=False)  # do not simplify, this speeds up the solver a lot
+        if len(exprYs) == 0:
+          raise ValueError(f'expression {partialIntegral/totalIntegral} seems not to be solvable for {varX}')
+        lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY, 
+                              modules=['numpy', 'scipy'])
+                                              for exprY in exprYs]
+      else:
+        # partial integral does not depend on var and integral vanishes -> random variable has no continuous part
+        if len(discreteEvents) == 0:
+          raise ValueError('random distribution has neither continuum nor discrete part')
+        lambYs = []
 
       # attach expressions to lambda for convenience
       for lam in lambYs:
@@ -234,7 +294,7 @@ class VectorRandomVariable:
       # disable alarm again
       _clearAlarm()
 
-    return lambYs
+    return lambYs, discreteEvents
 
   
   def _numericalResolution(self, var):
@@ -378,7 +438,7 @@ class VectorRandomVariable:
     for lam in lambYs:
       lam._origExpressions = ('n.a.', 'n.a.', ['n.a.'])
 
-    return lambYs
+    return lambYs, {}
 
 
   def draw(self, N=None, constants=None, _noVarOrderCheck=False):
@@ -406,7 +466,7 @@ class VectorRandomVariable:
       N = max([1, int(round(N))])
 
     result = []
-    for i, transforms in reversed(list(enumerate(self._transformLambdas))):
+    for i, (transforms, discreteEvents) in reversed(list(enumerate(self._transformLambdas))):
       #print(f'drawing var {self._variables[i]}...')
       l1, l2 = self._variableDomains.get(str(self._variables[i]), (-inf, inf))
 
@@ -419,7 +479,7 @@ class VectorRandomVariable:
       # make sure shapes match (only needed for debugging)
       if shape(vals) != (1,1) and shape(vals) != shape([rand]*len(transforms)):
         raise ValueError(f'shape mismatch {shape(vals)=} != {shape([rand]*len(transforms))=}, do '
-                         f'all arguments/attributes of this object have intended shapes?')
+                        f'all arguments/attributes of this object have intended shapes?')
 
       # find indices of resulting values that are within bounds
       valid = argwhere(logical_and(l1 <= vals, vals <= l2))
@@ -428,11 +488,29 @@ class VectorRandomVariable:
       if any(valid[:,-1] != arange(valid.shape[0])):
         raise ValueError('no/more than one valid value found in domain')
 
+      # if no valid results exist -> store nans (may be overwritten by discrete events)
+      if not len(valid):
+        result.append(nan*rand)
+
       # append valid results to list
-      if N is not None:
+      elif N is not None:
         result.append(vals[tuple(valid.T)])
       else:
         result.append(vals[tuple(valid.T)][0])
+
+      # decide whether result is discrete event, overwrite result entry if this is the case
+      _items = list(discreteEvents.items())
+      discreteProbs = [p for v, (p, isTrusty) in _items]
+      discreteVals = [v for v, (p, isTrusty) in _items]
+      rands = random.random_sample(**(dict(size=1) if N is None else dict(size=N)))
+      for j, rand in enumerate(rands):
+        for i, P in enumerate(cumsum(discreteProbs)):
+          if rand <= P:
+            if N is not None:
+              result[-1][j] = discreteVals[i]
+            else:
+              result[-1] = discreteVals[i]
+            break
     
     # reverse result ordering to restore correct variable order
     result = array(result[::-1])

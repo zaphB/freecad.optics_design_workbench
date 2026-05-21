@@ -33,7 +33,6 @@ class Ray():
     self.initWavelength = wavelength
     self.metadata = metadata
   
-     
   def traceRay(self, powerTol=1e-6, maxRayLength=None,
                maxIntersections=None, store=False,
                metadata={}):
@@ -69,9 +68,9 @@ class Ray():
     else:
       # setup defaults if no settings object exists
       if maxRayLength is None:
-        maxRayLength = 100 * self.lightSource.MaxRayLengthScale
+        maxRayLength = 1000 * self.lightSource.MaxRayLengthScale
       if maxIntersections is None:
-        maxIntersections = 10 * self.lightSource.MaxIntersectionsScale
+        maxIntersections = 100 * self.lightSource.MaxIntersectionsScale
       
       # default to empty metadata
       rayMetadata = {}
@@ -143,7 +142,18 @@ class Ray():
       # hit mirror: direction is mirrored at normal, 
       # medium is unchanged, power is altered according to reflectivity
       if obj.OpticalType == 'Mirror':
-        currentDirection = self.mirror(currentDirection, normal)
+
+        # calculate direction according to ideal specular reflection
+        directionSpecular = self.mirror(currentDirection, normal)
+
+        # apply stochastic corrections and update ray direction
+        currentDirection = obj.Proxy.applyStochasticRayCorrections(obj,
+              directionIn = currentDirection/currentDirection.Length,
+              idealDirectionOut = directionSpecular,
+              normal = normal,
+        )
+
+        # reduce ray power according to reflectivity
         currentPower *= obj.Reflectivity
 
         # mirrors have exactly one reflection in sequential mode
@@ -177,10 +187,17 @@ class Ray():
             n1 = currentMedium.RefractiveIndex
           n2 = 1
 
-        # update ray direction according to Snell's law
-        currentDirection, isTotalReflection = self.snellsLaw(
-                                      currentDirection/currentDirection.Length,
-                                      n1, n2, normal)
+        # calculate scattered ray direction according to Snell's law
+        refractedDirection, isTotalReflection = self.snellsLaw(
+                                    currentDirection/currentDirection.Length,
+                                    n1, n2, normal)
+
+        # apply stochastic corrections and update ray direction
+        currentDirection = obj.Proxy.applyStochasticRayCorrections(obj,
+              directionIn = currentDirection/currentDirection.Length,
+              idealDirectionOut = refractedDirection,
+              normal = normal,
+        )
 
         # if ray traveled in exit direction and not total reflection occurred,
         # set current medium to vacuum, also make sure that the ray was exiting

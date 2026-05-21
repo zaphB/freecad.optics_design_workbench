@@ -15,14 +15,70 @@ from .common import *
 from .. import simulation
 
 #####################################################################################################
-class SimulationSettingsProxy():
-  '''
-  Proxy of the point point source object responsible for the logic
-  '''
-  def execute(self, obj):
-    '''Do something when doing a recomputation, this method is mandatory'''
+class SimulationSettingsProxy(GenericFreecadElementProxy):
+
+  def _properties(self):
+    return [
+      ('OpticalSimulationSettings', [
+        ('Active', True, 'Bool', 'Use these settings as simulation settings.'),
+        ('EnableStoreSingleShotData', False, 'Bool', 'Store rays and hits to disk for every single-shot '
+              'simulation.'),
+      ]),
+      ('OpticalSimulationPerformanceSettings', [
+        ('EndAfterIterations', 'inf', 'String', 'Number of iterations after which simulation should stop'),
+        ('EndAfterRays', '1e4', 'String', 'Number of traced rays after which simulation should stop'),
+        ('EndAfterHits', 'inf', 'String', 'Number of recorded hits after which simulation should stop'),
+        ('RaysPerIteration', 100, 'Float', 'Number of rays to place per simulation iteration for random '
+              'and pseudo random modes.'),
+        ('MaxIntersections', 100, 'Float', 'Maximum number of intersections (reflections/refractions/'
+              'detections) that a ray may have with optical objects.'),
+        ('DistanceTolerance', '1e-6', 'String', 'If a ray is closer to a surface than this tolerance, '
+              'it is considered to intersect with the surface.'),
+        ('MaxRayLength', 1000, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
+              'may be up to MaxIntersections*MaxRayLength. This is not a strict '
+              'limit but rather a possibility for the ray tracer to save time by ignoring '
+              'objects that are farther away from a given ray origin than this limit. Longer ray '
+              'segments may still occur.'),
+        ('ShowRaysInContinuousMode', True, 'Bool', 'Allows to switch of displaying rays in '
+              'continuous simulation modes to speed up the calculation.'),
+        ('WorkerProcessCount', 'num_cpus', 'String', 'Number of worker processes to spawn for continuous '
+              f'simulation modes. Should be an integer or "num_cpus" ( = {simulation.cpuCount()} ).'),
+        ('SequentialMode', False, 'Bool', 'Enable/disable sequential ray-tracing mode. In '
+              f'sequential mode, rays will not collide with anything but the next object '
+              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
+              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
+        ('SequentialModeElement00', None, 'LinkList', 'List to specify order of optical elements to '
+              f'consider during ray tracing. Rays will not collide with anything but the next object '
+              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
+              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
+      ]),
+      ('OpticalSimulationMetadataSettings', [
+        ('StoreHitInitPoint', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitDirection', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitPower', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitWavelength', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitPhi', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitInitTheta', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitRayIndex', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitFanIndex', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitTotalFanCount', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+        ('StoreHitTotalRaysInFan', False, 'Bool', 'Enable/disable additional data about light source '
+              'and ray initial conditions to be stored with each ray hit.'),
+      ])
+    ]
 
   def onChanged(self, obj, prop):
+    self._ensurePropertiesExist(obj)
+
     # sync Visible property with active property to allow
     # convenient spacebar toggling of active settings
     if prop == 'Visibility':
@@ -132,7 +188,7 @@ class SimulationSettingsProxy():
     return list(reversed(sequence))
 
 #####################################################################################################
-class SimulationSettingsViewProxy():
+class SimulationSettingsViewProxy(GenericFreecadElementViewProxy):
   '''
   Proxy of the point point source object responsible for the view
   '''
@@ -152,85 +208,18 @@ class SimulationSettingsViewProxy():
 
   
 #####################################################################################################
-class MakeSimulationSettings:
+class MakeSimulationSettings(GenericMakeFreecadElement):
+  def __init__(self):
+    super().__init__(SimulationSettingsProxy, SimulationSettingsViewProxy, 
+                     'OpticalSimulationSettings', 'Part::FeaturePython')
+
   def Activated(self):
-    # create mirror object
-    obj = App.activeDocument().addObject('Part::FeaturePython', f'OpticalSimulationSettings')
-
-    # create properties of object
-    for section, entries in [
-      ('OpticalSimulationSettings', [
-        ('Active', True, 'Bool', 'Use these settings as simulation settings.'),
-        ('EnableStoreSingleShotData', False, 'Bool', 'Store rays and hits to disk for every single-shot '
-              'simulation.'),
-      ]),
-      ('OpticalSimulationPerformanceSettings', [
-        ('EndAfterIterations', 'inf', 'String', 'Number of iterations after which simulation should stop'),
-        ('EndAfterRays', '1e4', 'String', 'Number of traced rays after which simulation should stop'),
-        ('EndAfterHits', 'inf', 'String', 'Number of recorded hits after which simulation should stop'),
-        ('RaysPerIteration', 100, 'Float', 'Number of rays to place per simulation iteration for random '
-              'and pseudo random modes.'),
-        ('MaxIntersections', 100, 'Float', 'Maximum number of intersections (reflections/refractions/'
-              'detections) that a ray may have with optical objects.'),
-        ('DistanceTolerance', '1e-6', 'String', 'If a ray is closer to a surface than this tolerance, '
-              'it is considered to intersect with the surface.'),
-        ('MaxRayLength', 1000, 'Float', 'Maximum length of each ray segment, i.e. the total ray length '
-              'may be up to MaxIntersections*MaxRayLength. This is not a strict '
-              'limit but rather a possibility for the ray tracer to save time by ignoring '
-              'objects that are farther away from a given ray origin than this limit. Longer ray '
-              'segments may still occur.'),
-        ('ShowRaysInContinuousMode', True, 'Bool', 'Allows to switch of displaying rays in '
-              'continuous simulation modes to speed up the calculation.'),
-        ('WorkerProcessCount', 'num_cpus', 'String', 'Number of worker processes to spawn for continuous '
-              f'simulation modes. Should be an integer or "num_cpus" ( = {simulation.cpuCount()} ).'),
-        ('SequentialMode', False, 'Bool', 'Enable/disable sequential ray-tracing mode. In '
-              f'sequential mode, rays will not collide with anything but the next object '
-              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
-              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
-        ('SequentialModeElement00', None, 'LinkList', 'List to specify order of optical elements to '
-              f'consider during ray tracing. Rays will not collide with anything but the next object '
-              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
-              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
-      ]),
-      ('OpticalSimulationMetadataSettings', [
-        ('StoreHitInitPoint', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitInitDirection', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitInitPower', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitInitWavelength', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitInitPhi', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitInitTheta', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitRayIndex', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitFanIndex', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitTotalFanCount', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-        ('StoreHitTotalRaysInFan', False, 'Bool', 'Enable/disable additional data about light source '
-              'and ray initial conditions to be stored with each ray hit.'),
-      ])
-    ]:
-      for name, default, kind, tooltip in entries:
-        obj.addProperty('App::Property'+kind, name, section, tooltip)
-        setattr(obj, name, default)
-
-    # register custom proxy and view provider proxy
-    obj.Proxy = SimulationSettingsProxy()
-    if App.GuiUp:
-      obj.ViewObject.Proxy = SimulationSettingsViewProxy(obj)
+    obj = super().Activated()
 
     # set active property to true again to trigger onChange handler
     obj.Active = True
 
     return obj
-
-  def IsActive(self):
-    return True
 
   def GetResources(self):
     return dict(Pixmap=find.iconpath('settings'),

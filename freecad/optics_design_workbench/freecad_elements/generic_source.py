@@ -18,26 +18,25 @@ from .common import *
 from . import find
 from .. import simulation
 from ..simulation.tracing_cache import *
-from .. import io
-
-# global dict with keys being PointSourceProxy objects and values being 
-# more dicts that store pseudo-attributes. This awkward attribute storing
-# format allows to bypass the serializer which wants to safe the Proxy
-# objects whenever the FreeCAD project is saved.
-NON_SERIALIZABLE_STORE = {}
-
 
 #####################################################################################################
-class GenericSourceProxy():
-  '''
-  Proxy of the point point source object responsible for the logic
-  '''
-  def execute(self, obj):
-    '''Do something when doing a recomputation, this method is mandatory'''
+class GenericSourceProxy(GenericFreecadElementProxy):
 
-  def onChanged(self, obj, prop):
-    '''Do something when a property has changed'''
-    print(obj, prop)
+  def _properties(self):
+    return [
+      ('OpticalSimulationSettings', [
+        ('RecordRays', False, 'Bool', ''),
+        ('IgnoredOpticalElements', [], 'LinkList', 'Rays of this source ignore the optical freecad_elements given'
+                  ' in this list.'),
+        ('RaysPerIterationScale', 1, 'Float', 'Number of rays to place per simulation iteration. '
+                  'This will be multiplied with the RayCount property of the active simulation settings.'),
+        ('MaxIntersectionsScale', 1, 'Float', 'Maximum number of intersections (reflections/refractions/'
+                  'detections) that ray may have with optical objects. This will be '
+                  'multiplied with the MaxIntersections property of the active simulation settings.'),
+        ('MaxRayLengthScale', 1, 'Float', 'Maximum length of each ray segment. This will be '
+                  'multiplied with the MaxRayLength property of the active simulation settings.'),
+      ])
+    ]
 
   def clear(self, obj):
     # delete all children, which are the RaySegments
@@ -68,7 +67,7 @@ class GenericSourceProxy():
     return gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin
 
   def onInitializeSimulation(self, obj, state, ident):
-    pass
+    self._ensurePropertiesExist(obj)
 
   def onExitSimulation(self, obj, ident):
     pass
@@ -157,7 +156,7 @@ class GenericSourceProxy():
 
 
 #####################################################################################################
-class GenericSourceViewProxy():
+class GenericSourceViewProxy(GenericFreecadElementViewProxy):
 
   def getIcon(self):
     '''Return the icon which will appear in the tree view. This method is optional and if not defined a default icon is shown.'''
@@ -179,30 +178,8 @@ class GenericSourceViewProxy():
     NON_SERIALIZABLE_STORE[self].Proxy.clear(NON_SERIALIZABLE_STORE[self])
     return True
 
-  def onChanged(self, obj, prop):
-    '''Here we can do something when a single property got changed'''
-    pass
-
 
 #####################################################################################################
-class AddGenericSource():
-
+class AddGenericSource(GenericMakeFreecadElement):
   def iconpath(self):
     return find.iconpath('add-'+self.__class__.__name__.replace('Add', '').lower())
-
-  def IsActive(self):
-    return True
-
-  def defaultSimulationSettings(self, obj):
-    return [
-      ('RecordRays', False, 'Bool', ''),
-      ('IgnoredOpticalElements', [], 'LinkList', 'Rays of this source ignore the optical freecad_elements given'
-                ' in this list.'),
-      ('RaysPerIterationScale', 1, 'Float', 'Number of rays to place per simulation iteration. '
-                'This will be multiplied with the RayCount property of the active simulation settings.'),
-      ('MaxIntersectionsScale', 1, 'Float', 'Maximum number of intersections (reflections/refractions/'
-                'detections) that ray may have with optical objects. This will be '
-                'multiplied with the MaxIntersections property of the active simulation settings.'),
-      ('MaxRayLengthScale', 1, 'Float', 'Maximum length of each ray segment. This will be '
-                'multiplied with the MaxRayLength property of the active simulation settings.'),
-    ]
