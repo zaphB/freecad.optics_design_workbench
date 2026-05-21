@@ -359,7 +359,7 @@ class SurfaceSourceProxy(PointSourceProxy):
     while True:
       U, V, dA = self._sampleAreaElementsOnFace(obj, face)
       rv = distributions.SampledVectorRandomVariable(variableRanges=[U, V], gridProbs=dA, 
-                                                    warnIfDiscretizationStepAbove=1)
+                                                     warnIfDiscretizationStepAbove=1)
       u, v = rv.draw()
       origin = face.valueAt(u, v)
 

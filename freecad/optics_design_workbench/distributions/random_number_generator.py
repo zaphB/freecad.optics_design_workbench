@@ -51,6 +51,7 @@ class VectorRandomVariable:
     self._variableOrder = variableOrder
     self._constantsDict = {}
     self._mode = 'not yet compiled'
+    self._needsRecompile = True
     self._warnIfDiscretizationStepAbove = warnIfDiscretizationStepAbove
 
 
@@ -72,21 +73,26 @@ class VectorRandomVariable:
     self._deadline = time.time()+timeout
     self._setConstants(**kwargs)
 
-    try:
-      # immediately go to numerical fallback if analytical is disabled
-      if disableAnalytical:
-        raise ValueError('stop')
+    # only proceed if needsRecompile flag is set
+    if self._needsRecompile:
+      #print(f'actually doing the recompilation...')
+      try:
+        # immediately go to numerical fallback if analytical is disabled
+        if disableAnalytical:
+          raise ValueError('stop')
 
-      # try analytical treatment first
-      self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
-      self._mode = 'analytic'
+        # try analytical treatment first
+        self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
+        self._mode = 'analytic'
+        self._needsRecompile = False
 
-    # fallback to numerical treatment and analytical mode did not succeed
-    except Exception:
-      if sy.sympify(self._probabilityDensity).find(sy.DiracDelta):
-        raise ValueError(f'cannot use numeric mode for expression containing DiracDelta')
-      self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
-      self._mode = 'numeric'
+      # fallback to numerical treatment and analytical mode did not succeed
+      except Exception:
+        if sy.sympify(self._probabilityDensity).find(sy.DiracDelta):
+          raise ValueError(f'cannot use numeric mode for expression containing DiracDelta')
+        self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
+        self._mode = 'numeric'
+        self._needsRecompile = False
 
 
   def mode(self):
@@ -116,17 +122,25 @@ class VectorRandomVariable:
 
 
   def _setConstants(self, **kwargs):
-    # store passed constants dictionary for later reference
-    self._constantsDict = kwargs
-
     # prepare expression object
     if self._probabilityDensityBaseExpr is None:
       self._probabilityDensityBaseExpr = sy.sympify(self._probabilityDensity)
     expr = self._probabilityDensityBaseExpr    
 
     # substitute constants
+    substitutedConstantsDict = {}
     for name, val in kwargs.items():
-      expr = expr.subs(name, val)
+      if name in [str(s) for s in expr.free_symbols]:
+        expr = expr.subs(name, val)
+        substitutedConstantsDict[name] = val
+
+    # return immediately if was already compiled for this set of constants
+    if not self._needsRecompile and self._constantsDict == substitutedConstantsDict:
+      #print(f'no need to recompile, constants were: {self._constantsDict}, are: {substitutedConstantsDict}')
+      return
+    # if constants changed -> set needsRecompile flag to regenerate everything
+    self._needsRecompile = True
+    #print(f'constants changed, recompiling...')
 
     # set variables attribute if not set
     self._variables = list(expr.free_symbols)
@@ -246,7 +260,8 @@ class VectorRandomVariable:
       for val in discreteEvents.keys():
         if totalProb is None:
           totalProb = sum([v[0] for v in discreteEvents.values() if v[1]]) + float(totalProbContinuum.doit().evalf())
-        discreteEvents[val][0] /= totalProb
+        if totalProb:
+          discreteEvents[val][0] /= totalProb
 
       try:
         float(partialIntegral)
@@ -259,7 +274,7 @@ class VectorRandomVariable:
                               modules=['numpy', 'scipy'])
                                               for exprY in exprYs]
       else:
-        # partial integral does not depend on var -> random variable has no continuous part
+        # partial integral does not depend on var and integral vanishes -> random variable has no continuous part
         if len(discreteEvents) == 0:
           raise ValueError('random distribution has neither continuum nor discrete part')
         lambYs = []

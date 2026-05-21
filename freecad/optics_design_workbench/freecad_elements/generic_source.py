@@ -18,14 +18,6 @@ from .common import *
 from . import find
 from .. import simulation
 from ..simulation.tracing_cache import *
-from .. import io
-
-# global dict with keys being PointSourceProxy objects and values being 
-# more dicts that store pseudo-attributes. This awkward attribute storing
-# format allows to bypass the serializer which wants to safe the Proxy
-# objects whenever the FreeCAD project is saved.
-NON_SERIALIZABLE_STORE = {}
-
 
 #####################################################################################################
 class GenericSourceProxy(GenericFreecadElementProxy):

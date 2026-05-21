@@ -33,7 +33,6 @@ class Ray():
     self.initWavelength = wavelength
     self.metadata = metadata
   
-  
   def traceRay(self, powerTol=1e-6, maxRayLength=None,
                maxIntersections=None, store=False,
                metadata={}):
@@ -143,14 +142,16 @@ class Ray():
       # hit mirror: direction is mirrored at normal, 
       # medium is unchanged, power is altered according to reflectivity
       if obj.OpticalType == 'Mirror':
-        # calculate outgoing direction of ideal mirror
-        currentDirection = self.mirror(currentDirection, normal)
 
-        # determine outgoing direction using mirrors reflected power density
-        
+        # calculate direction according to ideal specular reflection
+        directionSpecular = self.mirror(currentDirection, normal)
 
-        # modify outgoing direction using modify probability density
-
+        # apply stochastic corrections and update ray direction
+        currentDirection = obj.Proxy.applyStochasticRayCorrections(obj,
+              directionIn = currentDirection/currentDirection.Length,
+              idealDirectionOut = directionSpecular,
+              normal = normal,
+        )
 
         # reduce ray power according to reflectivity
         currentPower *= obj.Reflectivity
@@ -186,10 +187,17 @@ class Ray():
             n1 = currentMedium.RefractiveIndex
           n2 = 1
 
-        # update ray direction according to Snell's law
-        currentDirection, isTotalReflection = self.snellsLaw(
-                                      currentDirection/currentDirection.Length,
-                                      n1, n2, normal)
+        # calculate scattered ray direction according to Snell's law
+        refractedDirection, _isTotalReflection = self.snellsLaw(
+                                    currentDirection/currentDirection.Length,
+                                    n1, n2, normal)
+
+        # apply stochastic corrections and update ray direction
+        currentDirection = obj.Proxy.applyStochasticRayCorrections(obj,
+              directionIn = currentDirection/currentDirection.Length,
+              idealDirectionOut = refractedDirection,
+              normal = normal,
+        )
 
         # if ray traveled in exit direction and not total reflection occurred,
         # set current medium to vacuum, also make sure that the ray was exiting

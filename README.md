@@ -44,7 +44,7 @@ If you want to install without the addon manager, head to the releases section a
 
 ## Getting started with examples
 
-To get started, FCStd files and corresponding jupyter notebooks can be found the examples folder of this repository.
+To get started, FCStd files and corresponding jupyter notebooks can be found in the examples folder of this repository.
 
 
 ### Gaussian beam point source and detector

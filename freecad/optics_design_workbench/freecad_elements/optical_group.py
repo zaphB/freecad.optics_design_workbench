@@ -6,12 +6,16 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 try:
   import FreeCADGui as Gui
   import FreeCAD as App
+  from FreeCAD import Vector, Rotation
 except ImportError:
   pass
+
+from numpy import *
 
 from . import common
 from . import find
 from .. import simulation
+from .. import distributions
 
 # global dict with keys being PointSourceProxy objects and values being 
 # more dicts that store pseudo-attributes. This awkward attribute storing
@@ -31,18 +35,21 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
               'fully absorbing (=Absorber) or completely transparent (=Vacuum).'),
         ('RefractiveIndex', 2, 'Float', 
               'Refractive index of the material used for ray tracing.'),
-        ('ReflectedPowerDensity', 'DiracDelta(theta-theta_refl) + DiracDelta(phi-phi_refl)', 'String', 
+        ('ReflectedPowerDensity', 'DiracDelta(theta-theta_refl) * DiracDelta(phi-phi_refl)', 'String', 
               'Power density distribution function for reflected light. The direction of the '
               'resulting reflected ray '
               'is given by theta and phi. The angles of the incoming ray are given by theta_in and, '
               'phi_in, the angles of a ray reflected at an ideal mirror are given by theta_refl and '
               'phi_refl. The theta=0 direction corresponds to the local face normal. Defaults to '
               'ideal mirror behavior.'),
-        ('RefractedPowerDensity', 'DiracDelta(theta-theta_refr) + DiracDelta(phi-phi_refr)', 'String', 
+        ('RefractedPowerDensity', 
+              # TODO: make this the default but needs performance improvement of random number generator:
+              #       'DiracDelta(theta-theta_refr) * DiracDelta(phi-phi_refr)', 
+              '', 'String', 
               'Power density distribution function for refracted light. The direction of the '
               'resulting refracted ray '
               'is given by theta and phi. The angles of the incoming ray are given by theta_in and, '
-              'phi_in, the angles of a ray reflected at an ideal dielectric boundary according to '
+              'phi_in, the angles of a ray refracted at an ideal dielectric boundary according to '
               'Snell\'s law are given by theta_refr and '
               'phi_refr. The theta=0 direction corresponds to the local face normal. '
               'Defaults to ideal dielectric behavior.'),
@@ -85,7 +92,9 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
   def setVisibleProperties(self, obj, props):
     dynamicProps = ['AbsorptionLength', 'RefractiveIndex', 'Reflectivity', 'GratingType', 
                     'GratingLinesPerMillimeter', 'GratingLinesOrientation', 
-                    'GratingDiffractionOrder']
+                    'GratingDiffractionOrder', 'ReflectedPowerDensity', 'RefractedPowerDensity', 
+                    'PowerThetaDomain', 'PowerPhiDomain', 'RayModificationProbabilityDensity', 
+                    'ModifyThetaDomain', 'ModifyPhiDomain']
     for p in dynamicProps:
       obj.setEditorMode(p, 0 if p in props else 3)
 
@@ -151,16 +160,148 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
       except ValueError:
         setattr(obj, prop, 'inf')
 
+    # make sure domains are valid
+    if prop in ('PowerThetaDomain', 'PowerPhiDomain', 'ModifyThetaDomain', 'ModifyPhiDomain'):
+      raw = getattr(obj, prop)
+
+      # select defaults and limits depending on property
+      if 'Theta' in prop:
+        default = '-pi,pi'
+        limits = ['-pi', 'pi']
+        spanLimits = [0, '2*pi']
+      elif 'Phi' in prop:
+        default = '-pi,pi'
+        limits = ['-2*pi', '2*pi']
+        spanLimits = [0, '4*pi']
+
+      # parse range and replace value in case parsing changed it
+      parsed, (l1,l2) = self._parsedDomain(raw, default=default, 
+                                           limits=limits, 
+                                           spanLimits=spanLimits)
+      if raw != parsed:
+        setattr(obj, prop, parsed)
+
   def onInitializeSimulation(self, obj, state, ident):
-    pass
+    # clear cached random number generators on start and exit of simulation
+    self._clearVrv(obj)
 
   def onExitSimulation(self, obj, ident):
-    pass
+    # clear cached random number generators on start and exit of simulation
+    self._clearVrv(obj)
 
   def onRayHit(self, source, obj, point, direction, power, isEntering, metadata, store):
     if store and obj.RecordHits:
       store.addRayHit(source=source, obj=obj, point=point, direction=direction, 
                       power=power, isEntering=isEntering, metadata=metadata)
+
+
+  def _getVrv(self, obj, kind):
+    '''
+    return (cached) random variables for stochastic ray postprocessing (or False if 
+    probability density is empty)
+    '''
+    if NON_SERIALIZABLE_STORE.get(self, None) is None:
+      NON_SERIALIZABLE_STORE[self] = {}
+    
+    if NON_SERIALIZABLE_STORE[self].get('vrv'+kind, None) is None:
+      # module global variable and not to self, because attributes of self should be serializable
+      if kind == 'reflect':
+        if obj.ReflectedPowerDensity:
+          NON_SERIALIZABLE_STORE[self]['vrv'+kind] = (
+              distributions.VectorRandomVariable(
+                    probabilityDensity='('+obj.ReflectedPowerDensity+')*abs(sin(theta))', # add correction for spherical coordinate area element size
+                    variableOrder=('theta', 'phi'),
+                    variableDomains=dict(
+                      theta=obj.Proxy._parsedDomain(obj.PowerThetaDomain)[1], 
+                      phi=obj.Proxy._parsedDomain(obj.PowerPhiDomain)[1]
+                    ),
+              )
+          )
+        else:
+          NON_SERIALIZABLE_STORE[self]['vrv'+kind] = False
+      if kind == 'refract':
+        if obj.RefractedPowerDensity:
+          NON_SERIALIZABLE_STORE[self]['vrv'+kind] = (
+              distributions.VectorRandomVariable(
+                    probabilityDensity='('+obj.RefractedPowerDensity+')*abs(sin(theta))', # add correction for spherical coordinate area element size
+                    variableOrder=('theta', 'phi'),
+                    variableDomains=dict(
+                      theta=obj.Proxy._parsedDomain(obj.PowerThetaDomain)[1], 
+                      phi=obj.Proxy._parsedDomain(obj.PowerPhiDomain)[1]
+                    ),
+              )
+          )
+        else:
+          NON_SERIALIZABLE_STORE[self]['vrv'+kind] = False
+      if kind == 'modify':
+        if obj.RayModificationProbabilityDensity:
+          NON_SERIALIZABLE_STORE[self]['vrv'+kind] = (
+              distributions.VectorRandomVariable(
+                    probabilityDensity=obj.RayModificationProbabilityDensity,
+                    variableOrder=('theta', 'phi'),
+                    variableDomains=dict(
+                      theta=obj.Proxy._parsedDomain(obj.ModifyThetaDomain)[1], 
+                      phi=obj.Proxy._parsedDomain(obj.ModifyPhiDomain)[1]
+                    ),
+              )
+          )
+        else:
+          NON_SERIALIZABLE_STORE[self]['vrv'+kind] = False
+    return NON_SERIALIZABLE_STORE[self]['vrv'+kind]
+
+
+  def _clearVrv(self, obj):
+    for kind in 'reflect refract modify'.split():
+      _stored = NON_SERIALIZABLE_STORE.get(self, {})
+      _stored['vrv'+kind] = None
+      NON_SERIALIZABLE_STORE[self] = _stored
+
+
+  def applyStochasticRayCorrections(self, obj, directionIn, idealDirectionOut, normal):
+    '''
+    Calculate direction of outgoing ray according to stochastic properties of the optical
+    object, i.e. ReflectedPowerDensity, RefractedPowerDensity and RayModificationProbabilityDensity
+    Takes the ideal (Snell's law for lenses, or specular reflection for mirrors) outgoing direction,
+    the incoming direction and the face normal (pointing into the body) as input parameters.
+    '''
+    # prepare vectors needed to calculate direction of reflected ray
+    _arccos = lambda x: arccos(max([-1, min([1, x])]))
+    thetaIn = _arccos( directionIn * normal/normal.Length )
+    phiIn = 0
+    thetaRefl = _arccos( idealDirectionOut/idealDirectionOut.Length * normal/normal.Length )
+    phiRefl = 0
+
+    # set ideal direction as default
+    directionOut = idealDirectionOut
+
+    # determine outgoing direction using mirrors reflected power density
+    #print(obj.ReflectedPowerDensity, obj.Proxy._parsedDomain(obj.PowerThetaDomain)[1], obj.Proxy._parsedDomain(obj.PowerPhiDomain)[1])
+    if obj.OpticalType == 'Mirror':
+      kind = 'reflect' 
+    elif obj.OpticalType == 'Lens':
+      kind = 'refract'
+    else:
+      raise ValueError(f'applyStochasticRayCorrections can only be called on mirrors and lenses optical types, found {obj.OpticalType=}')
+    vrv = self._getVrv(obj, kind=kind)
+    if vrv:
+      vrv.compile( theta_in=thetaIn, phi_in=phiIn, theta_refl=thetaRefl, phi_refl=phiRefl )
+      thetaOut, phiOut = vrv.draw()
+      #print(thetaOut, phiOut)
+      directionOut = (Rotation(normal, phiOut/pi*180) 
+                        * Rotation(normal.cross(directionIn), thetaOut/pi*180) 
+                        * normal)
+
+    # modify outgoing direction using modify probability density
+    #print(obj.RayModificationProbabilityDensity, obj.Proxy._parsedDomain(obj.ModifyThetaDomain)[1], obj.Proxy._parsedDomain(obj.ModifyPhiDomain)[1])
+    vrv = self._getVrv(obj, kind='modify')
+    if vrv:
+      thetaModify, phiModify = vrv.draw()
+      #print(thetaModify, phiModify)
+      directionOut = (Rotation(directionOut, phiModify/pi*180) 
+                            * Rotation(directionOut.cross(directionIn), thetaModify/pi*180) 
+                            * directionOut)
+    
+    return directionOut
 
 
 #####################################################################################################
