@@ -35,14 +35,17 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
               'fully absorbing (=Absorber) or completely transparent (=Vacuum).'),
         ('RefractiveIndex', 2, 'Float', 
               'Refractive index of the material used for ray tracing.'),
-        ('ReflectedPowerDensity', 'DiracDelta(theta-theta_refl) * DiracDelta(phi-phi_refl)', 'String', 
+        ('ReflectedProbabilityDensity', 
+              # TODO: make this the default but needs performance improvement of random number generator:
+              #       'DiracDelta(theta-theta_refl) * DiracDelta(phi-phi_refl)', 
+              '', 'String', 
               'Power density distribution function for reflected light. The direction of the '
               'resulting reflected ray '
               'is given by theta and phi. The angles of the incoming ray are given by theta_in and, '
               'phi_in, the angles of a ray reflected at an ideal mirror are given by theta_refl and '
               'phi_refl. The theta=0 direction corresponds to the local face normal. Defaults to '
               'ideal mirror behavior.'),
-        ('RefractedPowerDensity', 
+        ('RefractedProbabilityDensity', 
               # TODO: make this the default but needs performance improvement of random number generator:
               #       'DiracDelta(theta-theta_refr) * DiracDelta(phi-phi_refr)', 
               '', 'String', 
@@ -57,7 +60,10 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
               'when generating angles of the Reflected/Refracted Power Density.'),
         ('PowerPhiDomain', '0, 2*pi', 'String', 'Min and max value for azimuthal angle phi to consider '
               'when generating angles of the Reflected/Refracted Power Density.'),
-        ('RayModificationProbabilityDensity', 'DiracDelta(theta)', 'String', 
+        ('RayModificationProbabilityDensity',
+              # TODO: make this the default but needs performance improvement of random number generator:
+              #       'DiracDelta(theta)', 
+              '', 'String',
               'Modifies outgoing rays by the given probability density function. Available '
               'variables are theta and phi. Theta and phi rotate the resulting ray, with '
               'theta=0 (and phi arbitrary) implying no rotation at all. The phi=0 angle '
@@ -92,7 +98,7 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
   def setVisibleProperties(self, obj, props):
     dynamicProps = ['AbsorptionLength', 'RefractiveIndex', 'Reflectivity', 'GratingType', 
                     'GratingLinesPerMillimeter', 'GratingLinesOrientation', 
-                    'GratingDiffractionOrder', 'ReflectedPowerDensity', 'RefractedPowerDensity', 
+                    'GratingDiffractionOrder', 'ReflectedProbabilityDensity', 'RefractedProbabilityDensity', 
                     'PowerThetaDomain', 'PowerPhiDomain', 'RayModificationProbabilityDensity', 
                     'ModifyThetaDomain', 'ModifyPhiDomain']
     for p in dynamicProps:
@@ -115,13 +121,13 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
 
       # update which properties to display
       if newType == 'Mirror':
-        self.setVisibleProperties(obj, ['Reflectivity', 'ReflectedPowerDensity', 'PowerThetaDomain', 
+        self.setVisibleProperties(obj, ['Reflectivity', 'ReflectedProbabilityDensity', 'PowerThetaDomain', 
                                         'PowerPhiDomain', 'RayModificationProbabilityDensity', 
                                         'ModifyThetaDomain', 'ModifyPhiDomain'])
         obj.RecordHits = False
 
       elif newType == 'Lens':
-        self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex', 'RefractedPowerDensity', 
+        self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex', 'RefractedProbabilityDensity', 
                                         'PowerThetaDomain', 'PowerPhiDomain', 'RayModificationProbabilityDensity',
                                         'ModifyThetaDomain', 'ModifyPhiDomain'])
         for child in obj.ElementList:
@@ -202,14 +208,19 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
     '''
     if NON_SERIALIZABLE_STORE.get(self, None) is None:
       NON_SERIALIZABLE_STORE[self] = {}
+
+    # TODO: should *abs(sin(theta)) applied to probability densities to correct for spherical coordinate 
+    # element size (and rename to power density)? 
+    # At the moment this correction is not applied, because e.g. for the Lambert emitter it makes things
+    # less readable. Needs one or few practical examples and more thinking...
     
     if NON_SERIALIZABLE_STORE[self].get('vrv'+kind, None) is None:
       # module global variable and not to self, because attributes of self should be serializable
       if kind == 'reflect':
-        if obj.ReflectedPowerDensity:
+        if obj.ReflectedProbabilityDensity:
           NON_SERIALIZABLE_STORE[self]['vrv'+kind] = (
               distributions.VectorRandomVariable(
-                    probabilityDensity='('+obj.ReflectedPowerDensity+')*abs(sin(theta))', # add correction for spherical coordinate area element size
+                    probabilityDensity='('+obj.ReflectedProbabilityDensity+')',
                     variableOrder=('theta', 'phi'),
                     variableDomains=dict(
                       theta=obj.Proxy._parsedDomain(obj.PowerThetaDomain)[1], 
@@ -220,10 +231,10 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
         else:
           NON_SERIALIZABLE_STORE[self]['vrv'+kind] = False
       if kind == 'refract':
-        if obj.RefractedPowerDensity:
+        if obj.RefractedProbabilityDensity:
           NON_SERIALIZABLE_STORE[self]['vrv'+kind] = (
               distributions.VectorRandomVariable(
-                    probabilityDensity='('+obj.RefractedPowerDensity+')*abs(sin(theta))', # add correction for spherical coordinate area element size
+                    probabilityDensity='('+obj.RefractedProbabilityDensity+')',
                     variableOrder=('theta', 'phi'),
                     variableDomains=dict(
                       theta=obj.Proxy._parsedDomain(obj.PowerThetaDomain)[1], 
@@ -260,7 +271,7 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
   def applyStochasticRayCorrections(self, obj, directionIn, idealDirectionOut, normal):
     '''
     Calculate direction of outgoing ray according to stochastic properties of the optical
-    object, i.e. ReflectedPowerDensity, RefractedPowerDensity and RayModificationProbabilityDensity
+    object, i.e. ReflectedProbabilityDensity, RefractedProbabilityDensity and RayModificationProbabilityDensity
     Takes the ideal (Snell's law for lenses, or specular reflection for mirrors) outgoing direction,
     the incoming direction and the face normal (pointing into the body) as input parameters.
     '''
@@ -274,8 +285,8 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
     # set ideal direction as default
     directionOut = idealDirectionOut
 
-    # determine outgoing direction using mirrors reflected power density
-    #print(obj.ReflectedPowerDensity, obj.Proxy._parsedDomain(obj.PowerThetaDomain)[1], obj.Proxy._parsedDomain(obj.PowerPhiDomain)[1])
+    # determine outgoing direction using mirror's reflected power density
+    #print(obj.ReflectedProbabilityDensity, obj.Proxy._parsedDomain(obj.PowerThetaDomain)[1], obj.Proxy._parsedDomain(obj.PowerPhiDomain)[1])
     if obj.OpticalType == 'Mirror':
       kind = 'reflect' 
     elif obj.OpticalType == 'Lens':
