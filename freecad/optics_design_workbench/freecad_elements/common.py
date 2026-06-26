@@ -61,6 +61,12 @@ class GenericFreecadElementProxy:
         if not hasattr(obj, name):
           obj.addProperty('App::Property'+kind, name, section, tooltip)
           setattr(obj, name, default)
+    # trigger same operation for view object (if present)
+    if ( hasattr(obj, 'ViewObject') 
+         and hasattr(obj.ViewObject, 'Proxy')
+         and hasattr(obj.ViewObject.Proxy, '_ensurePropertiesExist') ):
+      obj.ViewObject.Proxy._ensurePropertiesExist(obj)
+
 
   def _parsedDomain(self, domain, default=None, limits=None, spanLimits=None, isRecursive=False):
     '''
@@ -142,6 +148,9 @@ class GenericFreecadElementProxy:
 
 
 class GenericFreecadElementViewProxy:
+  def __init__(self, obj):
+    pass
+
   def _properties(self):
     return []
 
