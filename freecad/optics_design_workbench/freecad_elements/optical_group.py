@@ -95,14 +95,32 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
       ]),
     ]
 
-  def setVisibleProperties(self, obj, props):
+  def execute(self, obj):
+    '''Do something when doing a recomputation, this method is mandatory'''
+    self._ensurePropertiesExist(obj)
+    self.setVisibleProperties(obj)
+
+  def setVisibleProperties(self, obj):
     dynamicProps = ['AbsorptionLength', 'RefractiveIndex', 'Reflectivity', 'GratingType', 
                     'GratingLinesPerMillimeter', 'GratingLinesOrientation', 
                     'GratingDiffractionOrder', 'ReflectedProbabilityDensity', 'RefractedProbabilityDensity', 
                     'PowerThetaDomain', 'PowerPhiDomain', 'RayModificationProbabilityDensity', 
                     'ModifyThetaDomain', 'ModifyPhiDomain']
+    visibleProps = []
+    if obj.OpticalType == 'Mirror':
+      visibleProps = ['Reflectivity', 'ReflectedProbabilityDensity', 'PowerThetaDomain', 
+                      'PowerPhiDomain', 'RayModificationProbabilityDensity', 
+                      'ModifyThetaDomain', 'ModifyPhiDomain']
+    elif obj.OpticalType == 'Lens':
+      visibleProps = ['AbsorptionLength', 'RefractiveIndex', 'RefractedProbabilityDensity', 
+                      'PowerThetaDomain', 'PowerPhiDomain', 'RayModificationProbabilityDensity',
+                      'ModifyThetaDomain', 'ModifyPhiDomain']
+    elif obj.OpticalType == 'Grating':
+      visibleProps = ['AbsorptionLength', 'RefractiveIndex',
+                      'GratingType', 'GratingLinesPerMillimeter', 
+                      'GratingLinesOrientation', 'GratingDiffractionOrder']
     for p in dynamicProps:
-      obj.setEditorMode(p, 0 if p in props else 3)
+      obj.setEditorMode(p, 0 if p in visibleProps else 3)
 
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
@@ -121,36 +139,28 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
 
       # update which properties to display
       if newType == 'Mirror':
-        self.setVisibleProperties(obj, ['Reflectivity', 'ReflectedProbabilityDensity', 'PowerThetaDomain', 
-                                        'PowerPhiDomain', 'RayModificationProbabilityDensity', 
-                                        'ModifyThetaDomain', 'ModifyPhiDomain'])
         obj.RecordHits = False
 
       elif newType == 'Lens':
-        self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex', 'RefractedProbabilityDensity', 
-                                        'PowerThetaDomain', 'PowerPhiDomain', 'RayModificationProbabilityDensity',
-                                        'ModifyThetaDomain', 'ModifyPhiDomain'])
         for child in obj.ElementList:
           if hasattr(child.ViewObject, 'Transparency'):
             child.ViewObject.Transparency = 80
         obj.RecordHits = False
 
       elif newType == 'Grating':
-        self.setVisibleProperties(obj, ['AbsorptionLength', 'RefractiveIndex',
-                                        'GratingType', 'GratingLinesPerMillimeter', 
-                                        'GratingLinesOrientation', 'GratingDiffractionOrder'])
         obj.RecordHits = False
 
       elif newType == 'Absorber':
-        self.setVisibleProperties(obj, [])
         obj.RecordHits = True
 
       elif newType == 'Vacuum':
-        self.setVisibleProperties(obj, [])
         for child in obj.ElementList:
           if hasattr(child.ViewObject, 'Transparency'):
             child.ViewObject.Transparency = 80
         obj.RecordHits = True
+
+      # update which properties are shown and which are hidden
+      self.setVisibleProperties(obj)
 
       # update label
       if oldType and oldType in obj.Label:
