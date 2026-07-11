@@ -399,7 +399,7 @@ class FreecadDocument:
   
   The document is intended to be used as a context manager to clean up after itself.
   '''
-  def __init__(self, path=None, openFreshCopy=False):
+  def __init__(self, path=None, workInTempCopy=False):
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
@@ -420,11 +420,11 @@ class FreecadDocument:
     if not path.endswith('.FCStd'):
       raise ValueError(f'path to freecad project file {path} does end with .FCStd')
 
-    # if openFreshCopy is True, create temp folder, copy freecad file in there, 
+    # if workInTempCopy is True, create temp folder, copy freecad file in there, 
     # and modify path attributes accordingly
-    self._openFreshCopy = openFreshCopy
+    self._workInTempCopy = workInTempCopy
     self._originalPath = path
-    if openFreshCopy:
+    if workInTempCopy:
       # find unique filename for FCStd file
       tempDirName = self._getTempFolder()
       while True:
@@ -470,20 +470,20 @@ class FreecadDocument:
 
   def purgeTempFolder(self):
     # dont clean if this is a tmp-document
-    if self._openFreshCopy:
-      raise ValueError(f'this freecad document was opened using openFreshCopy=True, '
+    if self._workInTempCopy:
+      raise ValueError(f'this freecad document was opened using workInTempCopy=True, '
                        f'can only purge temp folder from instances that were opened '
-                       f'without openFreshCopy option')
+                       f'without workInTempCopy option')
     shutil.rmtree(self._getTempFolder())
 
-  def isOpenFreshCopy(self):
-    if self._openFreshCopy:
+  def isWorkInTempCopy(self):
+    if self._workInTempCopy:
       return True
     return '.OpticsDesign/tmp'.lower() in self._path.lower()
 
   def _sanitizeTempFolder(self, timeout=4):
     # dont clean if this is a tmp-document
-    if self.isOpenFreshCopy():
+    if self.isWorkInTempCopy():
       return
 
     t0 = time.time()
@@ -936,7 +936,9 @@ class FreecadDocument:
       # fetch lines until queue.Empty is raised
       try:
         while True:
-          result.append(self._qe.get_nowait())
+          line = self._qe.get_nowait()
+          if not line.startswith('warning:'):
+            result.append(line)
           lastLineReceived = time.time()
       except queue.Empty:
         pass

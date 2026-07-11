@@ -110,6 +110,7 @@ class _ProgressTacker:
         self._previousProgressDict = p
       except (FileNotFoundError, IndexError):
         p = self._previousProgressDict or dict(
+                  simulationType='',
                   totalIterations=nan, endAfterIterations=nan,
                   totalRecordedHits=nan, endAfterHits=nan,
                   totalTracedRays=nan, endAfterRays=nan)
@@ -119,8 +120,8 @@ class _ProgressTacker:
       # calculate elapsed and expected remaining time
       elapsed = time.time()-self._t0
       simulationProg = max([ p['totalIterations']/p['endAfterIterations'],
-                              p['totalRecordedHits']/p['endAfterHits'],
-                              p['totalTracedRays']/p['endAfterRays'] ])
+                             p['totalRecordedHits']/p['endAfterHits'],
+                             p['totalTracedRays']/p['endAfterRays'] ])
       if not isfinite(simulationProg):
         simulationProg = 0
       relProgress = (self._simulationNo + simulationProg)/(self._totalSimulations or 1)
@@ -137,10 +138,19 @@ class _ProgressTacker:
         iterationProgress = f'simulations done {self._simulationNo}/{self._totalSimulations}'
       simulationProgress = ''
       if isfinite(p['totalIterations']):
-        simulationProgress = (f'current simulation: '
-                              f"iter {p['totalIterations']}/{p['endAfterIterations']}, "
-                              f"hits {p['totalRecordedHits']}/{p['endAfterHits']}, "
-                              f"rays {p['totalTracedRays']}/{p['endAfterRays']}")
+        if 'simulationType' not in p.keys():
+          simulationProgress = 'simulation starting...'
+        elif p['simulationType'] == 'fans':
+          simulationProgress = (f'simulation (type=fans): '
+                                f"hits {p['totalRecordedHits']}, "
+                                f"rays {p['totalTracedRays']}")
+          # disable expected remaining calculation in fan mode
+          expectedRemain = None
+        else:
+          simulationProgress = (f'simulation (type={p['simulationType']}): '
+                                f"iter {p['totalIterations']}/{p['endAfterIterations']}, "
+                                f"hits {p['totalRecordedHits']}/{p['endAfterHits']}, "
+                                f"rays {p['totalTracedRays']}/{p['endAfterRays']}")
       message = ', '.join([s for s in (iterationProgress, simulationProgress) if s.strip()])
 
       # print progress message

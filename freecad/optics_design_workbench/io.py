@@ -194,7 +194,7 @@ def warn(*msg, logOnly=False):
   if _logger():
     _logger().warning(msg)
   if not logOnly:
-    warnings.warn(msg)
+    warnings.warn('warning: '+msg)
     #print(_prefix('warning')+msg)
     #if '\n' in msg:
     #  print()

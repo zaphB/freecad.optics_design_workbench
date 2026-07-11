@@ -224,6 +224,9 @@ class Hits:
     return all([k in self.hits.keys() for k in 'rayIndex fanIndex totalRaysInFan'.split()])
 
   def _raiseIfNotFanMath(self):
+    if not len(self.hits):
+      raise ValueError(f'keys rayIndex, fanIndex and totalRaysInFan must exist in hits dictionary, '
+                f'but hits dictionary is empty')
     if not self.supportsFanMath():
       raise ValueError(f'keys rayIndex, fanIndex and totalRaysInFan must exist in hits dictionary, '
                 f'make sure you '

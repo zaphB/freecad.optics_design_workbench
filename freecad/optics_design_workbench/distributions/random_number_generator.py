@@ -37,6 +37,20 @@ def _clearAlarm():
   signal.alarm(0)
 
 
+def _lambdify(*args, **kwargs):
+  return sy.lambdify(*args, **kwargs, modules=['numpy', 'scipy']) # emath
+
+
+# TODO: instead of just two, use three modes: 
+#       1) analytic integral + analytic invert
+#       2) analytic integral + numeric invert
+#       3) numeric integral + numeric invert
+
+# TODO: implement optimal sampling of a Nd function that refines the coordinate
+#       mesh where curvature (laplacian) is large, explicitly check for 
+#       discontinouities (needed for discrete event determination)
+
+
 class VectorRandomVariable:
   '''
   Vector valued random variable. 
@@ -85,6 +99,16 @@ class VectorRandomVariable:
         self._transformLambdas = [self._generateAnalyticScalarLambda(i) for i in range(len(self._variables))]
         self._mode = 'analytic'
         self._needsRecompile = False
+
+        # try to draw values to make sure found lambdas are valid
+        _v = self.draw(N=10)
+        if type(_v) is dict:
+          for __v in _v.values():
+            if any(isnan(__v)):
+              raise ValueError('analytic mode was not successful')
+        else:
+          if any(isnan(_v)):
+            raise ValueError('analytic mode was not successful')
 
       # fallback to numerical treatment and analytical mode did not succeed
       except Exception:
@@ -270,9 +294,8 @@ class VectorRandomVariable:
                           simplify=False)  # do not simplify, this speeds up the solver a lot
         if len(exprYs) == 0:
           raise ValueError(f'expression {partialIntegral/totalIntegral} seems not to be solvable for {varX}')
-        lambYs = [sy.lambdify([varY]+self._variables[varI+1:], exprY, 
-                              modules=['numpy', 'scipy'])
-                                              for exprY in exprYs]
+        lambYs = [_lambdify([varY]+self._variables[varI+1:], exprY)
+                                                  for exprY in exprYs]
       else:
         # partial integral does not depend on var and integral vanishes -> random variable has no continuous part
         if len(discreteEvents) == 0:
@@ -339,7 +362,7 @@ class VectorRandomVariable:
     variableGrids = meshgrid(*variableRangesInBetween)
 
     # evaluate expression on grid
-    exprLam = sy.lambdify(self._variables, expr)
+    exprLam = _lambdify(self._variables, expr)
     gridProbs = exprLam(*variableGrids)
     return self._lambdasFromSampled(variableGrids, gridProbs, varI, expr=expr,
                                     variableRanges=variableRanges,
@@ -486,7 +509,7 @@ class VectorRandomVariable:
 
       # make sure each of the N rolls had exactly one valid result
       if any(valid[:,-1] != arange(valid.shape[0])):
-        raise ValueError('no/more than one valid value found in domain')
+        raise ValueError(f'no/more than one valid value found in domain ({valid[:,-1]=}, {valid.shape=})')
 
       # if no valid results exist -> store nans (may be overwritten by discrete events)
       if not len(valid):
@@ -592,7 +615,7 @@ class VectorRandomVariable:
 
       # calc expected histogram
       expr = self._probabilityDensityExpr
-      lambdExpr = sy.lambdify(list(reversed(self._variableOrder)), expr)
+      lambdExpr = _lambdify(list(reversed(self._variableOrder)), expr)
       expectedHist = lambdExpr(*meshgrid(*reversed(binCenters)))
 
       # fix shape in case of missing variables in expression
@@ -679,7 +702,7 @@ class VectorRandomVariable:
 
       # calc density
       expr = self._probabilityDensityExpr
-      lambdExpr = sy.lambdify(var, expr)
+      lambdExpr = _lambdify(var, expr)
       density = lambdExpr(varRange)
 
       # fix shape in case of missing variables in expression
