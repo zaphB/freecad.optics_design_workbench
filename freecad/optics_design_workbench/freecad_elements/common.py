@@ -22,7 +22,7 @@ _MIN_UPDATE_INTERVAL = 1e-2
 
 # global dict with keys being proxy objects and values being 
 # more dicts that store pseudo-attributes. This awkward attribute storing
-# format allows to bypass the serializer which wants to safe the Proxy
+# format allows to bypass the serializer which wants to save the Proxy
 # objects whenever the FreeCAD project is saved.
 NON_SERIALIZABLE_STORE = {}
 

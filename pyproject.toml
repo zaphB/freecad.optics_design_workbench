@@ -22,7 +22,7 @@ packages = [
 name = "optics_design_workbench"
 dynamic = ["version"]
 dependencies = [
-  "numpy>1.24.4", 
+  "numpy>=2.0.0", # <- some tests use atan instead of arctan, which only exists since numpy 2 
   "scipy>=1.14.0", # <- require scipy version with COBYQA optimizer
   "sympy", 
   "matplotlib", 

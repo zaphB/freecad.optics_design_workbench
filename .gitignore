@@ -24,6 +24,9 @@ __pycache__
 test-docker/**/container-home
 *.AppImage
 releases
+tmp
+raw
+.pymon
 
 # include screenshots in examples
 !examples/**/*.png

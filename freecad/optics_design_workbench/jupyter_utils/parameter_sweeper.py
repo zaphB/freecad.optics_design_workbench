@@ -115,7 +115,7 @@ class SweeperOptimizeWorker:
   def work(self):
     # make sure run-in-fresh-copy-mode is enabled to prevent any worker
     # from ever touching the main FCStd file
-    self._sweeperInstance.setOpenFreshCopyMode(True)
+    self._sweeperInstance.setWorkInTempCopyMode(True)
 
     # run optimizer work
     self._sweeperInstance.optimize(**self._optimizeArgs)
@@ -322,19 +322,19 @@ class ParameterSweeper:
       # own soon, because we set _freecadDocument to None)
       self._closeDocumentAfterInactivityThread = None
 
-  def setOpenFreshCopyMode(self, mode):
+  def setWorkInTempCopyMode(self, mode):
     # close file if mode changed to ensure it is re-opened with proper mode
     # on next occasion
-    prevMode = self._freecadDocumentKwargs.get('openFreshCopy', None)
+    prevMode = self._freecadDocumentKwargs.get('workInTempCopy', None)
     if prevMode != mode:
       self.resultsPath.cache_clear()
       self.close()
 
     # update freecad document kwargs
-    self._freecadDocumentKwargs['openFreshCopy'] = mode
+    self._freecadDocumentKwargs['workInTempCopy'] = mode
 
-  def getOpenFreshCopyMode(self):
-    return self._freecadDocumentKwargs.get('openFreshCopy', None)
+  def getWorkInTempCopyMode(self):
+    return self._freecadDocumentKwargs.get('workInTempCopy', None)
 
   def open(self):
     with self.freecadDocumentLock():
@@ -826,7 +826,7 @@ class ParameterSweeper:
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
 
             # show in notebook (if not running as worker)
-            if not self.getOpenFreshCopyMode():
+            if not self.getWorkInTempCopyMode():
               show()
 
             # close figure

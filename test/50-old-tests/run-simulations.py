@@ -39,6 +39,7 @@ def _runFile(filename, cleanup=True, cancelAfter=None, timeout=60*60):
     _cleanupResults(filename)
 
   # run true simulation
+  time.sleep(10)
   p = subprocess.Popen([FREECAD_BINARY, filename+'.FCStd', '-c'],
                         cwd=baseDir, 
                         #stdout=subprocess.DEVNULL,
@@ -219,7 +220,7 @@ allArgs = list(collectAllFCStd())
 def test_brieflyRunFCStdFiles(args):
   root, f, _f = args
   print(f'running simulation {f}')
-  baseDir, filename = _runFile(f, cancelAfter=30)
+  baseDir, filename = _runFile(f, cancelAfter=180)
   _cleanupResults(filename)
 
 

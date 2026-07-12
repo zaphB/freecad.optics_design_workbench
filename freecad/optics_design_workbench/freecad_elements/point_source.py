@@ -58,9 +58,9 @@ class PointSourceProxy(GenericSourceProxy):
       ]),
       ('OpticalSimulationSettings', [
         ('RandomNumberGeneratorMode', '?', 'String', ''),
-        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
-        ('RadiusResolutionNumericMode', '1e6', 'String', ''),
-        ('PhiResolutionNumericMode', '3', 'String', ''),
+        ('ThetaResolutionNumericMode', '1e5', 'String', ''),
+        ('RadiusResolutionNumericMode', '1e5', 'String', ''),
+        ('PhiResolutionNumericMode', '1e2', 'String', ''),
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('FanPhi0', '0', 'String', 'Change this to rotate fans around optical axis.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
@@ -79,15 +79,15 @@ class PointSourceProxy(GenericSourceProxy):
       # select defaults and limits depending on property
       if prop == 'PhiDomain':
         default = '0,2*pi'
-        limits = ['-2*pi', '2*pi']
-        spanLimits = [0, '2*pi']
+        limits = ['-20*pi', '20*pi']
+        spanLimits = [0, '20*pi']
       elif prop == 'ThetaDomain':
-        default = '0,pi'
-        limits = ['0','pi']
-        spanLimits = [0, 'pi']
+        default = '0,pi/4'
+        limits = ['-20*pi','20*pi']
+        spanLimits = [0, '20*pi']
       elif prop == 'RadiusDomain':
         default = '0,10'
-        limits = [0,inf]
+        limits = [-inf,inf]
         spanLimits = [0,inf]
 
       # parse range and replace value in case parsing changed it
@@ -104,20 +104,22 @@ class PointSourceProxy(GenericSourceProxy):
           if l1 < pi/2-1e-5 and l2 < pi/2-1e-5 and not isclose(float(obj.FocalLength), 0):
             r1, r2 = abs(tan(l1)*float(obj.FocalLength)), abs(tan(l2)*float(obj.FocalLength))
             r2 = max([0.1, r1+0.1, r2])
-            setattr(obj, 'RadiusDomain', ', '.join(['0' if r==0 
-                                                      else f'{r:.1e}' if abs(r)<0.01 or abs(r)>300
-                                                      else f'{r:.2f}' if abs(r) < 3
-                                                      else f'{r:.1f}' if abs(r) < 30
-                                                      else f'{r:.0f}'
-                                                          for r in sorted([r1,r2])]))
+            if isfinite(r1) and isfinite(r2):
+              setattr(obj, 'RadiusDomain', ', '.join(['0' if r==0 
+                                                        else f'{r:.1e}' if abs(r)<0.01 or abs(r)>300
+                                                        else f'{r:.2f}' if abs(r) < 3
+                                                        else f'{r:.1f}' if abs(r) < 30
+                                                        else f'{r:.0f}'
+                                                            for r in sorted([r1,r2])]))
       else:
         if prop == 'RadiusDomain':
           if _lastFiniteF:=getattr(self, '_lastFiniteFocalLength', nan):
             t1, t2 = sorted([ arctan(l1/abs(_lastFiniteF)), arctan(l2/abs(_lastFiniteF)) ])
             t2 = max([0.01*pi, t1+0.01*pi, t2])
-            if hasattr(obj, 'ThetaDomain'): # <- this is needed during startup to avoid 'attribute not found error'
-              setattr(obj, 'ThetaDomain', ', '.join(['0' if t==0 else f'{t/pi:.2f}*pi'
-                                                                    for t in [t1,t2] ]))
+            if isfinite(t1) and isfinite(t2):
+              if hasattr(obj, 'ThetaDomain'): # <- this is needed during startup to avoid 'attribute not found error'
+                setattr(obj, 'ThetaDomain', ', '.join(['0' if t==0 else f'{t/pi:.2f}*pi'
+                                                                      for t in [t1,t2] ]))
 
     # make sure resolutions are valid
     if prop in ('ThetaResolutionNumericMode', 'RadiusResolutionNumericMode', 
@@ -262,49 +264,65 @@ class PointSourceProxy(GenericSourceProxy):
           setattr(obj, 'FocalLength', getattr(obj, 'FocalLength'))
 
 
-  def _rvArgs(self, obj, densityString, variableDomain=None):
-    useTheta = isfinite(float(getattr(obj, 'FocalLength', 1)))
-    useRadius = not isfinite(float(getattr(obj, 'FocalLength', 1)))
-    usePhi = variableDomain is None
-    if useTheta:
+  def _rvArgs(self, obj, densityString, variableDomain=None, scalarRandomVar=False):
+    'make kwargs dictionary to initialize a scalar or vector random variable from the power density string'
+
+    # if focal length has a finite value means we want to generate rays in spherical coordinates
+    # using theta and phi angles.
+    if isfinite(float(getattr(obj, 'FocalLength', 1))):
+
       # raise error if focal length is zero and r,x or y exist in density expression (except for
       # characters in function names)
       if isclose(float(getattr(obj, 'FocalLength', 1)), 0):
         for c in 'rxy':
-          if c in ( densityString.replace('exp', '').replace('arcsin', '').replace('arccos', '')
+          if c in ( _s:=densityString.replace('exp', '').replace('arcsin', '').replace('arccos', '')
                                  .replace('arctan', '').replace('arctan2', '').replace('arccot', '')
                                  .replace('arsinh', '').replace('arcosh', '').replace('artanh', '')
-                                 .replace('arcoth', '').replace('DiracDelta', '') ):
+                                 .replace('arcoth', '').replace('DiracDelta', '').replace('Piecewise', '')
+                                 .replace('Heaviside', '').replace('True', '').replace('False', '') ):
             raise ValueError(f'Variable {c} in power density expression {obj.PowerDensity} '
-                             f'is forbidden if focal length is zero.')
+                             f'is forbidden if focal length is zero . ({_s=})')
+
+      # if we are making a 2D random variable (not 1D scalar random variable) we have to account
+      # for area element size in spherical coordinates:
+      if not scalarRandomVar:
+        densityString = '('+densityString+')*abs(sin(theta))'
 
       # substitute r,x,y by theta,phi expressions
       f = f'{abs(float(getattr(obj, "FocalLength", 1))):.8e}'
-      densityString = (sy.sympify(densityString)
+      densityExpr = (sy.sympify(densityString)
                             .subs('r', sy.sympify(f'(tan(theta)*{f})'))
                             .subs('x', sy.sympify(f'(tan(theta)*cos(phi)*{f})'))
                             .subs('y', sy.sympify(f'(tan(theta)*sin(phi)*{f})')))
-      if usePhi:
+
+      # if scalar random variable is requested: treat phi as a constant that has to
+      # be passed to compile (used in fan mode)
+      if scalarRandomVar:
         return dict(
-            probabilityDensity=densityString,
-            variableOrder=('theta', 'phi'),
-            variableDomains=dict(
-                theta=self.parsedThetaDomain(obj), 
-                phi=self.parsedPhiDomain(obj)),
-            numericalResolutions=dict(
-                theta=float(obj.ThetaResolutionNumericMode),
-                phi=float(getattr(obj, 'PhiResolutionNumericMode', 10)))
-        )
-      else:
-        return dict(
-            probabilityDensity=densityString,
+            probabilityDensity=str(densityExpr),
             variable='theta',
             variableDomain=variableDomain,
             numericalResolution=float(obj.ThetaResolutionNumericMode),
         )
-    if useRadius:
-      # replace sin(theta) with radius
-      densityString = densityString.replace('sin(theta)', 'r')
+      # else: return args to create vector random variable using theta and phi
+      return dict(
+        probabilityDensity=str(densityExpr),
+        variableOrder=('theta', 'phi'),
+        variableDomains=dict(
+            theta=self.parsedThetaDomain(obj), 
+            phi=self.parsedPhiDomain(obj)),
+        numericalResolutions=dict(
+            theta=float(obj.ThetaResolutionNumericMode),
+            phi=float(obj.PhiResolutionNumericMode))
+      )
+
+    # ..if however focal length is infinite (parallel ray source), the angle theta has no meaning and we have to 
+    # generate rays in cylinder coordinates using r and phi.
+    else:
+      # if we are making a 2D random variable (not 1D scalar random variable) we have to account
+      # for area element size in cylinder coordinates:
+      if not scalarRandomVar:
+        densityString = '('+densityString+')*abs(r)'
 
       # raise error if theta exists in density expression
       if 'theta' in densityString:
@@ -312,27 +330,30 @@ class PointSourceProxy(GenericSourceProxy):
                          f'is forbidden if focal length is infinite.')
 
       # substitute theta,x,y and by r,phi expressions
-      densityString = (sy.sympify(densityString)
+      densityExpr = (sy.sympify(densityString)
                             .subs('x', sy.sympify(f'(r*cos(phi))'))
                             .subs('y', sy.sympify(f'(r*sin(phi))')))
-      if usePhi:
+      
+      # if scalar random variable is requested: treat phi as a constant that has to
+      # be passed to compile (used in fan mode)
+      if scalarRandomVar:
         return dict(
-            probabilityDensity=densityString,
-            variableOrder=('r', 'phi'),
-            variableDomains=dict(
-                r=self.parsedRadiusDomain(obj), 
-                phi=self.parsedPhiDomain(obj)),
-            numericalResolutions=dict(
-                r=float(obj.RadiusResolutionNumericMode),
-                phi=float(obj.PhiResolutionNumericMode))
-        )
-      else:
-        return dict(
-            probabilityDensity=densityString,
+            probabilityDensity=str(densityExpr),
             variable='r',
             variableDomain=variableDomain,
             numericalResolution=float(obj.RadiusResolutionNumericMode),
         )
+      # else: return args to create vector random variable using theta and phi
+      return dict(
+          probabilityDensity=str(densityExpr),
+          variableOrder=('r', 'phi'),
+          variableDomains=dict(
+              r=self.parsedRadiusDomain(obj), 
+              phi=self.parsedPhiDomain(obj)),
+          numericalResolutions=dict(
+              r=float(obj.RadiusResolutionNumericMode),
+              phi=float(obj.PhiResolutionNumericMode))
+      )
 
   def _parsedFanPhi0(self, obj):
     return float(sy.sympify(getattr(obj, 'FanPhi0')).evalf())
@@ -345,9 +366,7 @@ class PointSourceProxy(GenericSourceProxy):
       # module global variable and not to self, because attributes of self should be serializable
       NON_SERIALIZABLE_STORE[self]['vrv'] = (
             distributions.VectorRandomVariable(
-                **self._rvArgs(obj,
-                    '('+obj.PowerDensity+')*abs(sin(theta))', # add correction for spherical coordinate area element size 
-                )
+                **self._rvArgs(obj, obj.PowerDensity)
             )
       )
       vrv = NON_SERIALIZABLE_STORE[self]['vrv']
@@ -378,14 +397,19 @@ class PointSourceProxy(GenericSourceProxy):
     return parsed
 
 
-  def _makeRay(self, obj, theta, phi, power=1, metadata={}):
+  def _makeRay(self, obj, thetaOrRadius, phi, power=1, metadata={}):
     '''
-    Create new ray object with origin and direction given in global coordinates
+    Create new ray object with origin and direction given in global coordinates,
+    if focal length is infinite, theta parameter is treated as radius.
     '''
     gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin = self._makeRayCache(obj)
 
     # normal point source with finite focal length
     if isfinite(float(obj.FocalLength)):
+      # with finite focal length both theta and radius are defined
+      theta = thetaOrRadius
+      radius = tan(theta)*float(obj.FocalLength)
+
       # apply azimuth and polar rotation to (0,0,1) vector
       ldirection = (Rotation(opticalAxis,phi/pi*180) 
                     * Rotation(orthoAxis,theta/pi*180) 
@@ -394,17 +418,16 @@ class PointSourceProxy(GenericSourceProxy):
       # shift origin to  all rays intersect in point (0,0,1)*focalLength
       lorigin = sourceOrigin + (opticalAxis-ldirection)*float(obj.FocalLength)
 
-      # calc initial radius
-      radius = tan(theta)*float(obj.FocalLength)
-
     # infinite focal length: passed theta is actually radius
     else:
+      # with infinite focal length only radius is well defined
+      radius = thetaOrRadius
+      theta = nan
+
       ldirection = opticalAxis
       lorigin = (sourceOrigin 
-                  + App.Vector(theta*orthoAxis*cos(phi))
-                  + App.Vector(theta*cross(orthoAxis, opticalAxis)*sin(phi)))
-      radius = theta
-      theta = nan
+                  + App.Vector(radius*orthoAxis*cos(phi))
+                  + App.Vector(radius*cross(orthoAxis, opticalAxis)*sin(phi)))
     
     # apply global placement transformation to obtain global coordinates
     p1, p2 = lorigin, lorigin+ldirection/ldirection.Length
@@ -432,110 +455,170 @@ class PointSourceProxy(GenericSourceProxy):
 
     # fan-mode: generate fans of rays in spherical coordinates
     if mode == 'fans':
+      
+      # fetch parameters for fan calculation
       raysPerFan = min([obj.RaysPerFan, maxRaysPerFan])
-
-      # reset flag to report fan mode once
-      self._reportedFullFanMode = None
-
-      # create obj.Fans ray fans oriented in phi0
       totalFanCount = int(min([obj.Fans, maxFanCount]))
+
+      # determine domain limits of theta or radius var
+      if isfinite(float(obj.FocalLength)):
+        l1, l2 = self.parsedThetaDomain(obj)
+      else:
+        l1, l2 = self.parsedRadiusDomain(obj)
+
+      # determine limits of phi
+      phiL1, phiL2 = self.parsedPhiDomain(obj)
+
+      # Per definition one fan covers both phi and phi+pi sides of the optical axis. Depending on the domain
+      # for theta (or radius) three different cases apply:
+      # 1) l1>0, gapped-fan mode: rays for two fan sides have to be calculated independently 
+      #          (this requires even number of rays)
+      # 2) l1==0, stitched-fan mode: two fan sides are calculated using positive theta (radius only), but on
+      #          one side phi is replaced with phi+pi (possibly +2pi*n, to make sure other side of fan is part
+      #          of phi-domain)
+      # 3) l1<0, theta-sign-change fan mode: two fan sides are calculated using positive and negative 
+      #          theta (radius)
+      #
+      # (above l1 conditions apply for positive l1 and l2, actual conditions for all signs follow)
+      if l1>0 and l2>0 or l1<0 and l2<0:
+        fanMode = 'gapped'
+        raysPerFan = max([ 4, int(ceil(raysPerFan/2)*2) ]) # (ensure even number of rays, at least 4)
+      elif l1==0 or l2==0:
+        fanMode = 'stitched'
+      elif l1 < 0 and l2 > 0:
+        fanMode = 'theta-sign-change'
+      else:
+        raise ValueError(f'{l1=}, {l2=}')
+      io.verb(f'using fan generation mode "{fanMode}"')
+
+      # create obj.Fans ray fans, with first fan oriented as phi0
       for fanIndex, _phi in enumerate(self._parsedFanPhi0(obj) + linspace(0, pi, totalFanCount+1)[:-1]):
+        keepGuiResponsiveAndRaiseIfSimulationDone()
 
-        # generate the required thetas to place beams, calc the phi+pi part of the
-        # fan using using positive and negative thetas here
-        if isfinite(float(obj.FocalLength)):
-          l1, l2 = self.parsedThetaDomain(obj)
+        # find angles phiA and phiB that both lie in phiDomain if possible, phiA is as close to _phi as
+        # possible, phiB is the opposite side of the fan (or nan if this side is not part of phiDomain)
+        _phiCandidates = [ phi for phi in arange(_phi-30*pi, _phi+31*pi, pi) 
+                                                    if phiL1-1e-9 <= phi and phi <= phiL2+1e-9 ]
+        if not len(_phiCandidates):
+          io.verb(f'skipping {fanIndex=} because no suitable angle phi is in phi domain')
+          continue
+        phiA = _phiCandidates[argmin(abs(_phi-_phiCandidates))]
+        # generate second list of candidates for opposite fan side, this time only look at phiA plus/minus
+        # odd multiples of 2*pi, because adding even multiples of pi would be equivalent to phiA. 
+        _phiCandidates = [ phi for phi in arange(phiA+pi -30*pi, phiA+pi +31*pi, 2*pi) 
+                                                    if phiL1-1e-9 <= phi and phi <= phiL2+1e-9 ]
+        if not len(_phiCandidates):
+          phiB = nan
         else:
-          l1, l2 = self.parsedRadiusDomain(obj)
-        if l1 == 0:
-          isFullFanMode = True
-          _report = getattr(self, '_reportedFullFanMode', None)
-          if _report is None or _report != isFullFanMode:
-            io.verb(f'using full fan-mode')
-            self._reportedFullFanMode = True
+          phiB = _phiCandidates[argmin(abs(phiA+pi - _phiCandidates))]
+        print(f'{phiA=}, {phiB=}, {phiL1=}, {phiL2=}')
+
+        # generate the required thetas (radii) to place rays depending on the fanMode (see long
+        # comment above for fanModes)
+        if fanMode == 'gapped':
           srv = distributions.ScalarRandomVariable(
-                  **self._rvArgs(obj,
-                      # no sin(theta) correction here because fans are 2D, but make sure theta 
-                      # is taken as absolute value because of the negative-theta-hack:
-                      str(sy.sympify(obj.PowerDensity).subs('theta', 'abs(theta)').subs('r', 'abs(r)')),
-                      variableDomain=(-l2,l2)
-                  )
-          )
-          # TODO: compile twice, once with _phi, once with _phi+pi, then add method to fetch the
-          #       numerical densities from both compiles, merge both densities, 
-          #       find grid of combined
-          srv.compile(phi=_phi)
-          _posNegThetas = srv.findGrid(N=raysPerFan)
-          #io.verb(f'{_posNegThetas=}, {-l2=}, {l2=}')
-
-          # store whether most central ray has positive of negative theta to
-          # decide later where to place rayIndex==0
-          _isCentralThetaNegative = (abs(_posNegThetas).min() < 0)
-
-        # make one iteration per ray fan half
-        for rayIndexSign, phi in ([1, _phi], [-1, _phi+pi]):
-
-          # select thetas belonging to this half of the fan
-          if l1 == 0:
-            if rayIndexSign == 1:
-              _thetas = _posNegThetas[_posNegThetas>=0]
-            else:
-              _thetas = -_posNegThetas[_posNegThetas<0]
-            totalRaysInFan = len(_posNegThetas)
-
-          # generate the required thetas to place beams in two halves if 
-          # lower theta limit l1 is not zero
-          else:
-            isFullFanMode = False
-            _report = getattr(self, '_reportedFullFanMode', None)
-            if _report is None or _report != isFullFanMode:
-              io.verb(f'using split fan-mode')
-              self._reportedFullFanMode = False
-            srv = distributions.ScalarRandomVariable(
-                    **self._rvArgs(obj,
-                        # no sin(theta) correction here because fans are 2D
-                        obj.PowerDensity,
-                        variableDomain=(l1,l2)
-                    )
+            **self._rvArgs(obj,
+                # no sin(theta) correction here because fans are 2D
+                obj.PowerDensity,
+                variableDomain = (l1,l2),
+                scalarRandomVar = True,
             )
-            srv.compile(phi=_phi)
-            _thetas = srv.findGrid(N=raysPerFan)
-            totalRaysInFan = 2*len(_thetas)
-            #io.verb(f'{_thetas=}')
+          )
+          srv.compile(phi=phiA)
+          valuesFanSide1 = srv.findGrid(N=raysPerFan//2)
+          srv.compile(phi=phiB)
+          valuesFanSide2 = srv.findGrid(N=raysPerFan//2)
 
-          # this loop may run for quite some time, keep GUI responsive by handling events
+        # stitched fan mode (see long comment above for details on fanModes)
+        elif fanMode == 'stitched':
+          limit = max([abs(l1), abs(l2)])
+          var = 'theta' if isfinite(float(obj.FocalLength)) else 'r'
+          srv = distributions.ScalarRandomVariable(
+            **self._rvArgs(obj,
+                # no sin(theta) correction here because fans are 2D, but replace:
+                #  theta and radius with their absolute values, because we are 
+                #                         setting their limits to -limit,limit
+                #  phi with piecewise phiA and phiB depending on sign of 
+                #             theta/radius to switch to other side of optical 
+                #             axis on theta handle sign change
+                #  if however phiB is None (=this side of the fan does not fall
+                #             within phiDomain, record power density from 0 to
+                #             var lim only)
+                ((
+                  str(sy.sympify(obj.PowerDensity)
+                          .subs('theta', 'abs(theta)')
+                          .subs('r', 'abs(r)')
+                          .subs('phi', f'Piecewise( ( ({phiA}), ({var})>0 ), '
+                                                  f'( ({phiB}),  True     ) )'))
+                )
+                if isfinite(phiB) else 
+                (
+                  str(sy.sympify(obj.PowerDensity)
+                          .subs('theta', 'abs(theta)')
+                          .subs('r', 'abs(r)'))
+                )),
+                variableDomain = (-limit,limit) if isfinite(phiB) else (0, limit),
+                scalarRandomVar = True,
+            )
+          )
+          srv.compile(phi=phiA)
+          valuesFanSide1 = srv.findGrid(N=raysPerFan)
+          valuesFanSide2 = []
+
+        # stitched fan mode (see long comment above for details on fanModes)
+        elif fanMode == 'theta-sign-change':
+          srv = distributions.ScalarRandomVariable(
+            **self._rvArgs(obj,
+                # no sin(theta) correction here because fans are 2D
+                obj.PowerDensity,
+                variableDomain = (l1,l2),
+                scalarRandomVar = True,
+            )
+          )
+          srv.compile(phi=phiA)
+          valuesFanSide1 = srv.findGrid(N=raysPerFan)
+          valuesFanSide2 = []
+
+        else:
+          raise ValueError(f'{fanMode=}')
+
+        # if two fan sides were generated, no index=zero, start indexing with 
+        # +1 and -1 on each respective side, ensure values in each fan side are
+        # sorted by absolute value to start from the center
+        if len(valuesFanSide2) > 0:
+          valuesFanSide1 = sorted(valuesFanSide1, key=abs)
+          valuesFanSide2 = sorted(valuesFanSide2, key=abs)
+          indicesFanSide1 = list(1+arange(len(valuesFanSide1)))
+          indicesFanSide2 = list(-(1+arange(len(valuesFanSide2))))
+
+        # if just one side exists: sort numerically (not absolute value) and
+        # ray closest do optical axis gets index=zero couting up/down to both
+        # sides from there
+        else:
+          valuesFanSide1 = sorted(valuesFanSide1)
+          _i0 = argmin(abs(valuesFanSide1))
+          indicesFanSide1 = list(arange(len(valuesFanSide1))-_i0)
+          indicesFanSide2 = []
+
+        # pack both fan sides values, indices and phiA/B into one list, iterate
+        # through them by starting from smallest indices by absolute value 
+        # (add -.1 for the sorting key to always start with positive sign index)
+        packedIVPhi = [(i,v,phi) 
+                          for i,v,phi in list(zip(indicesFanSide1, valuesFanSide1, 
+                                                  [phiA]*len(valuesFanSide1)))
+                                        +list(zip(indicesFanSide2, valuesFanSide2, 
+                                                  [phiB]*len(valuesFanSide2)))]
+        for rayIndex, thetaOrRadius, phi in sorted(packedIVPhi, key=lambda e: abs(e[0])-.1):
           keepGuiResponsiveAndRaiseIfSimulationDone()
 
-          for rayIndex, theta in enumerate(sorted(_thetas)):
-
-            # if number of rays is even: dont use index=zero, start with +1 and
-            # -1 on each side of the fan, respectively
-            if raysPerFan % 2 == 0:
-              rayIndex += 1
-
-            # if number of rays is odd: place index=zero on the central theta
-            else:
-              if isFullFanMode:
-                # increment index if we are on the side of the fan that is 
-                # to avoid having two rayIndex==0 rays 
-                if (       (_isCentralThetaNegative and rayIndexSign == +1)
-                    or (not _isCentralThetaNegative and rayIndexSign == -1) ):
-                  rayIndex += 1
-              else:
-                # in split ray fan mode just increment the negative ray indices
-                # by one to avoid having rayIndex==0 twice
-                if rayIndexSign == -1:
-                  rayIndex += 1
-
-            # this loop may run for quite some time, keep GUI responsive by handling events
-            keepGuiResponsiveAndRaiseIfSimulationDone()
-
-            # add lines corresponding to this ray to total ray list
-            yield self._makeRay(obj=obj, theta=theta, phi=phi, 
-                                metadata=dict(fanIndex=fanIndex, 
-                                              rayIndex=rayIndex*rayIndexSign,
-                                              totalFanCount=totalFanCount,
-                                              totalRaysInFan=totalRaysInFan))
+          # add lines corresponding to this ray to total ray list
+          yield self._makeRay(obj=obj, 
+                              thetaOrRadius=thetaOrRadius, 
+                              phi=phi,
+                              metadata=dict(fanIndex=int(fanIndex), 
+                                            rayIndex=int(rayIndex),
+                                            totalFanCount=int(totalFanCount),
+                                            totalRaysInFan=len(packedIVPhi)))
 
     # true/pseudo random mode: place rays by drawing theta and phi from true random distribution
     elif mode == 'true' or mode == 'pseudo':
@@ -548,17 +631,17 @@ class PointSourceProxy(GenericSourceProxy):
 
       # create/get random variable for theta and phi and draw samples 
       if mode == 'true':
-        thetas, phis = self._getVrv(obj).draw(N=raysPerIteration)
+        thetasOrRadii, phis = self._getVrv(obj).draw(N=raysPerIteration)
       elif mode == 'pseudo':
-        thetas, phis = self._getVrv(obj).drawPseudo(N=raysPerIteration)
+        thetasOrRadii, phis = self._getVrv(obj).drawPseudo(N=raysPerIteration)
 
-      for theta, phi in zip(thetas, phis):
+      for thetaOrRadius, phi in zip(thetasOrRadii, phis):
 
         # this loop may run for quite some time, keep GUI responsive by handling events
         keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # create and trace ray
-        yield self._makeRay(obj=obj, theta=theta, phi=phi)
+        yield self._makeRay(obj=obj, thetaOrRadius=thetaOrRadius, phi=phi)
 
     else:
       raise ValueError(f'unexpected ray placement mode {mode}')

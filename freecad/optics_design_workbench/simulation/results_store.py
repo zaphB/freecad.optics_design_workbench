@@ -447,7 +447,8 @@ class SimulationResults:
     # write progress atomically
     with atomic_write(self._makeFilename(source='progress', kind=str(hex(int(random.random()*1e15)))[2:]), 
                       mode='wb', overwrite=True) as f:
-      pickle.dump(dict(totalIterations = self.totalIterations,
+      pickle.dump(dict(simulationType = self.simulationType,
+                       totalIterations = self.totalIterations,
                        totalTracedRays = self.totalTracedRays,
                        totalRecordedHits = self.totalRecordedHits+len(self.hits or []),
                        totalRecordedRays = self.totalRecordedRays+len(self.rays or [])), f)
@@ -472,9 +473,14 @@ class SimulationResults:
       result = {}
       for _, prog in self.getProgressByWorker().items():
         for k, v in prog.items():
-          if k not in result:
-            result[k] = 0
-          result[k] += v
+          # numeric types -> cumulative sum
+          if type(v) not in (str, str_):
+            if k not in result:
+              result[k] = 0
+            result[k] += v
+          # string types: just update
+          else:
+            result[k] = v
 
       # check whether simulation is done and call cancelSimulation if so
       if (result.get('totalIterations', 0) > self.endAfterIterations
@@ -487,7 +493,8 @@ class SimulationResults:
       if processes.isMasterProcess() and time.time() - self._lastMasterProgressDump > .5:
         with atomic_write(f'{self.basePath}/{self.simulationRunFolder}/progress/master-{self._masterProgressDumpIdx:09d}', 
                           mode='wb', overwrite=True) as f:
-          pickle.dump(dict(totalIterations = result.get('totalIterations', 0),
+          pickle.dump(dict(simulationType = result.get('simulationType', ''),
+                           totalIterations = result.get('totalIterations', 0),
                            totalTracedRays = result.get('totalTracedRays', 0),
                            totalRecordedHits = result.get('totalRecordedHits', 0),
                            totalRecordedRays = result.get('totalRecordedRays', 0),
