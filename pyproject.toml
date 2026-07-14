@@ -53,6 +53,7 @@ dev = [
     "pytest-sugar",
     "jupyter",
     "ipykernel",
+    "psutil",
 ]
 
 [tool.pytest.ini_options]

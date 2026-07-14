@@ -399,7 +399,7 @@ class FreecadDocument:
   
   The document is intended to be used as a context manager to clean up after itself.
   '''
-  def __init__(self, path=None, workInTempCopy=False):
+  def __init__(self, path=None, workInTempCopy=False, showProgress=True):
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
@@ -445,6 +445,9 @@ class FreecadDocument:
 
     # generate results folder path
     self._resultsPath = path[:-6]+'.OpticsDesign'
+
+    # store whether progress should be shown interactively
+    self.showProgress = showProgress
 
     # setup flags
     self._isquit = False
@@ -816,6 +819,10 @@ class FreecadDocument:
 
     # clear interaction time list to avoid immediately triggering fast mode
     self._forceDisableFastMode()
+
+    # silence progress tracking if desired
+    if not self.showProgress:
+      progress.silenceProgressTracker()
 
     # print success
     io.verb(f'done in {time.time()-t0:.1f}s')

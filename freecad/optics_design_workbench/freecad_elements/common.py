@@ -7,11 +7,13 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 try:
   import FreeCADGui as Gui
   import FreeCAD as App
+  from FreeCAD import Vector
 except ImportError:
   pass
 
 import time
 import sympy as sy
+import functools
 
 from .. import io
 from .. import simulation
@@ -66,6 +68,62 @@ class GenericFreecadElementProxy:
          and hasattr(obj.ViewObject, 'Proxy')
          and hasattr(obj.ViewObject.Proxy, '_ensurePropertiesExist') ):
       obj.ViewObject.Proxy._ensurePropertiesExist(obj)
+
+  def fullDocumentPath(self, obj):
+    'return the full object path beginning from document root'
+    result = []
+    current = obj
+    # parents is only empty if object is toplevel
+    while current.Parents:
+      # find 'real' parent that is not linked
+      _orig = [(p, sub) for p, sub in current.Parents if not p.isDerivedFrom("App::Link")]
+      if len(_orig) != 1:
+        raise ValueError(f'failed to find "true" (i.e. not linked) path of light source {obj=} among {obj.Parents=}')
+      origParent, origPath = _orig[0]
+      matrix = origParent.getSubObject(origPath, retType=3).toMatrix()
+      result.append((origParent, origPath, matrix))
+      current = origParent
+    # only add Placement matrix if no parents existed at all (otherwise it will be incorporated in last parent entry)
+    if not len(result):
+      result.append((None, '', current.Placement.toMatrix()))
+    print(f'full path of {obj=} is {result=}')
+    return result
+
+  @functools.cache
+  def _calcTransforms(self, obj):
+    '''
+    Make sure matrices and vectors that do not change during ray 
+    tracing are calculated only once.
+    '''
+    # best method to find global placement of a LinkGroupPlacement seems to be to
+    # multiply Placements if all its parents (LinkGroupPython has no global placement method):
+    globalPlacement = None
+    for parent, path, matrix in self.fullDocumentPath(obj):
+      if globalPlacement is None:
+        globalPlacement = matrix
+      else:
+        globalPlacement = matrix*globalPlacement
+    print(f'global placement of {obj=} is {globalPlacement=}')
+
+    # return global placement and inverse matrices for caching
+    gpM = globalPlacement
+    gpMi = gpM.inverse()
+    
+    # prepare Placement-adjusted beam orientation vectors in local coordinates
+    opticalAxis = Vector(0,0,1)
+    orthoAxis = Vector(1,0,0)
+    sourceOrigin = Vector(0,0,0)
+
+    return gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin
+
+  def _onInitializeSimulation(self, obj, *args, **kwargs):
+    '''
+    Do not overload this method, use the version without underscore for overloading.
+    This is akward but safer (using super()... in all inherited method is easily 
+    overlooked which would result in very bad things)
+    '''
+    self._ensurePropertiesExist(obj)
+    self._calcTransforms.cache_clear()
 
 
   def _parsedDomain(self, domain, default=None, limits=None, spanLimits=None, isRecursive=False):
@@ -145,6 +203,10 @@ class GenericFreecadElementProxy:
   def onChanged(self, obj, prop):
     '''Do something when a property has changed'''
     self._ensurePropertiesExist(obj)
+
+  def onInitializeSimulation(self, obj, *args, **kwargs):
+    pass
+
 
 
 class GenericFreecadElementViewProxy:

@@ -46,7 +46,7 @@ from ...detect_pyside import *
 from ... import freecad_elements
 from ... import io
 from .. import results_store
-from .. import tracing_cache
+from .. import raytracing_cache
 from . import worker_process
 
 # fail gently if gui_windows module cannot imported
@@ -55,8 +55,11 @@ try:
 except Exception:
   gui_windows = None  
 
+# set tracemalloc interval only for debugging purposes, never use in release builds
+# because it (ironically) generates a significant memory consumption overhead
+_TRACEMALLOC_INTERVAL = inf
 
-_TRACEMALLOC_INTERVAL = 60*60
+_RESULT_CHUNKING_INTERVAL = 60*60
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
 _BACKGROUND_PROCESSES = []
@@ -233,7 +236,7 @@ def runSimulation(action, slaveInfo={}):
   t0 = time.time()
 
   # reset bound box cache to prevent outdated stuff from prevailing
-  tracing_cache.cacheClear()
+  raytracing_cache.cacheClear()
 
   # setup random seeds to ensure good randomness across all workers and threads
   setupRandomSeed()
@@ -339,6 +342,7 @@ def runSimulation(action, slaveInfo={}):
       io.verb(f'doing pre-worker-launch init of all components...')
       for obj in itertools.chain(freecad_elements.find.lightSources(), 
                                  freecad_elements.find.relevantOpticalObjects()):
+        obj.Proxy._onInitializeSimulation(obj=obj, state='pre-worker-launch', ident='master')
         obj.Proxy.onInitializeSimulation(obj=obj, state='pre-worker-launch', ident='master')
 
     # launch background worker processes (one less than specified if draw is true because 
@@ -364,9 +368,9 @@ def runSimulation(action, slaveInfo={}):
         io.verb(f'skip saving document {App.GuiUp=}')
 
       # actually launch workers
-      for workerNo in range(backgroundWorkers):
+      for _ in range(backgroundWorkers):
         _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
-                                                                  simulationRunFolder=simulationRunFolder))
+                                                simulationRunFolder=simulationRunFolder))
         freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
 
     # doing post-worker-launch init
@@ -415,10 +419,10 @@ def runSimulation(action, slaveInfo={}):
           # log top 10 biggest memory allocations
           if time.time()-lastTracemallocReport > _TRACEMALLOC_INTERVAL:
             lastTracemallocReport = time.time()
-            io.verb('tracemalloc: top 10 memory allocations')
+            io.verb('tracemalloc: top 20 memory allocations')
             _snapshot = tracemalloc.take_snapshot()
             _top_stats = _snapshot.statistics('lineno')
-            for _stat in _top_stats[:10]:
+            for _stat in _top_stats[:20]:
               io.verb(f'  > {_stat}')
         
         # make sure simulation is canceled if no light source exists
@@ -440,7 +444,7 @@ def runSimulation(action, slaveInfo={}):
             store.getProgress()
         
             # chunk result files every hour to make loading the results faster later
-            if time.time()-lastResultChunking > 60*60:
+            if time.time()-lastResultChunking > _RESULT_CHUNKING_INTERVAL:
               io.verb(f'chunking result files...')
               lastResultChunking = time.time()
               store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
@@ -459,8 +463,9 @@ def runSimulation(action, slaveInfo={}):
                   else:
                     w.kill()
                 break
+
             # start new worker after old one was killed
-            while len(_BACKGROUND_PROCESSES) < backgroundWorkers:
+            while isWorkerRunning() < backgroundWorkers:
               _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
                                                       simulationRunFolder=simulationRunFolder))
 
@@ -491,7 +496,7 @@ def runSimulation(action, slaveInfo={}):
         store.getProgress()
 
         # chunk result files every hour to make loading the results faster later
-        if time.time()-lastResultChunking > 60*60:
+        if time.time()-lastResultChunking > _RESULT_CHUNKING_INTERVAL:
           io.verb(f'chunking result files...')
           lastResultChunking = time.time()
           store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
@@ -510,8 +515,9 @@ def runSimulation(action, slaveInfo={}):
               else:
                 w.kill()
             break
+
         # start new worker after old one was killed
-        while len(_BACKGROUND_PROCESSES) < backgroundWorkers:
+        while isWorkerRunning() < backgroundWorkers:
           _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
                                                   simulationRunFolder=simulationRunFolder))
 

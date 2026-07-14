@@ -24,7 +24,7 @@ from .. import io
 
 from .generic_source import *
 from .common import *
-from ..simulation.tracing_cache import *
+from ..simulation.raytracing_cache import *
 
 #####################################################################################################
 class PointSourceProxy(GenericSourceProxy):
@@ -402,7 +402,7 @@ class PointSourceProxy(GenericSourceProxy):
     Create new ray object with origin and direction given in global coordinates,
     if focal length is infinite, theta parameter is treated as radius.
     '''
-    gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin = self._makeRayCache(obj)
+    gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin = self._calcTransforms(obj)
 
     # normal point source with finite focal length
     if isfinite(float(obj.FocalLength)):
@@ -439,7 +439,8 @@ class PointSourceProxy(GenericSourceProxy):
     rayMetadata.update(metadata)
 
     # return actual ray object
-    return ray.Ray(obj, gorigin, gdirection, wavelength=obj.Wavelength, 
+    return ray.Ray(obj, gorigin, gdirection, wavelength=
+                   cachedProperty(obj, 'Wavelength'), 
                    initPower=power, metadata=rayMetadata)
 
 
