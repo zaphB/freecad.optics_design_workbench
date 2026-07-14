@@ -417,13 +417,14 @@ def runSimulation(action, slaveInfo={}):
           freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
 
           # log top 10 biggest memory allocations
-          if time.time()-lastTracemallocReport > _TRACEMALLOC_INTERVAL:
-            lastTracemallocReport = time.time()
-            io.verb('tracemalloc: top 20 memory allocations')
-            _snapshot = tracemalloc.take_snapshot()
-            _top_stats = _snapshot.statistics('lineno')
-            for _stat in _top_stats[:20]:
-              io.verb(f'  > {_stat}')
+          if isfinite(_TRACEMALLOC_INTERVAL):
+            if time.time()-lastTracemallocReport > _TRACEMALLOC_INTERVAL:
+              lastTracemallocReport = time.time()
+              io.verb('tracemalloc: top 20 memory allocations')
+              _snapshot = tracemalloc.take_snapshot()
+              _top_stats = _snapshot.statistics('lineno')
+              for _stat in _top_stats[:20]:
+                io.verb(f'  > {_stat}')
         
         # make sure simulation is canceled if no light source exists
         if not lightSourceExists:
