@@ -99,21 +99,13 @@ def allPlacementsAndPaths(obj, ignoreLinks=False, _recDepth=0):
       prevP = p
     _result[-1].append(p)
 
-  # from my current understanding all situations should result in length 1 paths because the base
-  # object in the Parents attribute seems to be sitting in the document root in all situations.
-  # But I am not sure if this is strictly true, therefore this exception will prove me wrong if
-  # a user encounters it one day.
-  #if any([len(p)!=1 for p in _result]):
-  #  raise ValueError(f'Parent {prevP=} of {obj=} has nontrivial path which the '
-  #                    f'optics_design_workbench path resolver cannot accounted for yet. '
-  #                    f'Please create a github issue (https://github.com/zaphB/freecad.optics_design_workbench/issues) '
-  #                    f'and provide the FCStd file that generated this error.')
+  # keep only last placement entry in each path resolution list, merge all object name paths
+  _result = [ ( [m for m,_ in r][-1], '.'.join([p for _,p in r]) ) for r in _result ]
+  
+  # sort lexically by paths
+  _result = sorted( _result, key=lambda e: e[1] )
 
-  # return cleaned result list (after length one of each entry was asserted above)
-  print(obj, obj.Label)
-  print(_result)
-  _result = sorted([ ( [m for m,_ in r][-1], '.'.join([p for _,p in r]) ) for r in _result], key=lambda e: e[1] )
-  print('*', _result)
+  # return cleaned result list
   return _result
 
 
