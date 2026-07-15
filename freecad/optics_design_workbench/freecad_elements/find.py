@@ -48,7 +48,9 @@ def _allObjects(doc=None, checkedDocs=None):
 
     # if obj is link type and link.document is different from checked
     # documents -> check all objects in document, too
-    if obj.isDerivedFrom('App::Link') and (_doc:=obj.LinkedObject.Document) not in checkedDocs:
+    if (obj.isDerivedFrom('App::Link') 
+          and getattr(obj, 'LinkedObject', None) is not None
+          and (_doc:=obj.LinkedObject.Document) not in checkedDocs ):
       for obj in _allObjects(doc=_doc, checkedDocs=checkedDocs+[_doc]):
         if not _isDeleted(obj):
           yield obj
