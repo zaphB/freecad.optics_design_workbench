@@ -16,54 +16,54 @@ class OpticsDesignWorkbench(Gui.Workbench):
   toolbox = []
 
   def Initialize(self):
-      '''This function is executed when FreeCAD starts'''
-      # import here all the needed files that create your FreeCAD commands
-      self.toolbox = [
-        # sources
-        'Add point source', 
-        'Add surface source', 
-        'Add replay source', 
+    '''This function is executed when FreeCAD starts'''
+    # import here all the needed files that create your FreeCAD commands
+    self.toolbox = [
+      # sources
+      'Add point source', 
+      'Add surface source', 
+      'Add replay source', 
 
-        # optical elements
-        'Make mirror', 
-        'Make lens', 
-        'Make grating', 
+      # optical elements
+      'Make mirror', 
+      'Make lens', 
+      'Make grating', 
 
-        # detectors
-        'Make absorber', 
-        'Make detector', 
+      # detectors
+      'Make absorber', 
+      'Make detector', 
 
-        # place settings node
-        'Insert settings',
+      # place settings node
+      'Insert settings',
 
-        # place/start/stop simulation in the various modes
-        'Clear all rays',
-        'Place ray fans',
-        'Single pseudo random',
-        'Single true random',
-        'Continuous pseudo random',
-        'Continuous true random',
-        'Stop continuous',
-      ]
-      
-      self.appendToolbar(self.__class__.MenuText, self.toolbox)
-      self.appendMenu(self.__class__.MenuText, self.toolbox)
+      # place/start/stop simulation in the various modes
+      'Clear all rays',
+      'Place ray fans',
+      'Single pseudo random',
+      'Single true random',
+      'Continuous pseudo random',
+      'Continuous true random',
+      'Stop continuous',
+    ]
+    
+    self.appendToolbar(self.__class__.MenuText, self.toolbox)
+    self.appendMenu(self.__class__.MenuText, self.toolbox)
 
   def Activated(self):
-      '''This function is executed when the workbench is activated'''
-      return
+    '''This function is executed when the workbench is activated'''
+    return
 
   def Deactivated(self):
-      '''This function is executed when the workbench is deactivated'''
-      return
+    '''This function is executed when the workbench is deactivated'''
+    return
 
   def ContextMenu(self, recipient):
-      '''This is executed whenever the user right-clicks on screen'''
-      self.appendContextMenu(self.__class__.MenuText, self.toolbox)
+    '''This is executed whenever the user right-clicks on screen'''
+    self.appendContextMenu(self.__class__.MenuText, self.toolbox)
 
   def GetClassName(self):
-      # this function is mandatory if this is a full python workbench
-      return 'Gui::PythonWorkbench'
+    # this function is mandatory if this is a full python workbench
+    return 'Gui::PythonWorkbench'
 
 Gui.addWorkbench(OpticsDesignWorkbench())
 freecad_elements.loadAll()

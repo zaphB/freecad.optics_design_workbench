@@ -14,8 +14,8 @@ cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 uv run pytest -v $TESTS || exit 1
 
 # run cleanup
-echo 'running cleanup...'
-./dev/cleanup-test-folders.sh
+#echo 'running cleanup...'
+#./dev/cleanup-test-folders.sh
 
 # exit success
 exit 0

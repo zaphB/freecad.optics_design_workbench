@@ -402,7 +402,12 @@ class PointSourceProxy(GenericSourceProxy):
     Create new ray object with origin and direction given in global coordinates,
     if focal length is infinite, theta parameter is treated as radius.
     '''
-    gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin = self._calcTransforms(obj)
+    gpM, gpMi, pM, pMi = self._getCoordinateTransformMatricesWithoutLinks(obj)
+
+    # setup a few standard vectors in local coordinates
+    opticalAxis = Vector(0,0,1)
+    orthoAxis = Vector(1,0,0)
+    sourceOrigin = Vector(0,0,0)
 
     # normal point source with finite focal length
     if isfinite(float(obj.FocalLength)):

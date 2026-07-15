@@ -59,7 +59,7 @@ except Exception:
 # because it (ironically) generates a significant memory consumption overhead
 _TRACEMALLOC_INTERVAL = inf
 
-_RESULT_CHUNKING_INTERVAL = 60*60
+_RESULT_CHUNKING_INTERVAL = 50*60
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
 _BACKGROUND_PROCESSES = []
@@ -458,11 +458,11 @@ def runSimulation(action, slaveInfo={}):
                 _t0 = time.time()
                 while worker.isRunning():
                   if time.time()-_t0 < 7:
-                    w.quit()
+                    worker.quit()
                   elif time.time()-_t0 < 10:
-                    w.terminate()
+                    worker.terminate()
                   else:
-                    w.kill()
+                    worker.kill()
                 break
 
             # start new worker after old one was killed

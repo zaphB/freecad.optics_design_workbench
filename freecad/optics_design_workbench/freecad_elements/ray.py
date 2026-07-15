@@ -321,58 +321,59 @@ class Ray():
       # this loop may run for quite some time, keep GUI responsive by handling events
       keepGuiResponsiveAndRaiseIfSimulationDone()
 
-      # get global placement transform matrices from group
-      gpM, gpMi = group.Proxy._calcTransforms(group)[:2]
-      p = cachedPlacementMatrix(group)
-      gpM = gpM*p.inverse()
-      gpMi = p*gpMi
+      # get all global placement transform matrices from group and run intersect checks
+      # for all of them (links may cause multiple placement transforms to coexist)
+      for gpM, gpMi, pM, pMi in group.Proxy._getCoordinateTransformMatrices(group):
 
-      # only care if bounding box is closer to start point than maxRayLength and 
-      # if bounding box actually intersects with the ray
-      if hasattr(group, 'Shape'):
-        # fetch bounding box
-        sbb = cachedBoundBox(cachedShape(group), enlarge=distTol)
+        gpM = gpM*pMi
+        gpMi = pM*gpMi
 
-        # find start and direction vectors in local coordinates of optical group
-        lstart = gpMi*start 
-        ldirection = gpMi*(start+direction)-lstart
+        # only care if bounding box is closer to start point than maxRayLength and 
+        # if bounding box actually intersects with the ray
+        if hasattr(group, 'Shape'):
+          # fetch bounding box
+          sbb = cachedBoundBox(cachedShape(group), enlarge=distTol)
 
-        # create line already here because it involves a small (unavoidable) memory leak
-        line = Part.makeLine(lstart, lstart+ldirection/ldirection.Length*maxRayLength)
-        # check if bounding box is hit by ray
-        if ( ( not isfinite(maxRayLength)
-                or any([(sbb.getPoint(i)-lstart).Length < 2*maxRayLength 
-                                                            for i in range(8)]) )
-            and sbb.intersect(lstart, ldirection) ):
-          
-          # loop through all faces
-          for face in cachedFaces(cachedShape(group)):
+          # find start and direction vectors in local coordinates of optical group
+          lstart = gpMi*start 
+          ldirection = gpMi*(start+direction)-lstart
 
-            # this loop may run for quite some time, keep GUI responsive by handling events
-            keepGuiResponsiveAndRaiseIfSimulationDone()
+          # create line already here because it involves a small (unavoidable) memory leak
+          line = Part.makeLine(lstart, lstart+ldirection/ldirection.Length*maxRayLength)
+          # check if bounding box is hit by ray
+          if ( ( not isfinite(maxRayLength)
+                  or any([(sbb.getPoint(i)-lstart).Length < 2*maxRayLength 
+                                                              for i in range(8)]) )
+              and sbb.intersect(lstart, ldirection) ):
+            
+            # loop through all faces
+            for face in cachedFaces(cachedShape(group)):
 
-            # only care if bounding box of face intersects with ray
-            fbb = cachedBoundBox(face, enlarge=distTol)
-            if fbb.intersect(lstart, ldirection):
+              # this loop may run for quite some time, keep GUI responsive by handling events
+              keepGuiResponsiveAndRaiseIfSimulationDone()
 
-              # find intersection points and loop through all of them
-              if intersect := line.Curve.intersect(cachedSurface(face)):
-                points, _ = intersect
-                for point in points:
+              # only care if bounding box of face intersects with ray
+              fbb = cachedBoundBox(face, enlarge=distTol)
+              if fbb.intersect(lstart, ldirection):
 
-                  # this loop may run for quite some time, keep GUI responsive by handling events
-                  keepGuiResponsiveAndRaiseIfSimulationDone()
+                # find intersection points and loop through all of them
+                if intersect := line.Curve.intersect(cachedSurface(face)):
+                  points, _ = intersect
+                  for point in points:
 
-                  vec = Vector(point.X, point.Y, point.Z)
-                  vert = Part.Vertex(point)
+                    # this loop may run for quite some time, keep GUI responsive by handling events
+                    keepGuiResponsiveAndRaiseIfSimulationDone()
 
-                  # if found intersection point has some finite distance from 
-                  # origin and lies within the target face and on the line,
-                  # add to candidate list
-                  if ( (vec-lstart).Length > distTol
-                        and vert.distToShape(line)[0] < distTol
-                        and vert.distToShape(face)[0] < distTol):
-                    intersects.append([group, (gpM, gpMi, face), gpM*vec, (vec-lstart).Length])
+                    vec = Vector(point.X, point.Y, point.Z)
+                    vert = Part.Vertex(point)
+
+                    # if found intersection point has some finite distance from 
+                    # origin and lies within the target face and on the line,
+                    # add to candidate list
+                    if ( (vec-lstart).Length > distTol
+                          and vert.distToShape(line)[0] < distTol
+                          and vert.distToShape(face)[0] < distTol):
+                      intersects.append([group, (gpM, gpMi, face), gpM*vec, (vec-lstart).Length])
 
     # return intersection that is closest to start (if any), if multiple intersections 
     # exist that are closer than 2*distTol to the the closest intersection, prefer the

@@ -49,7 +49,7 @@ class GenericSourceProxy(GenericFreecadElementProxy):
 
   def runSimulationIteration(self, obj, *, mode, draw=False, store=False, **kwargs):
     # prepare transforms etc that will be used many times
-    gpM, gpMi = self._calcTransforms(obj)[:2]
+    gpM, gpMi, pM, pMi = self._getCoordinateTransformMatricesWithoutLinks(obj)
 
     # clear displayed rays on begin of each simulation iteration
     self.clear(obj)
