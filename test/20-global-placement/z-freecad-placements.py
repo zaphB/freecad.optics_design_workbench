@@ -45,13 +45,13 @@ def test_allPlacementsAndPaths():
     # assert strict values for placements
     matrices = [
       array(((1,0,0,0),(0,1,0,0),(0,0,1,-100),(0,0,0,1))),
-      array(((1,0,0,0),(0,1,0,0),(0,0,1,-100),(0,0,0,1))),
       array(((1,0,0,3),(0,1,0,3),(0,0,1,-100),(0,0,0,1))),
       array(((1,0,0,3),(0,1,0,0),(0,0,1,-100),(0,0,0,1))),
-      array(((1,0,0,0),(0,1,0,-30),(0,0,1,-100),(0,0,0,1))),
       array(((1,0,0,3),(0,1,0,-27),(0,0,1,-100),(0,0,0,1))),
       array(((1,0,0,3),(0,1,0,-27),(0,0,1,-100),(0,0,0,1))),
       array(((1,0,0,3),(0,1,0,3),(0,0,1,-97),(0,0,0,1))),
+      array(((1,0,0,0),(0,1,0,0),(0,0,1,-100),(0,0,0,1))),
+      array(((1,0,0,0),(0,1,0,-30),(0,0,1,-100),(0,0,0,1))),
     ]
     i = 0
     differingMats = []
@@ -66,7 +66,7 @@ def test_allPlacementsAndPaths():
         print(line)
         mat = eval(line)
         if not (isclose(mat, matrices[i])).all():
-          differingMats.append(i, mat, matrices[i])
+          differingMats.append([i, mat, matrices[i]])
         i += 1
       #else:
       #  print(line)
