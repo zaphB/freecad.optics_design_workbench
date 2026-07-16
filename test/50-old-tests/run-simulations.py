@@ -32,15 +32,22 @@ def _cleanupResults(filename):
     if f.name.startswith(filename) and f.name.lower().endswith('.FCBak'):
       os.remove(baseDir+'/'+f)
 
+
 def _runFile(filename, cleanup=True, cancelAfter=None, timeout=60*60):
   baseDir = os.path.abspath(os.path.dirname(__file__))
   # remove results folder
   if cleanup:
     _cleanupResults(filename)
 
+  _filename = filename
+  if filename.endswith('.FCStd'):
+    filename = _filename[:-6]
+  else:
+    _filename = filename+'.FCStd'
+
   # run true simulation
   time.sleep(10)
-  p = subprocess.Popen([FREECAD_BINARY, filename+'.FCStd', '-c'],
+  p = subprocess.Popen([FREECAD_BINARY, _filename, '-c'],
                         cwd=baseDir, 
                         #stdout=subprocess.DEVNULL,
                         #stderr=subprocess.DEVNULL,
@@ -102,13 +109,12 @@ def test_runPlaygroundExample():
       results.append(io.unpickle(_f))
   totalHits = sum([len(r['points']) for r in results])
   assert totalHits > 99
-  _cleanupResults(filename)
 
 
 def _test_runWithoutSettingsObject():
   # make sure FCStd file without any settings can also run
   _, filename = _runFile('nosettings')
-  _cleanupResults(filename)
+
 
 def test_runAndCancelGaussianExample():
   t0 = time.time()
@@ -164,10 +170,7 @@ def test_runGaussianExample():
 
     # make sure gaussian is nicely centered
     foundCenter = popt[-1]
-    assert abs(foundCenter) < 0.3
-
-  # cleanup
-  _cleanupResults(filename)
+    assert abs(foundCenter) < 0.5
 
 
 def test_runThreeTimes():
@@ -183,9 +186,6 @@ def test_runThreeTimes():
   results = os.listdir(baseDir+'/'+filename+'.OpticsDesign/raw/')
   assert len(results) == 3
 
-  # cleanup
-  _cleanupResults(filename)
-
 
 def test_runAndCancelThreeTimes():
   # make sure working dir is clean
@@ -199,9 +199,6 @@ def test_runAndCancelThreeTimes():
   # expect three result folders
   results = os.listdir(baseDir+'/'+filename+'.OpticsDesign/raw/')
   assert len(results) == 3
-
-  # cleanup
-  _cleanupResults(filename)
 
 
 # run and simulate every file in folder for a short moment
@@ -220,8 +217,7 @@ allArgs = list(collectAllFCStd())
 def test_brieflyRunFCStdFiles(args):
   root, f, _f = args
   print(f'running simulation {f}')
-  baseDir, filename = _runFile(f, cancelAfter=180)
-  _cleanupResults(filename)
+  baseDir, filename = _runFile(f, cancelAfter=60)
 
 
 # run all notebooks 

@@ -3,7 +3,11 @@
 # change parent dir to this script's location
 cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
+# remove flag files from ungently quits
+rm ./test/**/*.OpticsDesign/simulation-is-running
+
 # remove raw and tmp folders containing ray tracing results
+rm -rf ./test/**/*.OpticsDesign/__pycache__
 rm -rf ./test/**/*.OpticsDesign/raw
 rm -rf ./test/**/*.OpticsDesign/tmp
 
