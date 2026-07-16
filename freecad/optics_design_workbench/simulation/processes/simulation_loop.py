@@ -145,7 +145,7 @@ def _setStatus(name, status):
   elif not status and currentStatus:
     os.remove(path)
 
-def isRunning():
+def isRunning( attemptCleanup=True ):
   # if is-running file does not exist, case is closed
   if not _queryStatus('simulation-is-running'):
     return False
@@ -155,19 +155,38 @@ def isRunning():
   if not isCanceled() or isWorkerRunning():
     return True
 
-  # if cancel file and running file both exist and not a single worker is
-  # known to this freecad process, assume run has ended without proper cleanup
-  try:
-    runningSince = os.stat(_statusFilePath('simulation-is-canceled')).st_mtime
-    if time.time()-runningSince > _ASSUME_DEAD_TIMEOUT:
-      io.warn(f'simulation was canceled {time.time()-runningSince:.1e}s ago but '
-              f'is-running file still exists, assuming it died without proper '
-              f'clean-up')
-      setIsRunning(False)
-      return False
-  except Exception:
-    pass
+  # try to resolve inconsistent flag file stats after ungently killed simulations
+  if attemptCleanup:
+    # if cancel file and running file both exist and not a single worker is
+    # known to this freecad process, assume run has ended without proper cleanup
+    t0 = time.time()
+    i = 0
+    while True:
+      # every 20th loop iteration check if is-canceled file is old enough to 
+      # assume the process died
+      i += 1
+      if i%20==1:
+        canceledAt = os.stat(_statusFilePath('simulation-is-canceled')).st_mtime
+        if time.time()-canceledAt > _ASSUME_DEAD_TIMEOUT:
+          io.warn(f'simulation was canceled {time.time()-canceledAt:.0f}s ago but '
+                  f'is-running file still exists, assuming it died without proper '
+                  f'clean-up')
+          setIsRunning(False)
+          return False
 
+        # emit warning on very first iteration
+        if i==1:
+          io.warn(f'simulation was canceled {time.time()-canceledAt:.0f}s ago but '
+                  f'is-running file still exists, waiting a while and rechecking...')
+
+        # dont spend more time than ASSUME_DEAD_TIMEOUT +10% on checking this
+        if time.time()-t0 > 1.1*_ASSUME_DEAD_TIMEOUT:
+          break
+
+      # keep gui response while polling
+      freecad_elements.keepGuiResponsive()
+      time.sleep(1e-2)
+  
   # return true if none if the above applies  
   return True
 
@@ -187,7 +206,7 @@ def setIsCanceled(state):
   _setStatus('simulation-is-canceled', state)
 
 def cancelSimulation():
-  if isRunning():
+  if isRunning( attemptCleanup=False ):
     setIsCanceled(True)
 
 def isFinished():
@@ -243,6 +262,7 @@ def runSimulation(action, slaveInfo={}):
 
   store = None
   iteration = 0
+  skipUpdateFlagFiles = False
   try:
     ##########################################################################################
     # prepare simulation, assemble simulation parameters from the various sources (settings,
@@ -256,8 +276,8 @@ def runSimulation(action, slaveInfo={}):
     # can be started
     if isMasterProcess():
       if isRunning():
-        raise RuntimeError('another simulation seems to be running (or was just running and '
-                           'exited ungently, in that case just retry in a few seconds)')
+        raise RuntimeError(f'another simulation seems to be running (or was just running '
+                           f'and exited ungently, in that case press cancel and retry)')
       setIsRunning(True)
       setIsCanceled(False)
       setIsFinished(False)
@@ -547,8 +567,13 @@ def runSimulation(action, slaveInfo={}):
     pass
 
   # any other error cancels simulation and is re-raised
-  except Exception:
-    setIsCanceled(True)
+  except Exception as e:
+    # only cancel if the exception was not related to another simulation still being busy
+    if 'another simulation seems to be running' in str(e):
+      # set flag to remember during cleanup not to set is-finished flag file 
+      skipUpdateFlagFiles = True
+    else:
+      setIsCanceled(True)
     io.err(traceback.format_exc())
     raise
 
@@ -562,7 +587,7 @@ def runSimulation(action, slaveInfo={}):
     # are finished and then sets flag files 
     if isMasterProcess():
       # set is finished flag
-      if not isCanceled():
+      if not skipUpdateFlagFiles and not isCanceled():
         setIsFinished(True)
 
       # wait for workers to finish
@@ -602,7 +627,8 @@ def runSimulation(action, slaveInfo={}):
       _SIMULATING_DOCUMENT = None
 
       # remove is running flag
-      setIsRunning(False)
+      if not skipUpdateFlagFiles:
+        setIsRunning(False)
 
       # clean temp files if existing
       if store:

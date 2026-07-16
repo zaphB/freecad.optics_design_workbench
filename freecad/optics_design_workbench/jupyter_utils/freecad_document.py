@@ -206,7 +206,7 @@ class FreecadProperty:
     # if fast mode is enabled, skip any existCheck and run calls without waiting for response
     if self._doc._fastModeEnabled():
       if isCall:
-        self._doc.write(self._freecadShellRepr())
+        self._doc.writeToFreecadShell(self._freecadShellRepr())
 
     # run proper query and error checking if not in fast mode
     else:
@@ -229,7 +229,7 @@ class FreecadProperty:
 
       # if fast mode is enabled run setter line without waiting for response
       if self._doc._fastModeEnabled():
-        self._doc.write(setterLine)
+        self._doc.writeToFreecadShell(setterLine)
 
       # run proper query and error checking if not in fast mode
       else:
@@ -401,6 +401,10 @@ class FreecadDocument:
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
+    # ensure FCStd suffix is present
+    if path is not None and not path.endswith('.FCStd'):
+      path = path+'.FCStd'
+
     # autodetect path is none is given
     if path is None:
       _path = os.path.realpath(os.getcwd())
@@ -413,10 +417,10 @@ class FreecadDocument:
         _path = os.path.dirname(_path)
       else:
         raise RuntimeError('failed to autodetect path of FCStd project file')
+
+    # ensure path exists
     if not os.path.exists(path):
       raise ValueError(f'path to freecad project file {path} does not seem to exist')
-    if not path.endswith('.FCStd'):
-      raise ValueError(f'path to freecad project file {path} does end with .FCStd')
 
     # if workInTempCopy is True, create temp folder, copy freecad file in there, 
     # and modify path attributes accordingly

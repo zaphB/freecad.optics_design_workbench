@@ -22,11 +22,16 @@ class OpticalSimulationAction:
   def Activated(self):
     # call clear method of all light source Proxies to erase all visible rays
     if self.action == 'clear':
-      for obj in find.lightSources():
-        obj.Proxy.clear(obj)
-        
-        # make sure GUI does not freeze during this
-        keepGuiResponsive()
+      # make sure to cancel simulation first
+      simulation.runAction('stop')
+
+      # remove all rays, go through all sources twice in case the running 
+      # simulation created new rays in the meantime
+      for _ in range(2):
+        for obj in find.lightSources():
+          obj.Proxy.clear(obj)  
+          # make sure GUI does not freeze during this
+          keepGuiResponsive()
     else:
       # forward action to simulations submodule
       simulation.runAction(self.action)
