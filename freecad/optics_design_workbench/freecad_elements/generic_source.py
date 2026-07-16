@@ -41,6 +41,7 @@ class GenericSourceProxy(GenericFreecadElementProxy):
     if hasattr(obj, 'ElementList'):
       for segment in obj.ElementList:
         simulation.simulatingDocument().removeObject(segment.Name)
+        keepGuiResponsive(minUpdateInterval=1)
     else:
       raise RuntimeError(f'light source object {obj.Name} does not have ElementList property. Older project? Recreate the source.')
 

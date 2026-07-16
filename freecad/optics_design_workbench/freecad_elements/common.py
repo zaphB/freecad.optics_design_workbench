@@ -22,7 +22,6 @@ from .. import simulation
 from .. import distributions
 
 _LAST_PROCESS_EVENTS_CALL = time.time()
-_MIN_UPDATE_INTERVAL = 1e-2
 
 # global dict with keys being proxy objects and values being 
 # more dicts that store pseudo-attributes. This awkward attribute storing
@@ -53,22 +52,23 @@ def allPlacementsAndPaths(obj, ignoreLinks=False, _recDepth=0):
   # no parents means this object lives in the toplevel of the document and no
   # links point to it indirectly -> return identity placement
   if not len(parents):
-    print(f'{str(obj.Document):<20} -> {obj} has no parents')
+    #print(f'{str(obj.Document):<20} -> {obj} has no parents')
     result = [[(obj.Placement, obj.Name)]]
   else:
-    print(f'{str(obj.Document):<20} -> {obj} has parents {parents}')
+    #print(f'{str(obj.Document):<20} -> {obj} has parents {parents}')
+    pass
 
   for parentObj, path in parents:
     # if parentObj is not in this document -> do not add it
     if parentObj.Document != simulation.simulatingDocument():
-      print(f'skipping {parentObj=} from document {parentObj.Document}')
+      #print(f'skipping {parentObj=} from document {parentObj.Document}')
       continue
 
     # get placement matrix up to parent that we just found 
     parentPlacement = parentObj.getSubObject(path, retType=3)
 
     # recursively find placements of each parentObj and modify all results we collected so far
-    print(f'{str(parentObj.Document):<20} -> {parentObj} resolving great parents...')
+    #print(f'{str(parentObj.Document):<20} -> {parentObj} resolving great parents...')
     for greatParents in allPlacementsAndPaths(parentObj, _recDepth=_recDepth+1):
       result.append( greatParents+[(parentPlacement, parentObj.Name+'.'+path)] )
 
@@ -109,6 +109,22 @@ def allPlacementsAndPaths(obj, ignoreLinks=False, _recDepth=0):
   return _result
 
 
+def allCoordinateTransformMatrices(obj, ignoreLinks=False):
+  '''
+  Returns transformation matrices from local to global coordinate systems
+  for given obj. More than one set of matrices may be returned if links
+  exist in project.
+  '''
+  result = []
+  for placement, path in allPlacementsAndPaths(obj, ignoreLinks=ignoreLinks):
+    gpM = placement.toMatrix()
+    gpMi = gpM.inverse()
+    pM = obj.Placement.toMatrix()
+    pMi = pM.inverse()
+    result.append([gpM, gpMi, pM, pMi])
+  return result
+
+
 ###################################################################################
 # PRETTY PRINTING
 
@@ -139,17 +155,16 @@ def matrixToString(m):
 class SimulationEnded(RuntimeError):
   pass
 
-def keepGuiResponsive(raiseIfSimulationDone=False):
+def keepGuiResponsive(raiseIfSimulationDone=False, minUpdateInterval=1/100):
   from ..detect_pyside import QApplication  
   global _LAST_PROCESS_EVENTS_CALL
-  if time.time()-_LAST_PROCESS_EVENTS_CALL > _MIN_UPDATE_INTERVAL:
+  if time.time()-_LAST_PROCESS_EVENTS_CALL > minUpdateInterval:
     _LAST_PROCESS_EVENTS_CALL = time.time()
 
     if QApplication.instance():
       # process Qt events
       QApplication.processEvents()
       Gui.updateGui()
-      QApplication.processEvents()
 
     # check whether simulation was canceled and raise SimulationEnded if so
     if raiseIfSimulationDone and (simulation.isCanceled() or simulation.isFinished()):
@@ -179,31 +194,24 @@ class GenericFreecadElementProxy:
          and hasattr(obj.ViewObject.Proxy, '_ensurePropertiesExist') ):
       obj.ViewObject.Proxy._ensurePropertiesExist(obj)
 
+
+  @functools.wraps(allPlacementsAndPaths)
   def allPlacementsAndPaths(self, obj, **kwargs):
     return allPlacementsAndPaths(obj, **kwargs)
+
 
   @functools.cache
   def _getCoordinateTransformMatrices(self, obj, ignoreLinks=False):
     '''
-    Returns transformation matrices from local to global coordinate systems
-    for given obj. More than one set of matrices may be returned if links
-    exist in project.
-
     This is a prive method intended to be used by the ray-tracer only. Uses
     functools.cache to make sure matrices and vectors that do not change 
     during ray tracing are calculated only once.
     '''
-    result = []
-    for placement, path in self.allPlacementsAndPaths(obj, ignoreLinks=ignoreLinks):
-      gpM = placement.toMatrix()
-      gpMi = gpM.inverse()
-      pM = obj.Placement.toMatrix()
-      pMi = pM.inverse()
-      result.append([gpM, gpMi, pM, pMi])
-    return result
+    return allCoordinateTransformMatrices(obj, ignoreLinks=ignoreLinks)
 
   def _getCoordinateTransformMatricesWithoutLinks(self, obj):
     return self._getCoordinateTransformMatrices(obj, ignoreLinks=True)[0]
+
 
   def _onInitializeSimulation(self, obj, *args, **kwargs):
     '''
