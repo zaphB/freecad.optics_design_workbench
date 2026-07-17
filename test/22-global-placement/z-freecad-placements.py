@@ -12,10 +12,6 @@ from optics_design_workbench import jupyter_utils
 baseDir = os.path.abspath(os.path.dirname(__file__))
 
 def test_allPlacementsAndPaths():
-  
-  # open GUI for debugging if needed
-  #jupyter_utils.openFreecadGui(f'{baseDir}/main.FCStd')
-
   with jupyter_utils.FreecadDocument(f'{baseDir}/main.FCStd') as f:
 
     # just printing some paths and make sure nothing crashes

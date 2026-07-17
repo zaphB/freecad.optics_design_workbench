@@ -98,6 +98,7 @@ def _runFile(filename, cleanup=True, cancelAfter=None, timeout=60*60):
   return baseDir, filename
 
 
+@pytest.mark.long
 def test_runPlaygroundExample():
   # make sure FCStd file runs and yields expected number of hits (> 100 rays * 10 iterations)
   baseDir, filename = _runFile('playground')
@@ -121,6 +122,7 @@ def test_runAndCancelGaussianExample():
   baseDir, filename = _runFile('gaussian', cancelAfter=5)
 
 
+@pytest.mark.long
 def test_runGaussianExample():
   baseDir, filename = _runFile('gaussian')
 
@@ -233,6 +235,7 @@ def collectNotebooks():
         yield root, f, _f
 
 allArgs = list(collectNotebooks())
+@pytest.mark.long
 @pytest.mark.parametrize('args', allArgs, ids=[a[1] for a in allArgs])
 def test_runFreecadNotebooks(args):
   root, f, _f = args

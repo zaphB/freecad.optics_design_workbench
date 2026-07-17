@@ -21,6 +21,7 @@ def collectNotebooks():
         yield root, f, _f
 
 allArgs = list(collectNotebooks())
+@pytest.mark.long
 @pytest.mark.parametrize('args', allArgs, ids=[a[1] for a in allArgs])
 def test_runPythonNotebooks(args):
   root, f, _f = args

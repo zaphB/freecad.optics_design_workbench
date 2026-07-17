@@ -11,6 +11,7 @@ from optics_design_workbench import jupyter_utils
 
 baseDir = os.path.abspath(os.path.dirname(__file__))
 
+@pytest.mark.long
 def test_surfaceSourceRuns():
   
   # open GUI for debugging if needed
