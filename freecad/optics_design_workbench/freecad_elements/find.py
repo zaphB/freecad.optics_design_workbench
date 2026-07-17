@@ -21,19 +21,39 @@ def iconpath(name):
   return os.path.join(os.path.dirname(__file__), '../icons', name+'.svg')
 
 
-def _allObjects():
+def _allObjects(doc=None, checkedDocs=None):
   # this hast to be imported here to avoid circular import problems
   from .. import simulation
 
-  for obj in simulation.simulatingDocument().Objects:
+  if doc is None:
+    doc = simulation.simulatingDocument()
+    checkedDocs = [doc]
+
+  def _isDeleted(obj):
     # make sure TypeId attribute can be read without exception 
     # before yiedling to avoid yielding deleted objects
     try:
       obj.TypeId
+      return False
     except Exception:
-      pass
-    else:
-      yield obj
+      return True
+
+  # iterate through all objects in odc
+  for obj in doc.Objects:
+    if _isDeleted(obj):
+      continue
+
+    # yield object itself
+    yield obj
+
+    # if obj is link type and link.document is different from checked
+    # documents -> check all objects in document, too
+    if (obj.isDerivedFrom('App::Link') 
+          and getattr(obj, 'LinkedObject', None) is not None
+          and (_doc:=obj.LinkedObject.Document) not in checkedDocs ):
+      for obj in _allObjects(doc=_doc, checkedDocs=checkedDocs+[_doc]):
+        if not _isDeleted(obj):
+          yield obj
 
 
 def lightSources():
@@ -46,9 +66,19 @@ def lightSources():
       yield obj
 
 
-def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
+def opticalObjects(lightSource=None, sequenceIndex=None):
   '''
   yield all optical objects in project
+  '''
+  for obj in _allObjects():
+    if ( obj.TypeId == 'App::LinkGroupPython'
+          and isinstance(obj.Proxy, optical_group.OpticalGroupProxy) ):
+      yield obj
+
+
+def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
+  '''
+  yield all optical objects in project relevant for ray tracing at the moment
   '''
   # prepare sequential mode element lists
   sequentialModeEnable = False
@@ -66,15 +96,12 @@ def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
     ignoreList = lightSource.IgnoredOpticalElements
 
   # loop through all objects and yield suitable objects
-  for obj in _allObjects():
-    if ( obj.TypeId == 'App::LinkGroupPython'
-          and isinstance(obj.Proxy, optical_group.OpticalGroupProxy)
-          and obj not in ignoreList
-          and (not sequentialModeEnable
-                or sequenceIndex is None
-                or obj in currentObjectsOfSequence)):
+  for obj in opticalObjects():
+    if ( obj not in ignoreList
+         and (not sequentialModeEnable
+               or sequenceIndex is None
+               or obj in currentObjectsOfSequence)):
       yield obj
-
 
 def simulationSettings():
   '''

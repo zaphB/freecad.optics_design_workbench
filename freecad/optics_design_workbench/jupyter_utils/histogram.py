@@ -49,6 +49,9 @@ class Histogram:
       # calc histogram
       self.hist, self.binX, self.binY = histogram2d(X, Y, **kwargs)
 
+      # store bin centers for convenience
+      self.X, self.Y = (self.binX[1:]+self.binX[:-1])/2, (self.binY[1:]+self.binY[:-1])/2
+
       # calc bin areas
       self.binAreas = 1
 

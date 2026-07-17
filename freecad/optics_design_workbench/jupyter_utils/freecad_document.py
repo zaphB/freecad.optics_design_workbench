@@ -19,6 +19,8 @@ import random
 import functools
 import shutil
 import traceback
+import re
+import sys
 from atomicwrites import atomic_write
 
 from .. import io
@@ -140,7 +142,7 @@ class FreecadExpression:
 
 class FreecadPropertyDict:
   def __init__(self, d):
-    self._d = d
+    self.__dict__['_d'] = d
 
   def __str__(self):
     return repr(self)
@@ -149,8 +151,13 @@ class FreecadPropertyDict:
     return f'<FreecadPropertyDict {repr(self._d)} >'
 
   def __getattr__(self, k):
-    return getattr(self._d, k)
+    if hasattr(self._d, k):
+      return getattr(self._d, k)
+    return self._d[k]
 
+  def __setattr__(self, k, v):
+    self._d[k].set(v)    
+    
   def __getitem__(self, k):
     return self._d[k]
 
@@ -160,12 +167,9 @@ class FreecadPropertyDict:
 
 class FreecadConstraintDict(FreecadPropertyDict):
   def __init__(self, constraintDict, indexDict, sketch):
-    self._d = constraintDict
-    self._indexDict = indexDict
-    self._sketch = sketch
-
-  def __setitem__(self, k, v):
-    self._sketch.setDatumWrapped(self._indexDict[k], v)
+    self.__dict__['_d'] = constraintDict
+    self.__dict__['_indexDict'] = indexDict
+    self.__dict__['_sketch'] = sketch
 
 
 class FreecadProperty:
@@ -205,14 +209,12 @@ class FreecadProperty:
     # if fast mode is enabled, skip any existCheck and run calls without waiting for response
     if self._doc._fastModeEnabled():
       if isCall:
-        self._doc.write(self._freecadShellRepr())
+        self._doc.writeToFreecadShell(self._freecadShellRepr())
 
     # run proper query and error checking if not in fast mode
     else:
       try:
-        rn = f'{random.random():.8f}'
-        self._doc.query(f'{self._freecadShellRepr()}; print("success{rn}")', expect=f'success{rn}',
-                        errText=f'property {self} does not exist')
+        self._doc.execInFreecadShell(f'{self._freecadShellRepr()}', errText=f'property {self} does not exist')
       except Exception:
         io.warn(f'running {"call" if isCall else "ensureExists"} line failed: {self._freecadShellRepr()}')
         raise
@@ -230,41 +232,54 @@ class FreecadProperty:
 
       # if fast mode is enabled run setter line without waiting for response
       if self._doc._fastModeEnabled():
-        self._doc.write(setterLine)
+        self._doc.writeToFreecadShell(setterLine)
 
       # run proper query and error checking if not in fast mode
       else:
-        rn = f'{random.random():.8f}'
-        self._doc.query(f'{setterLine}; print("success{rn}")', expect=f'success{rn}',
-                        errText=f'failed running python line in FreeCAD: {setterLine.strip()}')
+        try:
+          self._doc.execInFreecadShell(setterLine, errText=f'failed running python '
+                                            f'line in FreeCAD: {setterLine.strip()}')
+        except RuntimeError as e:
+          if m:=re.search(r'type must be (\S+)', str(e)):
+            io.verb(f'found complaint that type is not matching: str(e), trying '
+                    f'to adapt setter line...')
+            typeFunc = eval(m.group(1))
+            setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {repr(typeFunc(value))}'
+            io.verb(f'updated setter line: {setterLine}')
+            self._doc.execInFreecadShell(setterLine, errText=f'failed running python '
+                                              f'line in FreeCAD: {setterLine.strip()}')
+          else:
+            raise
 
   def setDatumWrapped(self, constraintIndex, v):
-      # select good unit for value
-      if abs(v) < 1e-6:
-        unit = 'nm'
-        _v = 1e6*v
-      elif abs(v) < 1e-3:
-        unit = 'um'
-        _v = 1e3*v
+    # select good unit for value
+    if abs(v) < 1e-6:
+      unit = 'nm'
+      _v = 1e6*v
+    elif abs(v) < 1e-3:
+      unit = 'um'
+      _v = 1e3*v
+    else:
+      unit = 'mm'
+      _v = v
+    # return expression
+    valueExpr = FreecadExpression(f'App.Units.Quantity("{_v:.6f} {unit}")')
+    
+    # force careful flush before and after setDatum, because strange "invalid constraint index" may occur otherwise
+    for retry in range(99):
+      if '_sketchObjReference' not in self.__dict__.keys():
+        raise ValueError(f'object {self} does not seem to be a constraint')
+      result = self._sketchObjReference.setDatum(constraintIndex, valueExpr)
+      self._doc._flushOutput(forceCareful=True, keepErrs=True)
+      if err:=self._doc.readFreecadShellErr():
+        if retry > 5:
+          raise RuntimeError(f'setting datum {constraintIndex} of {self} failed: {err}')
+        io.warn(f'error {err} occurred while setting a datum, retrying...')
+        self._doc._flushOutput(forceCareful=True)
+        time.sleep(0.1*2**retry)
       else:
-        unit = 'mm'
-        _v = v
-      # return expression
-      valueExpr = FreecadExpression(f'App.Units.Quantity("{_v:.6f} {unit}")')
-      
-      # force careful flush before and after setDatum, because strange "invalid constraint index" may occur otherwise
-      for retry in range(99):
-        result = self._sketchObjReference.setDatum(constraintIndex, valueExpr)
-        self._doc._flushOutput(forceCareful=True, keepErrs=True)
-        if err:=self._doc.readErr():
-          if retry > 5:
-            raise RuntimeError(f'setting datum {constraintIndex} of {self} failed: {err}')
-          io.warn(f'error {err} occurred while setting a datum, retrying...')
-          self._doc._flushOutput(forceCareful=True)
-          time.sleep(0.1*2**retry)
-        else:
-          break
-      return result
+        break
+    return result
 
   def __setattr__(self, key, value):
     self.set(value, lvalSuffix=f'.{key}')
@@ -281,7 +296,7 @@ class FreecadProperty:
                            internalObjectName=self._internalObjectName)
 
   def __len__(self):
-    return int( self._doc.query( f'len( {self._freecadShellRepr()} )' ) )
+    return int( self._doc.execInFreecadShell( f'print( len( {self._freecadShellRepr()} ) )' ) )
 
   def __iter__(self):
     return iter([self[i] for i in range(len(self))])
@@ -300,7 +315,7 @@ class FreecadProperty:
   def getStr(self):
     if self._isConstraint:
       return self.Value.getStr()
-    return self._doc.query(self._freecadShellRepr())
+    return self._doc.execInFreecadShell(self._freecadShellRepr())
 
   def getFloat(self):
     return float(self.getStr())
@@ -359,7 +374,7 @@ class FreecadObject(FreecadProperty):
       try:
         # force careful flushing because we need the exact response to object count also in fastMode
         self._doc._flushOutput(forceCareful=True)
-        objectCount = int(self._doc.query(f'print(len( App.activeDocument().getObjectsByLabel("{self._obj}") ))'))
+        objectCount = int(self._doc.execInFreecadShell(f'print(len( App.activeDocument().getObjectsByLabel("{self._obj}") ))'))
         # zero objects with given label exist -> fail
         if objectCount == 0:
           raise ValueError(f'object with label {self._obj} does not exist.')
@@ -375,7 +390,7 @@ class FreecadObject(FreecadProperty):
 
     # make sure self._freecadShellRepr() evaluates fine
     try:
-      queryResponse = self._doc.query(f'print({self._freecadShellRepr()})')
+      queryResponse = self._doc.execInFreecadShell(f'print({self._freecadShellRepr()})')
       if queryResponse == 'None':
         raise ValueError(f'expected freecad object, found None')
     except Exception:
@@ -386,8 +401,49 @@ class FreecadObject(FreecadProperty):
     self.__getattr__(key).set(value)
 
   def __getattr__(self, key):
-    return FreecadProperty(self._doc, self._obj, key, 
+    # handle special keys that refer to custom methods (defined in parent class)
+    if key == 'ConstraintsByName':
+      return self.getConstraintsByName()
+    return FreecadProperty(self._doc, self._obj, key,
                            internalObjectName=self._internalObjectName)
+
+
+def _autodetectFcstdPath(basePath=None):
+  autodetectDirs = []
+
+  # if path argument is passed, add it as a directory to consider
+  if basePath is not None:
+    autodetectDirs.append(basePath)
+
+  # always check current working directory first
+  autodetectDirs.append('.')
+  
+  # heuristic to detect reasonable user dir (no hidden folders, no 'site-packages')
+  if sys.argv[0]:
+    p = os.path.dirname(os.path.abspath(sys.argv[0]))
+    if not any([ f=='site-packages' or f.startswith('.') for f in p.split('/')]):
+      autodetectDirs.append(p)
+
+  # loop through all directory candidates
+  for basePath in autodetectDirs:
+
+    # autodetect path (1)
+    # check wether in current folder just one unique FCStd file exists
+    # if that is the case we use this one
+    if len(fcstdFiles:=[f for f in os.listdir(basePath) if f.endswith('.FCStd')]) == 1:
+      return basePath+'/'+fcstdFiles[0]
+
+    # autodetect path (2)
+    # traverse through parent directories and check whether a .OpticsDesign
+    # folder with equally named .FCStd file exists. If so, use this FCStd
+    # file
+    _path = os.path.realpath(os.getcwd())
+    while _path.count('/') != 1:
+      if _path.endswith('.OpticsDesign'):
+        candidate = _path[:-13]+'.FCStd'
+        if os.path.exists(candidate):
+          return candidate
+      _path = os.path.dirname(_path)
 
 
 class FreecadDocument:
@@ -399,26 +455,32 @@ class FreecadDocument:
   
   The document is intended to be used as a context manager to clean up after itself.
   '''
-  def __init__(self, path=None, workInTempCopy=False):
+  def __init__(self, path=None, workInTempCopy=False, showProgress=True):
     # register self in global list
     _ALL_DOCUMENTS.append(self)
 
-    # autodetect path is none is given
-    if path is None:
-      _path = os.path.realpath(os.getcwd())
-      while _path.count('/') != 1:
-        if _path.endswith('.OpticsDesign'):
-          candidate = _path[:-13]+'.FCStd'
-          if os.path.exists(candidate):
-            path = candidate
-            break
-        _path = os.path.dirname(_path)
-      else:
-        raise RuntimeError('failed to autodetect path of FCStd project file')
+    # try to find path of currently running script if possible, check current working
+    # directory first and (if possible to determine) check path of currently running script too
+    if path is None or os.path.isdir(path):
+      if (_autodetectPath:=_autodetectFcstdPath(path)) is None:
+        raise ValueError(f'Failed to autodetect .FCStd file path. Pass an explicit path '
+                         f'argument to FreecadDocument to specify a path manually. For '
+                         f'successful autodetect there '
+                         f'must be either exactly one FCStd file in the current directory '
+                         f'(or directory of running script) or one of the parent directories '
+                         f'has to be an .OpticsDesign folder with accompanying .FCStd file. '
+                         f'(current working dir: "{os.path.abspath('.')}", '
+                         f'running script\'s dir: "{sys.argv[0]})", '
+                         f'passed path argument: path={repr(path)})')
+      path = _autodetectPath
+
+    # ensure FCStd suffix is present
+    if path is not None and not path.endswith('.FCStd'):
+      path = path+'.FCStd'
+
+    # ensure path exists
     if not os.path.exists(path):
-      raise ValueError(f'path to freecad project file {path} does not seem to exist')
-    if not path.endswith('.FCStd'):
-      raise ValueError(f'path to freecad project file {path} does end with .FCStd')
+      raise ValueError(f'path to freecad project file {repr(path)} does not seem to exist')
 
     # if workInTempCopy is True, create temp folder, copy freecad file in there, 
     # and modify path attributes accordingly
@@ -446,11 +508,15 @@ class FreecadDocument:
     # generate results folder path
     self._resultsPath = path[:-6]+'.OpticsDesign'
 
+    # store whether progress should be shown interactively
+    self.showProgress = showProgress
+
     # setup flags
     self._isquit = False
     self._isterminate = False
     self._iskill = False
     self._isRunning = False
+    self._permanentlyDisableFastMode = False
     self._freecadInteractionTimesList = [time.time()]
     self._previousFastModeEnabled = False
 
@@ -559,8 +625,8 @@ class FreecadDocument:
 
   def objects(self, internalNames=False):
     if internalNames:
-      return sorted(list(set(eval(self.query(f'[o.Name for o in App.activeDocument().Objects]')))))
-    return sorted(list(set(eval(self.query(f'[o.Label for o in App.activeDocument().Objects]')))))
+      return sorted(list(set(eval(self.execInFreecadShell(f'[o.Name for o in App.activeDocument().Objects]')))))
+    return sorted(list(set(eval(self.execInFreecadShell(f'[o.Label for o in App.activeDocument().Objects]')))))
 
   def runSimulation(self, action='true', endIf=None, endIfMaxLoad=.5):
     '''
@@ -627,8 +693,8 @@ class FreecadDocument:
         return RawFolder(f'{self._resultsPath}/raw/{newFolders[0]}') if len(newFolders) else None 
 
       # write command
-      self.write(f'from freecad.optics_design_workbench import simulation',
-                 f'simulation.runSimulation(action="{action}")')
+      self.writeToFreecadShell(f'from freecad.optics_design_workbench import simulation',
+                              f'simulation.runSimulation(action="{action}")')
 
       # start progress tracker background thread
       progressTracker = progress.progressTrackerInstance(doc=self)
@@ -644,7 +710,7 @@ class FreecadDocument:
           # ask to print random number every 60 seconds 
           if time.time()-lastSentRandom > 60:
             rn = f'{random.random():.8f}'
-            self.write(f'print("{rn}")')
+            self.writeToFreecadShell(f'print("{rn}")')
             lastSentRandom = time.time()
 
           # check for new folders and update simulation tracker folder if so
@@ -665,7 +731,7 @@ class FreecadDocument:
               endIfDuration = time.time()-_t0
 
           # if random number appears in output the simulation must be done
-          for l in self.read():
+          for l in self.readFreecadShell():
             if rn and rn == l:
               break
 
@@ -709,6 +775,11 @@ class FreecadDocument:
     return self
 
   def open(self):
+    '''
+    This method launches a freecad process with the -c option to make it
+    remote controllable through stdio, but with the GUI loaded to avoid
+    breaking all ViewProvider objects in the FCStd file on saving.
+    '''
     self._updateInteractionTime()
     t0 = time.time()
     
@@ -765,11 +836,15 @@ class FreecadDocument:
           raise RuntimeError(f'FreeCAD reported error: {line}')
 
         if line.strip():
-          # remove line ending characters and add to queue
-          while line.endswith('\r') or line.endswith('\n'):
-            line = line[:-1]
-          io.warn(f'received error line {repr(line)}', logOnly=True)
-          self._qe.put(line)
+          # ignore if line is 'Requested non-existent style parameter token'-type of message type of 
+          # line which some FreeCAD versions before 1.1 spammed on startup and the bug may not be fully
+          # fixed yet as some reports of regression exist
+          if 'requested non-existent style parameter token' not in line.lower():
+            # remove line ending characters and add to queue
+            while line.endswith('\r') or line.endswith('\n'):
+              line = line[:-1]
+            io.warn(f'received error line {repr(line)}', logOnly=True)
+            self._qe.put(line)
         time.sleep(1e-3)
       self._p.stdout.close()
     self._te = threading.Thread(target=readError)
@@ -783,7 +858,8 @@ class FreecadDocument:
     # process (we dont read stdout/stderr and only realize something is wrong if the child dies)
     # The second half of the snippets makes sure all other gui windows the workbench might want
     # to open remain hidden (or do not open at all)
-    self.write(f'try: ',
+    self.writeToFreecadShell(
+               f'try: ',
                f'  import FreeCADGui as Gui',
                f'  Gui.showMainWindow()',
                f'  Gui.getMainWindow().hide()',
@@ -797,7 +873,8 @@ class FreecadDocument:
     self._flushOutput(forceCareful=True)
 
     # after gui is fully loaded, load document
-    self.write(f'try: ',
+    self.writeToFreecadShell(
+               f'try: ',
                f'  App.openDocument({repr(self._path)})',
                f'except Exception:',
                f'  exit()')
@@ -807,7 +884,8 @@ class FreecadDocument:
 
     # make sure numpy is imported globally, as numpy and as np, to ensure all numpy datatypes
     # can be constructed properly
-    self.write(f'import numpy',
+    self.writeToFreecadShell(
+               f'import numpy',
                f'import numpy as np',
                f'from numpy import *')
 
@@ -816,6 +894,10 @@ class FreecadDocument:
 
     # clear interaction time list to avoid immediately triggering fast mode
     self._forceDisableFastMode()
+
+    # silence progress tracking if desired
+    if not self.showProgress:
+      progress.silenceProgressTracker()
 
     # print success
     io.verb(f'done in {time.time()-t0:.1f}s')
@@ -826,7 +908,7 @@ class FreecadDocument:
 
   def _errorOutText(self):
     'return a string to append to exceptions which hints to freecad error output'
-    errorOut = self.readErr()
+    errorOut = self.readFreecadShellErr()
     if not errorOut.strip():
       return ''
     return (f'\n\nFreecad process had possibly related '
@@ -840,20 +922,28 @@ class FreecadDocument:
     T = array(self._freecadInteractionTimesList)
     self._freecadInteractionTimesList[:] = T[time.time()-T < 30]
 
+  def disableFastMode(self):
+    'permanently disable fast mode communication to ease debugging'
+    io.verb('fast mode is permanently disabled for this instance')
+    self._permanentlyDisableFastMode = True
+    self._forceDisableFastMode()
+
   def _forceDisableFastMode(self):
     self._freecadInteractionTimesList[:] = [time.time()]
 
   def _fastModeEnabled(self):
-    T = array(self._freecadInteractionTimesList)
-
-    # enable fast mode if more than 100 freecad interactions
-    # within last 3 seconds, only disable if less then 100
-    # interactions within 10 seconds 
-    #io.verb(f'{sum( time.time()-T < 5 )=}')
-    if self._previousFastModeEnabled:
-      enable = sum( time.time()-T < 10 ) > 100
+    if not self._permanentlyDisableFastMode:
+      T = array(self._freecadInteractionTimesList)
+      # enable fast mode if more than 100 freecad interactions
+      # within last 3 seconds, only disable if less then 100
+      # interactions within 10 seconds 
+      #io.verb(f'{sum( time.time()-T < 5 )=}')
+      if self._previousFastModeEnabled:
+        enable = sum( time.time()-T < 10 ) > 100
+      else:
+        enable = sum( time.time()-T < 3 ) > 100
     else:
-      enable = sum( time.time()-T < 3 ) > 100
+      enable = False
 
     # if fast mode was just ended, make sure to flush buffers
     if not enable and self._previousFastModeEnabled:
@@ -866,7 +956,7 @@ class FreecadDocument:
 
     return enable
 
-  def write(self, *data):
+  def writeToFreecadShell(self, *data):
     self._updateInteractionTime()
     cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*2 # add plenty of newlines at the and to
                                                # make sure command is complete also 
@@ -882,8 +972,8 @@ class FreecadDocument:
 
     # throw away any previous content
     if not keepErrs:
-      self.readErr()
-    self.read()
+      self.readFreecadShellErr()
+    self.readFreecadShell()
 
     # skip careful flush if fastMode is active (and not forced)
     if forceCareful or not self._fastModeEnabled():
@@ -896,10 +986,10 @@ class FreecadDocument:
         if time.time()-lastPrintedRn > 1/5*(time.time()-t0):
           lastPrintedRn = time.time()
           rn = f'{random.random():.8f}'
-          self.write(f'print("{rn}")')
+          self.writeToFreecadShell(f'print("{rn}")')
         
         # if random number appears in output: success
-        out = self.read()
+        out = self.readFreecadShell()
         #print(f'waiting for {rn}, found {out}')
         if rn in out:
           return
@@ -918,24 +1008,31 @@ class FreecadDocument:
                             f'running?')
         time.sleep(1e-3)
 
-  def read(self):
+  def readFreecadShell(self, maxLines=inf):
     self._updateInteractionTime()
     result = []
     try:
-      while True:
+      # fetch lines until queue.Empty is raised 
+      # or maxLines limit is reached
+      while len(result) < maxLines:
         result.append(self._q.get_nowait())
     except queue.Empty:
       pass
     return result
 
-  def readErr(self):
+  def readFreecadShellLine(self):
+    if len(lines:=self.readFreecadShell(maxLines=1)):
+      return lines[0]
+
+  def readFreecadShellErr(self, maxLines=inf):
     self._updateInteractionTime()
     result = []
     lastLineReceived = 0
     while True:
-      # fetch lines until queue.Empty is raised
+      # fetch lines until queue.Empty is raised 
+      # or maxLines limit is reached
       try:
-        while True:
+        while len(result) < maxLines:
           line = self._qe.get_nowait()
           if not line.startswith('warning:'):
             result.append(line)
@@ -953,41 +1050,102 @@ class FreecadDocument:
 
     return '\n'.join(result)
 
-  def readline(self):
-    self._updateInteractionTime()
-    try:
-      return self._q.get_nowait()
-    except queue.Empty:
-      pass
-    return None
+  def _cleanShellCommands(self, *data):
+    # if all lines have a certain amount of leading whitespaces, remove them 
+    commonLeadingWsCount = inf
+    for d in data:
+      for line in d.split('\n'):
+        if not len(line.strip()):
+          continue
+        leadingWs = re.match(r'^\s*', line).span()[1]
+        commonLeadingWsCount = int(min([commonLeadingWsCount, leadingWs]))
+    # finite command whitespace count >0? -> remove this number of 
+    # chars from all passed lines
+    if isfinite(commonLeadingWsCount) and commonLeadingWsCount>0:
+      io.verb(f'removed {commonLeadingWsCount=} from input lines {data}')
+      data = [ '\n'.join([l[commonLeadingWsCount:] for l in d.split('\n')]) for d in data]
 
-  def query(self, *data, timeout=60, expect=None, errText=None):
+    # remove all \r from input, then replace all \n with \r\n because freecad shell
+    # prefers this as newline
+    data = [ d.replace('\r', '').replace('\n', '\r\n') for d in data]
+    return data
+
+
+  #@functools.wraps(FreecadDocument.execInFreecadShellIter)
+  def execInFreecadShell(self, *args, **kwargs):
+    return '\n'.join([l for l in self.execInFreecadShellIter(*args, **kwargs) if l is not None ])
+
+  def execInFreecadShellIter(self, *data, autoCleanInputs=True, **kwargs):
+    # remove leading whitespaces etc
+    if autoCleanInputs:
+      data = self._cleanShellCommands(*data)
+
+    # append command that prints unique random number and wait until this print appears in output
+    expect = f'success+{time.time()*1e6}+{random.random():.8f}'
+    for line in self._queryFreecadShellIter(*data, f'print("{expect}")', autoCleanInputs=False,
+                                            expect=expect, **kwargs):
+      if expect in line:
+        return
+      yield line
+
+
+  #@functools.wraps(FreecadDocument._queryFreecadShellIter)
+  def _queryFreecadShell(self, *args, **kwargs):
+    return list(self._queryFreecadShellIter(*args, **kwargs))
+
+  def _queryFreecadShellIter(self, *data, timeout=60, expect=None, errText=None, 
+                             autoCleanInputs=True):
     self._updateInteractionTime()
     t0 = time.time()
+
+    # remove leading whitespaces etc
+    if autoCleanInputs:
+      data = self._cleanShellCommands(*data)
 
     # make sure output buffer of freecad is empty (do not wait
     # full timeout to leave a bit time for the query itself)
     self._flushOutput(timeout=0.9*timeout)
 
     # send python commands
-    self.write(*data)
+    self.writeToFreecadShell(*data)
 
     # wait for single line response
     lastWarned = time.time()
     sentCommandT0 = time.time()
+    collectedLines = []
+    iteration = 0
+    returnAtIteration = inf
+    returnResult = None
     while True:
-      if error:=self.readErr():
+      # delayed return of loop ten iterations after expected line was found
+      iteration += 1
+      if iteration >= returnAtIteration:
+        return returnResult
+
+      if error:=self.readFreecadShellErr():
         raise RuntimeError((f'{errText.strip()}\n' if errText else '')
                            +f'exception was raised while handling '
                            +f'command(s) {data}:\n\n'+error)
 
       # check for result line
-      if line:=self.readline():
+      if line:=self.readFreecadShellLine():
         if _PRINT_FREECAD_COMMUNICATION:
           io.verb(f'< {line}')
-        if expect is not None and expect not in line:
-          continue
-        return line
+
+        # if expect is set and this line contains
+        # expected test: return line (end iterator)
+        # else: yield line (go on with iterating) 
+        if expect is not None:
+          if expect in line:
+            returnResult = line
+            returnAtIteration = iteration + 10
+          else:
+            yield line
+
+        # if expect is None: return on first encountered line
+        else:
+          returnResult = line
+          returnAtIteration = iteration + 10
 
       # warn of takes long
       if time.time()-lastWarned > 5:
@@ -1012,10 +1170,10 @@ class FreecadDocument:
 
   def save(self):
     # send clear rays command
-    self.write('Gui.runCommand("Clear all rays",0)')
+    self.writeToFreecadShell('Gui.runCommand("Clear all rays",0)')
 
     # send save document command
-    self.write('App.activeDocument().save()')
+    self.writeToFreecadShell('App.activeDocument().save()')
 
   def close(self):
     t0 = time.time()
@@ -1063,8 +1221,8 @@ class FreecadDocument:
   def _quit(self):
     if self.isRunning() and not self._isquit:
       io.verb('asking FreeCAD to quit...')
-      self.write('FreeCADGui.getMainWindow().deleteLater()') # <- trick to gently shut down freecad without any prompts
-      #self.write('exit()') # <- dont do, exiting the python shell causes segfaults sometimes
+      self.writeToFreecadShell('FreeCADGui.getMainWindow().deleteLater()') # <- trick to gently shut down freecad without any prompts
+      #self.writeToFreecadShell('exit()') # <- dont do, exiting the python shell causes segfaults sometimes
       self._isquit = True
 
   def _terminate(self):
@@ -1143,6 +1301,14 @@ def openFreecadGui(*args, **kwargs):
       raise
 
 def _rawFolders(basePath='.'):
+  # if exactly one '.OpticsDesign' folder exist in bastPath and no 'raw' folder, enter 
+  # the opticsDesign folder
+  if (len(simFolders:=[p for p in os.listdir(basePath) 
+                                if p.endswith('.OpticsDesign')
+                                      and os.path.isdir(f'{basePath}/{p}')]) == 1
+        and not os.path.exists(f'{basePath}/raw') ):
+    basePath += f'/{simFolders[0]}'
+
   # descent path until 'raw' folder is found
   while not os.path.exists(f'{basePath}/raw') and basePath != '/':
     basePath = os.path.realpath(f'{basePath}/..')
@@ -1172,8 +1338,8 @@ def rawFolderByIndex(index=-1, basePath='.'):
   return RawFolder(f'{basePath}/{folders[index]}')
 
 @functools.wraps(rawFolderByIndex)
-def latestRawFolder(**kwargs):
-  return rawFolderByIndex(index=-1, **kwargs)
+def latestRawFolder(*args, **kwargs):
+  return rawFolderByIndex(*args, index=-1, **kwargs)
 
 
 class RawFolder:
@@ -1263,6 +1429,10 @@ class RawFolder:
         self.printTree(_node=v, _prefix=_prefix+'  ')
       else:
         raise ValueError(f'invalid tree node {_node}')
+
+  def loadGlobalInfo(self):
+    with open(self._path+'/global-info.pkl', 'rb') as _f:
+      return io.unpickle(_f)
 
   def loadHits(self, pattern='*'):
     return hits.Hits(self._load(pattern=pattern, kind='hits'))

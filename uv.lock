@@ -1209,6 +1209,7 @@ dependencies = [
 dev = [
     { name = "ipykernel" },
     { name = "jupyter" },
+    { name = "psutil" },
     { name = "pytest" },
     { name = "pytest-monitor" },
     { name = "pytest-sugar" },
@@ -1231,6 +1232,7 @@ requires-dist = [
 dev = [
     { name = "ipykernel" },
     { name = "jupyter" },
+    { name = "psutil" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-monitor" },
     { name = "pytest-sugar" },

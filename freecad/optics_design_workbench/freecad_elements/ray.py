@@ -16,7 +16,7 @@ from numpy import *
 import time
 
 from . import find
-from ..simulation.tracing_cache import *
+from ..simulation.raytracing_cache import *
 from .common import *
 
 
@@ -144,7 +144,6 @@ class Ray():
       # hit mirror: direction is mirrored at normal, 
       # medium is unchanged, power is altered according to reflectivity
       if obj.OpticalType == 'Mirror':
-
         # calculate direction according to ideal specular reflection
         directionSpecular = self.mirror(currentDirection, normal)
 
@@ -295,54 +294,93 @@ class Ray():
     given in global coordinates.
     '''
     distTol = self._getDistTol(distTol)
-
-    line = Part.makeLine(start, start+direction/direction.Length*maxRayLength)
     intersects = []
     
     # loop through all relevant optical groups
     for group in find.relevantOpticalObjects(self.lightSource, sequenceIndex=sequenceIndex):
 
-      # this loop may run for quite some time, keep GUI responsive by handling events
-      keepGuiResponsiveAndRaiseIfSimulationDone()
+      # IMPORTANT NOTE ON MEMORY LEAKS: 
+      
+      # This loop makes various calls that cause the memory allocations on the C++ side, e.g. 
+      # obj.Shape, shape.BoundBox, Part.makeLine, line.Curve, etc. Each of these calls 
+      # potentially causes memory leaks because it is not possible to free this memory from
+      # the python side (that's us). Experience has shown that FreeCAD/OCC do not clean up 
+      # completely even after many hours, only if  the simulation has ended. Freecad/OCCs 
+      # memory management apparently waits for the python frame to end before cleanup up, in
+      # our case this only when we give control back to the FreeCAD GUI and we cannot continue
+      # to simulate. Therefore, in a simulation that runs continuously for a long time we have
+      # to possibility to trigger FreeCAD/OCCs garbage collection mechanisms.
 
-      # only care if bounding box is closer to start point than maxRayLength and 
-      # if bounding box actually intersects with the ray
-      if hasattr(group, 'Shape'):
-        sbb = cachedBoundBox(cachedShape(group), enlarge=distTol)
-        if ( ( not isfinite(maxRayLength)
-                or any([(sbb.getPoint(i)-start).Length
-                                  < 10*maxRayLength 
-                                        for i in range(8)]) )
-            and sbb.intersect(start, direction) ):
+      # Here is what we can do to keep memory consumption under control:
+      # Where possible use raytracing_cache functions cachedBoundBox, cachedShape, ... These 
+      # will avoid recreating any C++ objects as e.g. obj.Shape would do. This works for 
+      # Shapes, Faces, Surfaces etc of static geometric objects in the project. This is not 
+      # useful for anything that depends on the current ray, because it does not make sense 
+      # to cache it if the next ray will be different and no two rays will be identical in 
+      # Monte Carlo runs. 
+      # Transforming a Shape/Face/etc creates a copy on the C++ side thus allocates memory 
+      # that we cannot free explicitly.
+      # It is thus important to use transformation matrices to convert _ray_ coordinates to
+      # local coordinate systems of Shapes/Faces/etc. wherever possible to be able to work
+      # with the cached Shape/Face/etc objects as often as possible.
 
-          # loop through all faces
-          for face in cachedFaces(cachedShape(group)):
+      # get all global placement transform matrices from group and run intersect checks
+      # for all of them (links may cause multiple placement transforms to coexist)
+      for gpM, gpMi, pM, pMi in group.Proxy._getCoordinateTransformMatrices(group):
+        keepGuiResponsiveAndRaiseIfSimulationDone()
 
-            # this loop may run for quite some time, keep GUI responsive by handling events
-            keepGuiResponsiveAndRaiseIfSimulationDone()
+        # here we need to first apply the groups own placement transform (pMi) and
+        # then the global transform, because the rays of our own shape are already
+        # incorporating the respective obj's placement transform (pM) 
+        gpM = gpM*pMi
+        gpMi = pM*gpMi
 
-            # only care if bounding box of face intersects with ray
-            fbb = cachedBoundBox(face, enlarge=distTol)
-            if fbb.intersect(start, direction):
+        # only care if bounding box is closer to start point than maxRayLength and 
+        # if bounding box actually intersects with the ray
+        if hasattr(group, 'Shape'):
+          # fetch bounding box
+          sbb = cachedBoundBox(cachedShape(group), enlarge=distTol)
 
-              # find intersection points and loop through all of them
-              if intersect := line.Curve.intersect(face.Surface):
-                points, _ = intersect
-                for point in points:
-                  
-                  # this loop may run for quite some time, keep GUI responsive by handling events
-                  keepGuiResponsiveAndRaiseIfSimulationDone()
+          # find start and direction vectors in local coordinates of optical group
+          lstart = gpMi*start 
+          ldirection = gpMi*(start+direction)-lstart
 
-                  vec = Vector(point.X, point.Y, point.Z)
-                  vert = Part.Vertex(point)
+          # create line already here because it involves a small (unavoidable) memory leak
+          line = Part.makeLine(lstart, lstart+ldirection/ldirection.Length*maxRayLength)
+          # check if bounding box is hit by ray
+          if ( ( not isfinite(maxRayLength)
+                  or any([(sbb.getPoint(i)-lstart).Length < 2*maxRayLength 
+                                                              for i in range(8)]) )
+              and sbb.intersect(lstart, ldirection) ):
+            
+            # loop through all faces
+            for face in cachedFaces(cachedShape(group)):
 
-                  # if found intersection point has some finite distance from 
-                  # origin and lies within the target face and on the line,
-                  # add to candidate list
-                  if ( (vec-start).Length > distTol
-                        and vert.distToShape(line)[0] < distTol
-                        and vert.distToShape(face)[0] < distTol):
-                    intersects.append([group, face, vec, (vec-start).Length])
+              # this loop may run for quite some time, keep GUI responsive by handling events
+              keepGuiResponsiveAndRaiseIfSimulationDone()
+
+              # only care if bounding box of face intersects with ray
+              fbb = cachedBoundBox(face, enlarge=distTol)
+              if fbb.intersect(lstart, ldirection):
+
+                # find intersection points and loop through all of them
+                if intersect := line.Curve.intersect(cachedSurface(face)):
+                  points, _ = intersect
+                  for point in points:
+
+                    # this loop may run for quite some time, keep GUI responsive by handling events
+                    keepGuiResponsiveAndRaiseIfSimulationDone()
+
+                    vec = Vector(point.X, point.Y, point.Z)
+                    vert = Part.Vertex(point)
+
+                    # if found intersection point has some finite distance from 
+                    # origin and lies within the target face and on the line,
+                    # add to candidate list
+                    if ( (vec-lstart).Length > distTol
+                          and vert.distToShape(line)[0] < distTol
+                          and vert.distToShape(face)[0] < distTol):
+                      intersects.append([group, (gpM, gpMi, face), gpM*vec, (vec-lstart).Length])
 
     # return intersection that is closest to start (if any), if multiple intersections 
     # exist that are closer than 2*distTol to the the closest intersection, prefer the
@@ -362,23 +400,29 @@ class Ray():
         break
     return result
   
-  def getNormal(self, nearest_part, origin, neworigin, epsLength=1e-6):
+  def getNormal(self, face, fromPoint, toPoint, epsLength=1e-6):
     '''
     calculate the normal vector given, inherited from OpticsWorkbench
     '''
-    dRay = neworigin - origin
-    if hasattr(nearest_part, 'Surface'):
-      uv = nearest_part.Surface.parameter(neworigin)
+    origToPoint = toPoint
+    gpM, gpMi, _face = face
+    fromPoint, toPoint = gpMi*fromPoint, gpMi*toPoint
+    if hasattr(_face, 'Surface'):
+      uv = _face.Surface.parameter(toPoint)
       try:
-        normal = nearest_part.normalAt(uv[0], uv[1])
+        normal = _face.normalAt(uv[0], uv[1])
       except Exception:
         # try to take normal in very close vicinity, hoping it is only
         # locally illdefined
         r1, r2 = [(1 if random.random()<.5 else -1)*(.1+random.random()) for _ in range(2)]
-        normal = nearest_part.normalAt(uv[0] + epsLength*r1, uv[1] + epsLength*r2)
+        normal = _face.normalAt(uv[0] + epsLength*r1, uv[1] + epsLength*r2)
     else:
       return Vector(0, 0, 0)
-    cosangle = dRay*normal / (dRay.Length*normal.Length)
+    dRay = toPoint-fromPoint
+    cosangle = dRay*normal/(dRay.Length*normal.Length)
+    #print(f'normal before: {normal=}')
+    normal = gpM*(toPoint+normal)-origToPoint
+    #print(f'normal after: {normal=}')
     if cosangle < 0:
       return -normal, True
     return normal, False

@@ -143,7 +143,7 @@ class ReplaySourceProxy(GenericSourceProxy):
         io.warn(f'ReplaySource does not support pseudo-random mode and behaves identical to true-random mode')
 
       rayCount = 0
-      gpM, gpMi = self._makeRayCache(obj)[:2]
+      gpM, gpMi, pM, pMi = self._getCoordinateTransformMatrices(obj)
 
       for origin, direction, wavelength, power in self._yieldOriginDirectionWavelengthPower(obj):
         # apply placement of lightsource to coordinates

@@ -43,14 +43,14 @@ class SimulationSettingsProxy(GenericFreecadElementProxy):
               'continuous simulation modes to speed up the calculation.'),
         ('WorkerProcessCount', 'num_cpus', 'String', 'Number of worker processes to spawn for continuous '
               f'simulation modes. Should be an integer or "num_cpus" ( = {simulation.cpuCount()} ).'),
-        ('SequentialMode', False, 'Bool', 'Enable/disable sequential ray-tracing mode. In '
-              f'sequential mode, rays will not collide with anything but the next object '
-              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
-              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
-        ('SequentialModeElement00', None, 'LinkList', 'List to specify order of optical elements to '
-              f'consider during ray tracing. Rays will not collide with anything but the next object '
-              f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
-              f'sequential mode, i.e. rays can collide with any optical object in the project.'),
+        ('SequentialMode', False, 'Bool', 'Enable/disable sequential ray-tracing mode. '
+              f'In sequential mode, rays will not collide with anything but the objects listed in '
+              f'the property "Sequential Mode Elements_00". Reflected or transmitted rays will then '
+              f'not collide with anything but objects listed in "Sequential Mode Elements_00" and so on.'
+              f'This can cause a massive speedup.'),
+        ('SequentialModeElements_00', None, 'LinkList', 'List of optical elements to consider in the '
+              f'first sequence step. I.e. rays directly emitted from light sources will not collide '
+              f'with anything but the objects in this list. (Empty lists in the sequence are ignored.)')
       ]),
       ('OpticalSimulationMetadataSettings', [
         ('StoreHitInitPoint', False, 'Bool', 'Enable/disable additional data about light source '
@@ -116,7 +116,7 @@ class SimulationSettingsProxy(GenericFreecadElementProxy):
           obj.WorkerProcessCount = 'num_cpus'
 
         # limit mit to 1
-        if count and count < 1:
+        if count is not None and count < 1:
           obj.WorkerProcessCount = str(1)
         
         # limit count to 10 times cpu count + 10 (which would never make any sense)
@@ -163,7 +163,7 @@ class SimulationSettingsProxy(GenericFreecadElementProxy):
     hasEmpty = False
     lastUnset = 100
     for i in reversed(range(100)):
-      attr = getattr(obj, f'SequentialModeElement{i:02d}', 'unset')
+      attr = getattr(obj, f'SequentialModeElements_{i:02d}', 'unset')
       if not len(attr):
         hasEmpty = True
       else:
@@ -178,12 +178,20 @@ class SimulationSettingsProxy(GenericFreecadElementProxy):
     
     # add property for last unset
     if not hasEmpty and lastUnset < 100:
-      obj.addProperty('App::PropertyLinkList', f'SequentialModeElement{lastUnset:02d}', 
+      nth = f'{lastUnset+1:.0f}th'
+      prevRays = f'reflected or transmitted by elements in the previous "Sequential Mode Elements" list'
+      if lastUnset == 0:
+        nth = 'first'
+        prevRays = f'directly emitted from light sources'
+      if lastUnset == 1:
+        nth = 'second'
+      if lastUnset == 2:
+        nth = 'third'
+      obj.addProperty('App::PropertyLinkList', f'SequentialModeElements_{lastUnset:02d}', 
                       'OpticalSimulationPerformanceSettings', 
-                      f'List to specify order of optical elements to '
-                      f'consider during ray tracing. Rays will not collide with anything but the next object '
-                      f'given in the sequence. This can cause a massive speedup. Empty list implies the non-'
-                      f'sequential mode, i.e. rays can collide with any optical object in the project.')
+                      f'List of optical elements to consider in the {nth} sequence '
+                      f'step. Rays {prevRays} will not collide with anything but the '
+                      f'objects in this list. (Empty lists in the sequence are ignored.)')
 
     return list(reversed(sequence))
 

@@ -6,18 +6,16 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 try:
   import FreeCADGui as Gui
   import FreeCAD as App
-  from FreeCAD import Vector, Rotation
   import Part
 except ImportError:
   pass
 
 from numpy import *
-import functools
 
 from .common import *
 from . import find
 from .. import simulation
-from ..simulation.tracing_cache import *
+from ..simulation.raytracing_cache import *
 
 #####################################################################################################
 class GenericSourceProxy(GenericFreecadElementProxy):
@@ -43,41 +41,16 @@ class GenericSourceProxy(GenericFreecadElementProxy):
     if hasattr(obj, 'ElementList'):
       for segment in obj.ElementList:
         simulation.simulatingDocument().removeObject(segment.Name)
+        keepGuiResponsive(minUpdateInterval=1)
     else:
       raise RuntimeError(f'light source object {obj.Name} does not have ElementList property. Older project? Recreate the source.')
-
-  @functools.cache
-  def _makeRayCache(self, obj):
-    '''
-    Make sure matrices and vectors that do not change during ray 
-    tracing are calculated only once.
-    '''
-    # TODO: LinkGroupPython has no global placement method... Is this sufficient?
-    gpM = obj.Placement.toMatrix()
-    gpMi = obj.Placement.toMatrix().inverse()
-    #elem = obj.ElementList[0]
-    #gpM = obj.Shape.getGlobalPlacement().toMatrix()
-    #gpMi = obj.Shape.getGlobalPlacement().toMatrix().inverse()
-    
-    # prepare Placement-adjusted beam orientation vectors in local coordinates
-    opticalAxis = Vector(0,0,1)
-    orthoAxis = Vector(1,0,0)
-    sourceOrigin = Vector(0,0,0)
-
-    return gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin
-
-  def onInitializeSimulation(self, obj, state, ident):
-    self._ensurePropertiesExist(obj)
 
   def onExitSimulation(self, obj, ident):
     pass
 
   def runSimulationIteration(self, obj, *, mode, draw=False, store=False, **kwargs):
-    # recalculate cached matrices for each iteration
-    self._makeRayCache.cache_clear()
-
     # prepare transforms etc that will be used many times
-    gpM, gpMi = self._makeRayCache(obj)[:2]
+    gpM, gpMi, pM, pMi = self._getCoordinateTransformMatricesWithoutLinks(obj)
 
     # clear displayed rays on begin of each simulation iteration
     self.clear(obj)
@@ -99,7 +72,8 @@ class GenericSourceProxy(GenericFreecadElementProxy):
       # the diffuse color is the first one visible in the view settings, so it
       # is most intuitive to use this
       if _vobj:=cachedViewObject(obj):
-        color = _vobj.ShapeMaterial.DiffuseColor
+        material = cachedProperty(_vobj, 'ShapeMaterial')
+        color = cachedProperty(material, 'DiffuseColor')
 
       # trace ray through project
       for (p1,p2), power, medium, colorChange in ray.traceRay(store=store, **kwargs):

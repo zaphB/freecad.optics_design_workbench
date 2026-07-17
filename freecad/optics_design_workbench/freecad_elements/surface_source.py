@@ -30,34 +30,37 @@ from .. import io
 class SurfaceSourceProxy(PointSourceProxy):
 
   def _properties(self):
-    return [
+    ownProps = [
       ('OpticalEmission', [
         ('ActiveSurfaces', [], 'LinkSubList', 'List of surfaces that we want to emit rays from. '
                                'Selecting bodies without specifying individual faces implies '
                                'that all faces of the body emit.'),
-        ('PowerDensity', 'cos(theta)', 'String',  
+        ('PowerDensity', 'cos(theta)**2', 'String',  
                   'Emitted optical power per solid angle at each surface element. '
                   'The expression may contain any mathematical '
                   'function contained in the numpy module and the polar angle "theta" '
                   'to make the emission of each surface element depend on the emission angle.'
                   'All rays placed by this light source begin on the selected surfaces.'),
-        ('Wavelength', 500, 'Float', 'Wavelength of the emitted light in nm.'),
       ]),
       ('OpticalSimulationSettings', [
-        ('RandomNumberGeneratorMode', '?', 'String', ''),
-        ('ThetaResolutionNumericMode', '1e6', 'String', ''),
         ('UVSamplingInitialResolution', '5', 'String', ''),
         ('UVSamplingMaxRelAreaElementChange', '0.1', 'String', ''),
-        ('ThetaDomain', '0,pi/2', 'String', ''),
-        ('RayCountFanMode', 100, 'Integer', 'Total number of rays to distribute over all '
+        ('FanModeRayCount', 100, 'Integer', 'Total number of rays to distribute over all '
                                  'emitting surfaces in fan mode.'),
        ]),
-    ]+super()._properties()
+    ]
+    # remove some of the inherited properties that be are not using
+    relevantSuperProps = [ (group,[p for p in ps 
+                                    if p[0] not in ('RadiusDomain PowerDensity FocalLength Divergence '
+                                                    'Fans FanPhi0 RaysPerFan PhiDomain '
+                                                    'PhiResolutionNumericMode').split()]) 
+                                                for group,ps in super()._properties()]
+    return ownProps+relevantSuperProps
 
   def onChanged(self, obj, prop):
     self._ensurePropertiesExist(obj)
 
-    # first call onChanged of point source
+    # first call onChanged of surface source
     super().onChanged(obj, prop)
 
     # parse UV map sampling settings
@@ -79,23 +82,29 @@ class SurfaceSourceProxy(PointSourceProxy):
     self._cachedSelectedFace.cache_clear()
 
 
-  def parsedPhiDomain(self, obj):
-    return (0, 2*pi)
-
-
   def _makeRay(self, obj, origin, faceTangent, faceNormal, 
-               theta, phi, power=1, metadata={}):
+               theta, phi, globalPlacementMatrices, 
+               power=1, metadata={}):
     '''
     Create new ray object with origin and direction given in global coordinates
     '''
+    # build metadata dict
+    rayMetadata = dict(initPhi=phi, initTheta=theta)
+    rayMetadata.update(metadata)
+
     # apply azimuth and polar rotation to faceNormal vector
     direction = (Rotation(faceNormal,phi/pi*180) 
                   * Rotation(faceTangent,theta/pi*180) 
                   * faceNormal)
 
-    # build metadata dict
-    rayMetadata = dict(initPhi=phi, initTheta=theta)
-    rayMetadata.update(metadata)
+    # apply global placement transform to origin and direction
+    # here we need to first apply our inverse own placement transform (pMi) and
+    # then the global transform, because the rays of our own shape are already
+    # incorporating the respective obj's placement transform (pM) 
+    gpM, gpMi, pM, pMi = globalPlacementMatrices
+    _origin = origin
+    origin = gpM*pMi*origin 
+    direction = gpM*pMi*(_origin+direction)-origin
 
     # return actual ray object
     return ray.Ray(obj, origin, direction, wavelength=obj.Wavelength, 
@@ -112,13 +121,26 @@ class SurfaceSourceProxy(PointSourceProxy):
 
   def _makeSurfaceGrid(self, obj, face, totalGridPoints,
                        uniformParam=None, fillFactor=1, 
-                       effectiveSizes=None, recursionDepth=0):
+                       effectiveSizes=None, recursionDepth=0,
+                       t0=None, lastPrint=None):
     '''
     Prepare a list of (u,v) points that have approximately equal distance on a given
     face, most parameters will be found out and refined in a number of recursive calls
     '''
     # calculate distance tolerance
     distTolerance = self._getDistTol()
+
+    # shorthand to keep GUI update and print something to indicate we are not stuck
+    if t0 is None:
+      t0 = time.time()
+    if lastPrint is None:
+      lastPrint = time.time()
+    def _updateGuiAndProgress():
+      nonlocal lastPrint
+      if time.time()-lastPrint > 30:
+        io.verb(f'  ..still busy sampling and analyzing UV maps (step {recursionDepth+1}/5)')
+        lastPrint = time.time()
+      keepGuiResponsiveAndRaiseIfSimulationDone()
 
     # setup limits and sizes dicts (if not given)
     _r = face.ParameterRange
@@ -135,9 +157,11 @@ class SurfaceSourceProxy(PointSourceProxy):
 
     # generate very simple rectilinear grid with minimum 5x5 points, p1 and p2 correspond to u and v as given by
     # value of paramOrder
-    P1, P2 = [ linspace(limits[p][0], limits[p][1], 
-                        max([5, 1+int( 2*round( sqrt(effectiveSizes[p]/effectiveSizes[_p] * totalGridPoints/fillFactor)/2 )) ]) )
-                                                                                    for p, _p in zip(paramOrder, reversed(paramOrder)) ]
+    P1, P2 = [ (linspace(limits[p][0], limits[p][1],
+                         max([5, 1+int( 2*round( sqrt(effectiveSizes[p]/effectiveSizes[_p] 
+                                                      * totalGridPoints/fillFactor )/2 )) ]) ),
+                _updateGuiAndProgress())[0]
+                                              for p, _p in zip(paramOrder, reversed(paramOrder)) ]
     p1Step = P1[1]-P1[0]
     p2Step = P2[1]-P2[0]
 
@@ -146,11 +170,15 @@ class SurfaceSourceProxy(PointSourceProxy):
     p1p2 = lambda u, v: (u,v) if paramOrder=='uv' else (v,u)
 
     # calculate locations of all mesh points and find out whether they are actually part of the mesh
-    points = [[ face.valueAt(*uv(p1,p2)) for p2 in P2 ] for p1 in P1 ]
-    isValid = [[ Part.Vertex(p).distToShape(face)[0] < distTolerance for p in row] for row in points ]
+    points = [[ (face.valueAt(*uv(p1,p2)), _updateGuiAndProgress())[0]
+                                                             for p2 in P2 ] for p1 in P1 ]
+    isValid = [[ (Part.Vertex(p).distToShape(face)[0] < distTolerance, 
+                  _updateGuiAndProgress())[0]
+                                                         for p in row] for row in points ]
 
     # calculate derivatives at all valid locations, place (None,None) placeholders outside of face
-    derivatives = [[ p1p2(*face.derivative1At(*uv(p1,p2))) if isValid[i][j] else (None,None) 
+    derivatives = [[ (p1p2(*face.derivative1At(*uv(p1,p2))) if isValid[i][j] else (None,None),
+                      _updateGuiAndProgress())[0] 
                                                                     for j,p2 in enumerate(P2) ]
                                                                           for i,p1 in enumerate(P1) ]
     derivP1 = [[ d[0].Length if d[0] is not None else None for d in row ] for row in derivatives ]
@@ -163,14 +191,18 @@ class SurfaceSourceProxy(PointSourceProxy):
     _max = lambda A: (lambda _A: max(_A) if len(_A) else None)([a for a in A if a is not None])
     _sum = lambda A: sum([a for a in A if a is not None])
     _dAvgs = [ _mean(row) for row in areaElems ]
-    isUniformP1 = all([all([ abs(d-dAvg)*p1Step*p2Step < distTolerance**2 for d in row if d is not None ])
-                                                                 for dAvg, row in zip(_dAvgs, areaElems) ])
+    isUniformP1 = all([all([ (abs(d-dAvg)*p1Step*p2Step < distTolerance**2,
+                              _updateGuiAndProgress())[0] 
+                                                              for d in row if d is not None ])
+                                                                for dAvg, row in zip(_dAvgs, areaElems) ])
     #print(f'{paramOrder=}, {isUniformP1=}')
     if isUniformP1:
       uniformParam = paramOrder[0]
     else:
       _dAvgs = [ _mean(row) for row in zip(*areaElems) ]
-      isUniformP2 = all([all([ abs(d-dAvg)*p1Step*p2Step < distTolerance**2 for d in row if d is not None ]) 
+      isUniformP2 = all([all([ (abs(d-dAvg)*p1Step*p2Step < distTolerance**2, 
+                                _updateGuiAndProgress())[0] 
+                                                              for d in row if d is not None ]) 
                                                                 for dAvg, row in zip(_dAvgs, zip(*areaElems)) ])
       #print(f'{paramOrder=}, {isUniformP2=}')
       if isUniformP2:
@@ -209,19 +241,21 @@ class SurfaceSourceProxy(PointSourceProxy):
     #print(f'{len(P1)=} {len(P2)=} {fillFactor=}, {updatedFillFactor=} {validCount=}')
 
     # recurse three times to refine fillFactor, effectiveSizes and uniformParam values 
-    if recursionDepth < 3:
+    if recursionDepth < 4:
+      _updateGuiAndProgress()
       return self._makeSurfaceGrid(obj, face, totalGridPoints, 
                                    uniformParam=uniformParam,
                                    # avoid fillFactor jumping to zero if none if the initial rays is on the face
                                    fillFactor=max([fillFactor/10, updatedFillFactor]),
                                    effectiveSizes=effectiveSizes,
-                                   recursionDepth=recursionDepth+1)
+                                   recursionDepth=recursionDepth+1, 
+                                   t0=t0, lastPrint=lastPrint)
 
     # remove outer points if requested very few points and too many were created
-    dropEveryCandidates = [lambda i,j: False, lambda i,j: i%2==0 or j%2==0, lambda i,j: ((i+1)//2)%2==0 or ((j+1)//2)%2==0]
+    dropFuncCandidates = [lambda i,j: False, lambda i,j: i%2==0 or j%2==0, lambda i,j: ((i+1)//2)%2==0 or ((j+1)//2)%2==0]
     validCount = sum([sum([1 if v else 0 for v in row]) for row in isValid ])
-    while len(dropEveryCandidates) and totalGridPoints < 20 and validCount > totalGridPoints:
-      drop = dropEveryCandidates.pop(0)
+    while len(dropFuncCandidates) and totalGridPoints < 20 and validCount > totalGridPoints:
+      drop = dropFuncCandidates.pop(0)
       isValid = [[ (isValid[i][j] 
                     and not drop(i,j))
                              for j,p in enumerate(row) ] for i,row in enumerate(points) ]
@@ -257,15 +291,16 @@ class SurfaceSourceProxy(PointSourceProxy):
 
     # calculate points and area elements of the initial grid
     def calcPdA(U, V):
+      keepGuiResponsiveAndRaiseIfSimulationDone()
       P = []
       dA = []
       valid = []
       for u in U:
+        keepGuiResponsiveAndRaiseIfSimulationDone()
         dA.append([])
         P.append([])
         valid.append([])
         for v in V:
-          # this loop may run for quite some time, keep GUI responsive by handling events
           keepGuiResponsiveAndRaiseIfSimulationDone()
 
           # calc points and derivatives and construct result array
@@ -300,6 +335,8 @@ class SurfaceSourceProxy(PointSourceProxy):
     # find row/col with largest curvature (but still lying within face) -> insert new cols/rows to enhance resolution
     maxAreaElementDiff = float(obj.UVSamplingMaxRelAreaElementChange)
     while True:
+      keepGuiResponsiveAndRaiseIfSimulationDone()
+
       # update P and dA arrays
       P, dA, valid = calcPdA(U, V)
 
@@ -309,8 +346,6 @@ class SurfaceSourceProxy(PointSourceProxy):
       areaDiffs2 = abs(( (dA[:,1:]-dA[:,:-1]) / _meanA )).max(axis=0)
       maxDiff1, maxDiff2 = areaDiffs1.max(), areaDiffs2.max()
 
-      # this loop may run for quite some time, keep GUI responsive by handling events
-      keepGuiResponsiveAndRaiseIfSimulationDone()
       io.verb(f'refining UV-grid of finite area element sizes {len(U)=}, {len(V)=}, {maxDiff1=:.1e}, {maxDiff2=:.1e}')
 
       # end loop if biggest diff between neighboring area elements is <maxAreaElementDiff
@@ -387,32 +422,54 @@ class SurfaceSourceProxy(PointSourceProxy):
     # calculate distance tolerance
     distTolerance = self._getDistTol()
 
+    # warn if light source has non-trivial placement (which makes no sense for surface sources)
+    if not obj.Placement.isIdentity():
+      io.warn(f'Surface source {obj.Label=}, {obj.Name=} has non-trivial placement {obj.Placement=}. '
+              f'The position of rays is entirely determined by the faces/bodies added to the '
+              f'"Active Surfaces" property of this source and the source Placement will be ignored. '
+              f'Reset the placement to zero shift and rotation to silence this warning.')
+
     # make sure GUI does not freeze
     keepGuiResponsiveAndRaiseIfSimulationDone()
 
     # identify all faces that take part in the emission, split total 
     # emitted rays according to face area
-    allFaces = []
+    allFacesAndPlacements = []
     for (part, faces) in obj.ActiveSurfaces:
-      if faces and len(faces):
-        # if faces were explicitly selected, add them to total list
-        selectedFaces = [self._cachedSelectedFace(part, f) for f in faces if f]
-        if len(selectedFaces):
-          allFaces.extend(selectedFaces)
+
+      # create one entry in list for each physical placement of part
+      for globalPlacementMatrices in allCoordinateTransformMatrices(part):
+
+        # check whether faces were explicitly selected by user or just the body
+        handSelectedFaces = False
+        if faces and len(faces):
+          # if faces were explicitly selected, add them to total list
+          selectedFaces = [self._cachedSelectedFace(part, f) for f in faces if f]
+          if len(selectedFaces):
+            handSelectedFaces = True
+            io.verb(f'{len(selectedFaces)} faces of {part.Label=} ({part.Name=}) were selected for emission')
+            allFacesAndPlacements.extend([(globalPlacementMatrices, f) for f in selectedFaces])
 
         # if not faces were explicitly selected, add all faces of the body the list
-        else:
-          allFaces.extend(cachedFaces(cachedShape(part)))
+        if not handSelectedFaces:
+          allPartFaces = cachedFaces(cachedShape(part))
+          io.verb(f'all {len(allPartFaces)} faces of {part.Label=} ({part.Name=}) were selected for emission')
+          allFacesAndPlacements.extend([(globalPlacementMatrices, f) for f in allPartFaces])
+
+    # leave if no faces selected
+    if not len(allFacesAndPlacements):
+      io.warn(f'surface source {obj.Label=} ({obj.Name=}) has no ActiveFaces selected for emission')
+      return
 
     # calculate weight of each face by its area
-    _allAreas = [f.Area for f in allFaces]
+    _allAreas = [f.Area for _,f in allFacesAndPlacements]
     allWeights = array(_allAreas)/sum(_allAreas)
-
+    
     # fan-mode: generate rays with face-normal orientation and approximately uniform spacing on the surface
     if mode == 'fans':
 
       # determine how many rays to place in fan mode
-      rayCountFanMode = obj.RayCountFanMode
+      FanModeRayCount = obj.FanModeRayCount
 
       # function that rounds ray counts to integers 1, 4, 9 or greater
       # these are the reasonable numbers of rays to place per pace
@@ -420,37 +477,44 @@ class SurfaceSourceProxy(PointSourceProxy):
 
       # check if placing rays by weight but at least one per face exceeds
       # total ray count 
-      _rayCount = sum([customRound(w*rayCountFanMode) for w in allWeights])
-      skipFaceFraction = max([0, 1-rayCountFanMode/_rayCount])
+      _rayCount = sum([customRound(w*FanModeRayCount) for w in allWeights])
+      skipFaceFraction = max([0, 1-FanModeRayCount/_rayCount])
       if skipFaceFraction > 0.3:
         warnings.warn(f'cannot place rays an all surfaces, because this would require to '
-                      f'place {rayCount=} rays, which exceeds {rayCountFanMode=}. '
+                      f'place {rayCount=} rays, which exceeds {FanModeRayCount=}. '
                       f'Skipping {1e2*skipFaceFraction:.0f}% of faces.')
       else:
         skipFaceFraction = 0
 
       # iterate over all weights and faces
       faceI = 0
-      for weight, face in zip(allWeights, allFaces):
+      lastPrint = 0
+      for _i, (weight, (globalPlacementMatrices, face)) in enumerate(zip(allWeights, allFacesAndPlacements)):
 
         # skip a portion of faces given by skipFaceFraction
         if skipFaceFraction > 0:
-          _step = skipFaceFraction / weight*len(allFaces)
+          _step = skipFaceFraction / weight*len(allFacesAndPlacements)
           if round(faceI) != round(faceI+_step):
             continue
           faceI += _step
 
         # decide how may rays to place, at low fidelity use either 1, 4, 9, after that increase smoothly
-        raysOnFace = customRound(weight*rayCountFanMode)
+        raysOnFace = customRound(weight*FanModeRayCount)
 
         # generate grid of surface points attempting regular spacing
-        io.verb(f'placing {raysOnFace=} rays on face {face}')
+        if time.time()-lastPrint > 10:
+          io.verb(f'placing {raysOnFace=:.0f} rays on faces... '
+                  f'{f'(currently at {_i+1}/{len(allFacesAndPlacements)})' if _i>0 else ''}\n'
+                  f'depending on face complexity it may take a while until rays become visible, '
+                  f'because sampling uv maps may take time')
+          lastPrint = time.time()
         for (u,v), point, (du,dv) in self._makeSurfaceGrid(obj, face, raysOnFace):
           yield self._makeRay(obj, 
                               origin=point, 
                               faceTangent=du if du.Length>10*distTolerance else [du,dv][argmax([du.Length, dv.Length])],
                               faceNormal=face.normalAt(u,v),
-                              theta=0, phi=0)
+                              theta=0, phi=0,
+                              globalPlacementMatrices=globalPlacementMatrices)
 
     # true/pseudo random mode: place rays randomly distributed over the surface with 
     # angular distribution given by LocalPowerDensity
@@ -463,19 +527,21 @@ class SurfaceSourceProxy(PointSourceProxy):
       raysPerIteration *= obj.RaysPerIterationScale
 
       # prepare random variable
-      vrv = self._getVrv(obj)
+      vrv = self._getVrv(obj, variableDomain=self.parsedThetaDomain(obj), scalarRandomVar=True)
 
       # repeat raysPerIteration times
       for _ in range(int(round(raysPerIteration))):
 
         # randomly select face, weigh probability using face area
-        face = random.choice(allFaces, p=allWeights)
+        allI = arange(len(allFacesAndPlacements))
+        globalPlacementMatrices, face = allFacesAndPlacements[ random.choice(allI, p=allWeights) ]
 
         # roll random position on the selected surface
         origin, u, v, du, dv = self._drawRandomPositionOnFace(obj, face)
 
         # create/get random variable for theta and phi and draw samples 
-        theta, phi = vrv.draw()
+        theta = vrv.draw()
+        phi = random.random()*2*pi
 
         # this loop may run for quite some time, keep GUI responsive by handling events
         keepGuiResponsiveAndRaiseIfSimulationDone()
@@ -485,7 +551,8 @@ class SurfaceSourceProxy(PointSourceProxy):
                             origin=origin, 
                             faceTangent=du if du.Length>10*distTolerance else [du,dv][argmax([du.Length, dv.Length])],
                             faceNormal=face.normalAt(u,v),
-                            theta=theta, phi=phi)
+                            theta=theta, phi=phi,
+                            globalPlacementMatrices=globalPlacementMatrices )
 
 
 #####################################################################################################
@@ -510,8 +577,8 @@ class AddSurfaceSource(AddGenericSource):
   def GetResources(self):
     return dict(Pixmap=self.iconpath(),
                 Accel='',
-                MenuText='Make point source',
-                ToolTip='Add a point light source to the current project.')
+                MenuText='Make surface source',
+                ToolTip='Add a surface light source to the current project.')
 
 def loadSurfaceSource():
   Gui.addCommand('Add surface source', AddSurfaceSource())

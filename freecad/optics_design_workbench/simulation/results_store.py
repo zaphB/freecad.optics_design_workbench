@@ -20,7 +20,6 @@ import shutil
 from atomicwrites import atomic_write
 import glob
 
-from .. import freecad_elements
 from .. import io
 from . import processes
 
@@ -31,15 +30,17 @@ _README_TEXT = '''
 
 This folder contains simulation results, analysis and optimizer notebooks
 interacting with the Optics Design Workbench. Feel free to edit this readme
-document your optics design project. If this readme is deleted, it will
-be restored with its default content on the next simulation run.
+document to describe your optics design project. If this readme is deleted, 
+it will be restored with its default content on the next simulation run.
 
 Subfolders raw/simulation-run-xyz will be created on each simulation run
 and contain the raw ray and hit information recorded during ray tracing. 
 
-The subfolder notebooks/ contains all jupyter notebooks used to visualize,
-analyze the results and to perform sweeps and optimizations of geometry
-parameters.
+The subfolder notebooks/ is a good place to store all your jupyter 
+notebooks used to visualize, analyze the results and to perform sweeps and
+optimizations of geometry parameters. Notebooks and scripts placed in this
+folder can use jupyter_utils.FreecadDocument() without passing a file name
+and autodetect the FCStd file path belonging to this .OpticsDesign folder.
 
 The optics_design_workbench.log logfile will accumulate logging messages
 generated during the ray tracing for debugging purposes.
@@ -118,7 +119,7 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
       # only do something if more than one file in list
       if len(mergeList) > 1:
         # load and merge all files in list
-        merged = {}
+        merged = None
         for name in mergeList:
           updateGuiCallback()
           try:
@@ -127,9 +128,20 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
           except Exception as e:
             io.warn(f'failed to read {kind} file {base}/{name}: {e.__class__.__name__} "{e}"')
           else:
-            # merge file content with merged dict
-            for k, v in data.items():
-              updateResultEntry(merged, k, v)
+            # files that contain dictionaries: use updateResultEntry function to merge
+            if type(data) is dict:
+              for k, v in data.items():
+                if merged is None:
+                  merged = {}
+                updateResultEntry(merged, k, v)
+            # files that contain lists: simply concatenate lists
+            elif type(data) is list:
+              if merged is None:
+                merged = []
+              merged = merged + data
+            # unexpected content: raise error
+            else:
+              raise ValueError(f'found datafile with unexpected content type {type(data)=}')
         
         # overwrite first file in list with total results
         with atomic_write(f'{base}/{mergeList[0]}',
@@ -145,7 +157,7 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
       updateGuiCallback()
       mergeList.clear()
 
-    # only consider files that did not change in the last hour
+    # only consider files that did not change for a while
     for name, size in sorted([(n, s) for n, t, s in namesTimesSizes if time.time()-t > 5*60],
                               key=lambda e: e[0]):
       updateGuiCallback()
@@ -312,6 +324,11 @@ class SimulationResults:
     if not os.path.exists(self.basePath+'/README.md'):
       with atomic_write(self.basePath+'/README.md', mode='w') as f:
         f.write(_README_TEXT)
+
+  def dumpGlobalInfo(self, info):
+    with atomic_write(f'{self.basePath}/{self.simulationRunFolder}/global-info.pkl',
+                      mode='wb', overwrite=False) as f:
+      pickle.dump(info, f)
 
   def _raiseIfCleanedUp(self):
     if self._cleanedUp:

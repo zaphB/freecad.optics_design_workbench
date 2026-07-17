@@ -24,7 +24,7 @@ from .. import io
 
 from .generic_source import *
 from .common import *
-from ..simulation.tracing_cache import *
+from ..simulation.raytracing_cache import *
 
 #####################################################################################################
 class PointSourceProxy(GenericSourceProxy):
@@ -99,7 +99,9 @@ class PointSourceProxy(GenericSourceProxy):
       
       # inter-update theta and radius domains if possible, avoid recursion by only
       # updating the hidden one of the two domains when the non-hidden one changes
-      if isfinite(float(getattr(obj, 'FocalLength', 1))):
+      # (check for hasattr Focal length because e.g. surface source inherits this
+      #  onChanged handler but removes the focal length property)
+      if hasattr(obj, 'FocalLength') and isfinite(float(getattr(obj, 'FocalLength', 1))):
         if prop == 'ThetaDomain':
           if l1 < pi/2-1e-5 and l2 < pi/2-1e-5 and not isclose(float(obj.FocalLength), 0):
             r1, r2 = abs(tan(l1)*float(obj.FocalLength)), abs(tan(l2)*float(obj.FocalLength))
@@ -190,78 +192,82 @@ class PointSourceProxy(GenericSourceProxy):
           obj.setEditorMode('ThetaResolutionNumericMode', 3)
           obj.setEditorMode('RadiusResolutionNumericMode', 0)
 
-    # update divergence if focal length, emission density expression or other 
-    # dependent property changed
-    if prop in ('FocalLength', 'PowerDensity', 'ThetaDomain', 'ThetaResolutionNumericMode'):
-      f = getattr(obj, 'FocalLength', None)
-      expr = getattr(obj, 'PowerDensity', None)
-      prevDivergence = getattr(obj, 'Divergence', None)
-      if f is not None and expr is not None:
-        f = float(f)
-        if not isfinite(f):
-          setattr(obj, 'Divergence', '0')
-        else:
-          # set divergence to read only if variables other than r exist
-          # in expression
-          if [str(s) for s in sy.sympify(expr).free_symbols] == ['r']:
-            obj.setEditorMode('Divergence', 0)
-          else:
-            obj.setEditorMode('Divergence', 1)
+    # check for hasattr focal length and divergence because e.g. surface source inherits this
+    # onChanged handler but removes the focal length property
+    if ( hasattr(obj, 'FocalLength') and hasattr(obj, 'Divergence') ):
 
-          # create theta-only expression and find divergence angle
-          expr = sy.sympify(expr).subs('r', sy.sympify(f'(tan(theta)*{f})'))
+      # update divergence if focal length, emission density expression or other 
+      # dependent property changed
+      if prop in ('FocalLength', 'PowerDensity', 'ThetaDomain', 'ThetaResolutionNumericMode'):
+        f = getattr(obj, 'FocalLength', None)
+        expr = getattr(obj, 'PowerDensity', None)
+        prevDivergence = getattr(obj, 'Divergence', None)
+        if f is not None and expr is not None:
+          f = float(f)
+          if not isfinite(f):
+            setattr(obj, 'Divergence', '0')
+          else:
+            # set divergence to read only if variables other than r exist
+            # in expression
+            if [str(s) for s in sy.sympify(expr).free_symbols] == ['r']:
+              obj.setEditorMode('Divergence', 0)
+            else:
+              obj.setEditorMode('Divergence', 1)
+
+            # create theta-only expression and find divergence angle
+            expr = sy.sympify(expr).subs('r', sy.sympify(f'(tan(theta)*{f})'))
+            syms = [str(s) for s in expr.free_symbols]
+            if not isclose(f, 0) and syms == ['theta'] and self.parsedThetaDomain(obj)[0] == 0:
+              maxPower = sy.lambdify('theta', expr)(0)
+              try:
+                divergenceAngle = scipy.optimize.bisect(sy.lambdify('theta', expr - maxPower/e), 
+                                                        0, self.parsedThetaDomain(obj)[1])
+              except Exception:
+                io.verb(f'failed to find 1/e angle in emission power expression {expr} within theta '
+                        f'domain {self.parsedThetaDomain(obj)}, does the power emission decrease for '
+                        f'theta>0? is the theta domain large enough?')
+                setattr(obj, 'Divergence', '-')
+              else:
+                if (prevDivergence is None 
+                      or prevDivergence == '-' 
+                      or not isclose(float(eval(prevDivergence)), divergenceAngle) ):
+                  setattr(obj, 'Divergence', f'{-sign(f)*divergenceAngle/pi:.6g}*pi')
+            else:
+              setattr(obj, 'Divergence', '-')
+
+      # update focal length if divergence changed (this can only be done if 
+      # power emission is parametrized by radius only)
+      if prop == 'Divergence':
+        divergence = getattr(obj, 'Divergence', None)
+        if divergence is not None and divergence != '-':
+          newDivergenceAngle = float(eval(divergence))
+
+        # try to find 1/e radius of power density
+        f = getattr(obj, 'FocalLength', None)
+        expr = getattr(obj, 'PowerDensity', None)
+        if f is not None and expr is not None:
+          f = float(f)
+          expr = sy.sympify(expr)
           syms = [str(s) for s in expr.free_symbols]
-          if not isclose(f, 0) and syms == ['theta'] and self.parsedThetaDomain(obj)[0] == 0:
-            maxPower = sy.lambdify('theta', expr)(0)
+          if syms == ['r'] and self.parsedRadiusDomain(obj)[0] == 0:
+            maxPower = sy.lambdify('r', expr)(0)
             try:
-              divergenceAngle = scipy.optimize.bisect(sy.lambdify('theta', expr - maxPower/e), 
-                                                      0, self.parsedThetaDomain(obj)[1])
+              oneOverERadius = scipy.optimize.bisect(sy.lambdify('r', expr - maxPower/e), 
+                                                    0, self.parsedRadiusDomain(obj)[1])
             except Exception:
               io.warn(f'failed to find 1/e angle in emission power expression {expr} within theta '
                       f'domain {self.parsedThetaDomain(obj)}, does the power emission decrease for '
                       f'theta>0? is the theta domain large enough?')
               setattr(obj, 'Divergence', '-')
             else:
-              if (prevDivergence is None 
-                    or prevDivergence == '-' 
-                    or not isclose(float(eval(prevDivergence)), divergenceAngle) ):
-                setattr(obj, 'Divergence', f'{-sign(f)*divergenceAngle/pi:.6g}*pi')
+              if isclose(newDivergenceAngle, 0):
+                setattr(obj, 'FocalLength', 'inf')
+              else:
+                newFocalLength = -oneOverERadius/tan(newDivergenceAngle)
+                if not isclose(newFocalLength, f, rtol=1e-5):
+                  setattr(obj, 'FocalLength', f'{newFocalLength:.6g}')
           else:
-            setattr(obj, 'Divergence', '-')
-
-    # update focal length if divergence changed (this can only be done if 
-    # power emission is parametrized by radius only)
-    if prop == 'Divergence':
-      divergence = getattr(obj, 'Divergence', None)
-      if divergence is not None and divergence != '-':
-        newDivergenceAngle = float(eval(divergence))
-
-      # try to find 1/e radius of power density
-      f = getattr(obj, 'FocalLength', None)
-      expr = getattr(obj, 'PowerDensity', None)
-      if f is not None and expr is not None:
-        f = float(f)
-        expr = sy.sympify(expr)
-        syms = [str(s) for s in expr.free_symbols]
-        if syms == ['r'] and self.parsedRadiusDomain(obj)[0] == 0:
-          maxPower = sy.lambdify('r', expr)(0)
-          try:
-            oneOverERadius = scipy.optimize.bisect(sy.lambdify('r', expr - maxPower/e), 
-                                                   0, self.parsedRadiusDomain(obj)[1])
-          except Exception:
-            io.warn(f'failed to find 1/e angle in emission power expression {expr} within theta '
-                    f'domain {self.parsedThetaDomain(obj)}, does the power emission decrease for '
-                    f'theta>0? is the theta domain large enough?')
-            setattr(obj, 'Divergence', '-')
-          else:
-            if isclose(newDivergenceAngle, 0):
-              setattr(obj, 'FocalLength', 'inf')
-            else:
-              newFocalLength = -oneOverERadius/tan(newDivergenceAngle)
-              if not isclose(newFocalLength, f, rtol=1e-5):
-                setattr(obj, 'FocalLength', f'{newFocalLength:.6g}')
-        else:
-          setattr(obj, 'FocalLength', getattr(obj, 'FocalLength'))
+            setattr(obj, 'FocalLength', getattr(obj, 'FocalLength'))
 
 
   def _rvArgs(self, obj, densityString, variableDomain=None, scalarRandomVar=False):
@@ -358,16 +364,17 @@ class PointSourceProxy(GenericSourceProxy):
   def _parsedFanPhi0(self, obj):
     return float(sy.sympify(getattr(obj, 'FanPhi0')).evalf())
 
-  def _getVrv(self, obj):
+  def _getVrv(self, obj, **kwargs):
     if NON_SERIALIZABLE_STORE.get(self, None) is None:
       NON_SERIALIZABLE_STORE[self] = {}
     
     if NON_SERIALIZABLE_STORE[self].get('vrv', None) is None:
       # module global variable and not to self, because attributes of self should be serializable
       NON_SERIALIZABLE_STORE[self]['vrv'] = (
-            distributions.VectorRandomVariable(
-                **self._rvArgs(obj, obj.PowerDensity)
-            )
+            (distributions.ScalarRandomVariable 
+                if kwargs.get('scalarRandomVar', False) 
+                else distributions.VectorRandomVariable )(
+                      **self._rvArgs(obj, obj.PowerDensity, **kwargs) )
       )
       vrv = NON_SERIALIZABLE_STORE[self]['vrv']
       vrv.compile()
@@ -402,7 +409,12 @@ class PointSourceProxy(GenericSourceProxy):
     Create new ray object with origin and direction given in global coordinates,
     if focal length is infinite, theta parameter is treated as radius.
     '''
-    gpM, gpMi, opticalAxis, orthoAxis, sourceOrigin = self._makeRayCache(obj)
+    gpM, gpMi, pM, pMi = self._getCoordinateTransformMatricesWithoutLinks(obj)
+
+    # setup a few standard vectors in local coordinates
+    opticalAxis = Vector(0,0,1)
+    orthoAxis = Vector(1,0,0)
+    sourceOrigin = Vector(0,0,0)
 
     # normal point source with finite focal length
     if isfinite(float(obj.FocalLength)):
@@ -439,7 +451,8 @@ class PointSourceProxy(GenericSourceProxy):
     rayMetadata.update(metadata)
 
     # return actual ray object
-    return ray.Ray(obj, gorigin, gdirection, wavelength=obj.Wavelength, 
+    return ray.Ray(obj, gorigin, gdirection, wavelength=
+                   cachedProperty(obj, 'Wavelength'), 
                    initPower=power, metadata=rayMetadata)
 
 
