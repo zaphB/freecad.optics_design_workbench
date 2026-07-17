@@ -1430,6 +1430,10 @@ class RawFolder:
       else:
         raise ValueError(f'invalid tree node {_node}')
 
+  def loadGlobalInfo(self):
+    with open(self._path+'/global-info.pkl', 'rb') as _f:
+      return io.unpickle(_f)
+
   def loadHits(self, pattern='*'):
     return hits.Hits(self._load(pattern=pattern, kind='hits'))
 

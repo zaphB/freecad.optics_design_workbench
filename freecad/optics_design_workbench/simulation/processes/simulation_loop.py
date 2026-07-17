@@ -359,6 +359,15 @@ def runSimulation(action, slaveInfo={}):
       # connect progress window to this store if more than one iteration is requested
       if isMasterProcess() and continuous and gui_windows:
         gui_windows.showProgressWindow(store)
+      
+      # let master process dump the global info once (transformation matrices etc)
+      if isMasterProcess():
+        # TODO: remove try except when function seems stable enough
+        try:
+          store.dumpGlobalInfo( freecad_elements.collectGlobalInfo() )
+        except Exception:
+          io.warn('failed to dump gobal info:')
+          io.warn(traceback.format_exc())
 
     ##########################################################################################
     # do pre-worker launched init and post-worker launched init of each light source

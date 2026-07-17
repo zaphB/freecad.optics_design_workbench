@@ -20,7 +20,6 @@ import shutil
 from atomicwrites import atomic_write
 import glob
 
-from .. import freecad_elements
 from .. import io
 from . import processes
 
@@ -31,15 +30,17 @@ _README_TEXT = '''
 
 This folder contains simulation results, analysis and optimizer notebooks
 interacting with the Optics Design Workbench. Feel free to edit this readme
-document your optics design project. If this readme is deleted, it will
-be restored with its default content on the next simulation run.
+document to describe your optics design project. If this readme is deleted, 
+it will be restored with its default content on the next simulation run.
 
 Subfolders raw/simulation-run-xyz will be created on each simulation run
 and contain the raw ray and hit information recorded during ray tracing. 
 
-The subfolder notebooks/ contains all jupyter notebooks used to visualize,
-analyze the results and to perform sweeps and optimizations of geometry
-parameters.
+The subfolder notebooks/ is a good place to store all your jupyter 
+notebooks used to visualize, analyze the results and to perform sweeps and
+optimizations of geometry parameters. Notebooks and scripts placed in this
+folder can use jupyter_utils.FreecadDocument() without passing a file name
+and autodetect the FCStd file path belonging to this .OpticsDesign folder.
 
 The optics_design_workbench.log logfile will accumulate logging messages
 generated during the ray tracing for debugging purposes.
@@ -323,6 +324,11 @@ class SimulationResults:
     if not os.path.exists(self.basePath+'/README.md'):
       with atomic_write(self.basePath+'/README.md', mode='w') as f:
         f.write(_README_TEXT)
+
+  def dumpGlobalInfo(self, info):
+    with atomic_write(f'{self.basePath}/{self.simulationRunFolder}/global-info.pkl',
+                      mode='wb', overwrite=False) as f:
+      pickle.dump(info, f)
 
   def _raiseIfCleanedUp(self):
     if self._cleanedUp:

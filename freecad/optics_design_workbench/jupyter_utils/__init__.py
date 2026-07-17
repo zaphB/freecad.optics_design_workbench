@@ -13,6 +13,7 @@ from .progress import *
 from .hits import *
 from .histogram import *
 from .parameter_sweeper import *
+from .transforms import *
 
 # import a few useful toplevel modules too
 from .. import timing

@@ -66,9 +66,19 @@ def lightSources():
       yield obj
 
 
-def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
+def opticalObjects(lightSource=None, sequenceIndex=None):
   '''
   yield all optical objects in project
+  '''
+  for obj in _allObjects():
+    if ( obj.TypeId == 'App::LinkGroupPython'
+          and isinstance(obj.Proxy, optical_group.OpticalGroupProxy) ):
+      yield obj
+
+
+def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
+  '''
+  yield all optical objects in project relevant for ray tracing at the moment
   '''
   # prepare sequential mode element lists
   sequentialModeEnable = False
@@ -86,15 +96,12 @@ def relevantOpticalObjects(lightSource=None, sequenceIndex=None):
     ignoreList = lightSource.IgnoredOpticalElements
 
   # loop through all objects and yield suitable objects
-  for obj in _allObjects():
-    if ( obj.TypeId == 'App::LinkGroupPython'
-          and isinstance(obj.Proxy, optical_group.OpticalGroupProxy)
-          and obj not in ignoreList
-          and (not sequentialModeEnable
-                or sequenceIndex is None
-                or obj in currentObjectsOfSequence)):
+  for obj in opticalObjects():
+    if ( obj not in ignoreList
+         and (not sequentialModeEnable
+               or sequenceIndex is None
+               or obj in currentObjectsOfSequence)):
       yield obj
-
 
 def simulationSettings():
   '''
