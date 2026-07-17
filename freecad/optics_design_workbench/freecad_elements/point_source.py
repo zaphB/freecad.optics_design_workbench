@@ -223,7 +223,7 @@ class PointSourceProxy(GenericSourceProxy):
                 divergenceAngle = scipy.optimize.bisect(sy.lambdify('theta', expr - maxPower/e), 
                                                         0, self.parsedThetaDomain(obj)[1])
               except Exception:
-                io.warn(f'failed to find 1/e angle in emission power expression {expr} within theta '
+                io.verb(f'failed to find 1/e angle in emission power expression {expr} within theta '
                         f'domain {self.parsedThetaDomain(obj)}, does the power emission decrease for '
                         f'theta>0? is the theta domain large enough?')
                 setattr(obj, 'Divergence', '-')
