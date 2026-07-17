@@ -116,7 +116,7 @@ class SimulationSettingsProxy(GenericFreecadElementProxy):
           obj.WorkerProcessCount = 'num_cpus'
 
         # limit mit to 1
-        if count and count < 1:
+        if count is not None and count < 1:
           obj.WorkerProcessCount = str(1)
         
         # limit count to 10 times cpu count + 10 (which would never make any sense)

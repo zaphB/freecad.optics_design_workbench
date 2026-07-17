@@ -166,6 +166,13 @@ def isRunning( attemptCleanup=True ):
       # assume the process died
       i += 1
       if i%20==1:
+
+        # check two regular criteria first before going on with cleanup attempt
+        if not _queryStatus('simulation-is-running'):
+          return False
+        if not isCanceled() or isWorkerRunning():
+          return True
+
         canceledAt = os.stat(_statusFilePath('simulation-is-canceled')).st_mtime
         if time.time()-canceledAt > _ASSUME_DEAD_TIMEOUT:
           io.warn(f'simulation was canceled {time.time()-canceledAt:.0f}s ago but '

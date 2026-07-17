@@ -14,6 +14,7 @@ import threading
 import time
 import os
 import traceback
+import functools
 
 from .. import io
 
@@ -167,10 +168,14 @@ class _ProgressTacker:
       # return whether something was printed or not
       return printedSomething
 
+  @functools.cache
+  def _isRunningFromVsCode(self):
+    return any([k in os.environ for k in 'VSCODE_PID VSCODE_CWD TERM_PROGRAM'.split()])
+
   def updateLoop(self):
     while self._isRunning:
       self.update()
-      time.sleep(1/3)
+      time.sleep(1/3 if not self._isRunningFromVsCode() else 3)
     if self.update(displayTiming=False):
       print(f'simulations ended after {io.secondsToStr(time.time()-self._t0)}')
 
