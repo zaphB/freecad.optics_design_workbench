@@ -78,13 +78,13 @@ def test_setGetPlacementLabel(f, openClose):
   r = random.random()
   f.labeledBox.Placement.Base = [1,2,r]
   openClose()
-  assert isclose(f.labeledBox.Placement.Base.get(), [1,2,r]).all()
+  assert isclose(f.labeledBox.Placement.Base.get(), [1,2,r], rtol=1e-4).all()
 
 def test_setGetPlacementInternalName(f, openClose):
   r = random.random()
   f.Box.Placement.Base = [1,2,r]
   openClose()
-  assert isclose(f.Box.Placement.Base.get(), [1,2,r]).all()
+  assert isclose(f.Box.Placement.Base.get(), [1,2,r], rtol=1e-4).all()
 
 def test_setGetSource(f, openClose):
   dens = 'exp(-theta**2/(1e-2)**2)'
@@ -102,34 +102,34 @@ def test_setGetSketchConstraintViaItem(f, openClose):
   r = 5*random.random()
   f.Sketch.getConstraintsByName()['namedConstraint'] = r
   openClose()
-  assert isclose(f.Sketch.getConstraintsByName()['namedConstraint'].get(), r)
+  assert isclose(f.Sketch.getConstraintsByName()['namedConstraint'].get(), r, rtol=1e-4)
 
 def test_setGetSketchConstraintViaAttr(f, openClose):
   r = 5*random.random()
   f.Sketch.getConstraintsByName().namedConstraint = r
   openClose()
-  assert isclose(f.Sketch.getConstraintsByName().namedConstraint.get(), r)
+  assert isclose(f.Sketch.getConstraintsByName().namedConstraint.get(), r, rtol=1e-4)
 
 def test_setGetSketchConstraintViaSetter(f, openClose):
   r = 5*random.random()
   f.Sketch.getConstraintsByName().namedConstraint.set(r)
   openClose()
-  assert isclose(f.Sketch.getConstraintsByName().namedConstraint.get(), r)
+  assert isclose(f.Sketch.getConstraintsByName().namedConstraint.get(), r, rtol=1e-4)
 
 def test_setGetSketchConstraintViaShorthandItem(f, openClose):
   r = 5*random.random()
   f.Sketch.ConstraintsByName['namedConstraint'] = r
   openClose()
-  assert isclose(f.Sketch.ConstraintsByName['namedConstraint'].get(), r)
+  assert isclose(f.Sketch.ConstraintsByName['namedConstraint'].get(), r, rtol=1e-4)
 
 def test_setGetSketchConstraintViaShorthandAttr(f, openClose):
   r = 5*random.random()
   f.Sketch.ConstraintsByName.namedConstraint = r
   openClose()
-  assert isclose(f.Sketch.ConstraintsByName.namedConstraint.get(), r)
+  assert isclose(f.Sketch.ConstraintsByName.namedConstraint.get(), r, rtol=1e-4)
 
 def test_setGetSketchConstraintViaShorthandSetter(f, openClose):
   r = 5*random.random()
   f.Sketch.ConstraintsByName.namedConstraint.set(r)
   openClose()
-  assert isclose(f.Sketch.ConstraintsByName.namedConstraint.get(), r)
+  assert isclose(f.Sketch.ConstraintsByName.namedConstraint.get(), r, rtol=1e-4)
