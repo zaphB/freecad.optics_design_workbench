@@ -62,7 +62,7 @@ _TRACEMALLOC_INTERVAL = inf
 _RESULT_CHUNKING_INTERVAL = 50*60
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
-_BACKGROUND_PROCESSES = []
+_WORKER_PROCESSES = []
 _ASSUME_DEAD_TIMEOUT = 15
 
 # process info
@@ -119,9 +119,37 @@ def unsetJupyterMaster():
   io.unregisterJupyterLogDir()
 
 def isWorkerRunning():
-  #print(isCanceled(), [w.isRunning() for w in _BACKGROUND_PROCESSES])
-  _BACKGROUND_PROCESSES[:] = [w for w in _BACKGROUND_PROCESSES if w.isRunning()]
-  return len(_BACKGROUND_PROCESSES)
+  for w in _WORKER_PROCESSES:
+    if not w.isRunning():
+      io.verb(f'worker {w} exited, clearing it from list')
+  _WORKER_PROCESSES[:] = [w for w in _WORKER_PROCESSES if w.isRunning()]
+  return len(_WORKER_PROCESSES)
+
+def isWorkerBusy():
+  return len([w for w in _WORKER_PROCESSES if w.isBusy()])
+
+def ensureWorkerCount(workerCount):
+  missingWorkers = (workerCount - isWorkerRunning())
+  if missingWorkers > 0:
+    io.verb(f'require {workerCount} worker processes but only {isWorkerRunning()} are alive '
+            f'-> launching {missingWorkers} workers')
+    for _ in range(missingWorkers):
+      _WORKER_PROCESSES.append(worker_process.WorkerProcess())
+  elif workerCount != isWorkerRunning():
+    io.verb(f'require {workerCount} worker processes, {isWorkerRunning()} are already alive')
+
+def cleanupUnneededWorkers():
+  for w in _WORKER_PROCESSES:
+    if time.time()-w.wasLastBusy > 10*60:
+      _t0 = time.time()
+      while w.isRunning():
+        if time.time()-_t0 < 5:
+          worker.quit()
+        elif time.time()-_t0 < 10:
+          worker.terminate()
+        else:
+          worker.kill()
+        time.sleep(1e-2)
 
 def simulatingDocument():
   if _SIMULATING_DOCUMENT is not None:
@@ -152,7 +180,7 @@ def isRunning( attemptCleanup=True ):
 
   # if is canceled file does not exist or a running
   # worker is known to us, assume we are still running
-  if not isCanceled() or isWorkerRunning():
+  if not isCanceled() or isWorkerBusy():
     return True
 
   # try to resolve inconsistent flag file stats after ungently killed simulations
@@ -170,7 +198,7 @@ def isRunning( attemptCleanup=True ):
         # check two regular criteria first before going on with cleanup attempt
         if not _queryStatus('simulation-is-running'):
           return False
-        if not isCanceled() or isWorkerRunning():
+        if not isCanceled() or isWorkerBusy():
           return True
 
         canceledAt = os.stat(_statusFilePath('simulation-is-canceled')).st_mtime
@@ -292,7 +320,7 @@ def runSimulation(action, slaveInfo={}):
     # slaves expect simulation running state
     else:
       if not isRunning():
-        raise RuntimeError('slave was launched but no simulation seems to be running')
+        raise RuntimeError('slave simulation task was launched but no simulation seems to be running')
         
     # determine simulation mode
     mode = action
@@ -403,11 +431,44 @@ def runSimulation(action, slaveInfo={}):
       else:
         io.verb(f'skip saving document {App.GuiUp=}')
 
-      # actually launch workers
-      for _ in range(backgroundWorkers):
-        _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
-                                                simulationRunFolder=simulationRunFolder))
+      # make sure enough workers are alive
+      ensureWorkerCount(backgroundWorkers)
+
+      # make workers start their work
+      for i in range(backgroundWorkers):
+        _WORKER_PROCESSES[i].startSimulation(simulationType=mode, 
+                                             simulationRunFolder=simulationRunFolder)
         freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
+
+    # define function to ensure appropriate number of worker processes are busy
+    def ensureWorkersAreBusy():
+      # kill and restart workers after they reach their end-of-life that to 
+      # circumvent memory leaks
+      for worker in _WORKER_PROCESSES:
+        if time.time() > worker.endOfLife:
+          io.verb(f'killing worker {worker} that reached end of life...')
+          _t0 = time.time()
+          while worker.isRunning():
+            if time.time()-_t0 < 7:
+              worker.quit()
+            elif time.time()-_t0 < 10:
+              worker.terminate()
+            else:
+              worker.kill()
+          break
+
+      # ensure expected number of workers are busy
+      ensureWorkerCount(backgroundWorkers)
+      for i in range(backgroundWorkers):
+        if not (p:=_WORKER_PROCESSES[i]).isBusy():
+          # make sure to avoid starting work in un-busy workers if simulation is done
+          # (minUpdateInteval to zero to enforce checking if simulation is done right now)
+          freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone(minUpdateInterval=0)
+
+          # let worker start simulation job
+          io.verb(f'found worker #{p.index} not busy, starting simulation on this worker...')
+          p.startSimulation(simulationType=mode, 
+                            simulationRunFolder=simulationRunFolder)
 
     # doing post-worker-launch init
     io.verb(f'doing post-worker-launch init of all components...')
@@ -418,7 +479,7 @@ def runSimulation(action, slaveInfo={}):
     # report to shell that simulation starts
     if isMasterProcess():
       io.info(f'starting simulation {mode=}, {store=}, {draw=}, {workers=}, {continuous=}')
-
+    
     ##########################################################################################
     # mainloop A: run actual simulation work if we are a background worker or the master
     #             with draw=True
@@ -486,29 +547,12 @@ def runSimulation(action, slaveInfo={}):
               lastResultChunking = time.time()
               store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
 
-            # kill and restart workers after they reach their end-of-life that to 
-            # circumvent memory leaks
-            for worker in _BACKGROUND_PROCESSES:
-              if time.time() > worker.endOfLife:
-                io.verb(f'killing worker {worker} that reached end of life...')
-                _t0 = time.time()
-                while worker.isRunning():
-                  if time.time()-_t0 < 7:
-                    worker.quit()
-                  elif time.time()-_t0 < 10:
-                    worker.terminate()
-                  else:
-                    worker.kill()
-                break
-
-            # start new worker after old one was killed
-            while isWorkerRunning() < backgroundWorkers:
-              _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
-                                                      simulationRunFolder=simulationRunFolder))
+            # kill workers beyond their lifetime, restart died workers, etc
+            ensureWorkersAreBusy()
 
         # keep GUI responsive and limit loop speed
         time.sleep(1e-2)
-        freecad_elements.keepGuiResponsive()
+        freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
         if not continuous:
@@ -538,25 +582,12 @@ def runSimulation(action, slaveInfo={}):
           lastResultChunking = time.time()
           store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
 
-        # kill and restart workers after they reach their end-of-life that to 
-        # circumvent memory leaks
-        for worker in _BACKGROUND_PROCESSES:
-          if time.time() > worker.endOfLife:
-            io.verb(f'killing worker {worker} that reached end of life...')
-            _t0 = time.time()
-            while worker.isRunning():
-              if time.time()-_t0 < 7:
-                w.quit()
-              elif time.time()-_t0 < 10:
-                w.terminate()
-              else:
-                w.kill()
-            break
-
-        # start new worker after old one was killed
-        while isWorkerRunning() < backgroundWorkers:
-          _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
-                                                  simulationRunFolder=simulationRunFolder))
+        # kill workers beyond their lifetime, restart died workers, etc
+        # (make sure not to raise SimulationEnded exception because this is running in a timer)
+        try:
+          ensureWorkersAreBusy()
+        except Exception:
+          pass
 
       # stop if canceled or done
       if isFinished():
@@ -573,7 +604,7 @@ def runSimulation(action, slaveInfo={}):
 
     # this busy-loop makes the timer useless, but it is needed because cleanup is done in
     # the finally block. Maybe restructure this in the future to improve GUI responsiveness
-    while isWorkerRunning():
+    while isWorkerBusy():
       time.sleep(1e-2)
       freecad_elements.keepGuiResponsive()
 
@@ -609,26 +640,14 @@ def runSimulation(action, slaveInfo={}):
       # wait for workers to finish
       _t0 = time.time()
       lastPrint = time.time()
-      while isWorkerRunning():
-
-        # keep GUI responsive and limit loop speed
-        time.sleep(1e-2)
-        freecad_elements.keepGuiResponsive()
-
-        # quit/kill worker processes if they take too long
-        if time.time()-_t0 > 3:
-          for w in _BACKGROUND_PROCESSES:
-            if time.time()-_t0 < 7:
-              w.quit()
-            elif time.time()-_t0 < 10:
-              w.terminate()
-            else:
-              w.kill()
-
+      while _busyCount:=isWorkerBusy():
         # report progress
         if time.time()-lastPrint > 3:
-          io.info(f'waiting for {len(_BACKGROUND_PROCESSES)} worker processes to finish...')
+          io.info(f'waiting for {_busyCount} worker processes to finish...')
           lastPrint = time.time()
+
+      # check which workers have not been used in a long time
+      cleanupUnneededWorkers()
 
       # make sure all logfiles of worker processes are collected and merged into main log
       io.gatherSlaveFiles()

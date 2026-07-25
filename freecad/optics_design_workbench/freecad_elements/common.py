@@ -170,8 +170,8 @@ def keepGuiResponsive(raiseIfSimulationDone=False, minUpdateInterval=1/100):
     if raiseIfSimulationDone and (simulation.isCanceled() or simulation.isFinished()):
       raise SimulationEnded()
       
-def keepGuiResponsiveAndRaiseIfSimulationDone():
-  keepGuiResponsive(raiseIfSimulationDone=True)
+def keepGuiResponsiveAndRaiseIfSimulationDone(**kwargs):
+  keepGuiResponsive(**kwargs, raiseIfSimulationDone=True)
 
 
 ###################################################################################

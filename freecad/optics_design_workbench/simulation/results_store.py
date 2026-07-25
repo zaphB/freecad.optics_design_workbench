@@ -183,12 +183,17 @@ def findPathsAndSanitize(basePath, pattern, kind, optimalFilesize=500e6,
 
 def _getFolderBase():
   # check whether current file is saved
-  if not processes.simulatingDocument() or not processes.simulatingDocument().getFileName():
+  fname = None
+  try:
+    fname = processes.simulatingDocument().getFileName()
+  except Exception:
+    pass
+  if not fname:
     raise RuntimeError('cannot start simulation because no active document '
                        'or active document is not yet saved')
 
   # generate paths
-  base, fname = os.path.split(os.path.realpath(processes.simulatingDocument().getFileName()))
+  base, fname = os.path.split(os.path.realpath(fname))
   if fname.lower().endswith('.fcstd'):
     fname = fname[:-6]
   folderName = f'{fname}.OpticsDesign'
@@ -292,7 +297,7 @@ class SimulationResults:
     except Exception:
       raise RuntimeError(f'it seems simulation result path is not writable: {_path}')
 
-    # set limitss
+    # set limits
     self.endAfterIterations = endAfterIterations
     self.endAfterRays = endAfterRays
     self.endAfterHits = endAfterHits
