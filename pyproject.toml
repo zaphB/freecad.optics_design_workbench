@@ -60,7 +60,7 @@ dev = [
 docs = [
   "sphinx",
   "numpydoc",
-  "sphinx-rtd-theme",
+  "pydata-sphinx-theme",
 ]
 
 [tool.pytest.ini_options]
