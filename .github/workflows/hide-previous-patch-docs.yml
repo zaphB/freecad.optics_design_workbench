@@ -1,0 +1,59 @@
+name: Hide previous patch docs on RTD
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  hide-previous-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine version info
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "major_minor=${MAJOR}.${MINOR}" >> "$GITHUB_OUTPUT"
+
+      - name: Hide previous patch versions on Read the Docs
+        env:
+          RTD_TOKEN: ${{ secrets.RTD_API_TOKEN }}
+          RTD_PROJECT: optics_design_workbench
+          MAJOR_MINOR: ${{ steps.version.outputs.major_minor }}
+          CURRENT_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          echo "Suche aktive Tag-Versionen fuer v${MAJOR_MINOR}.*, ausser ${CURRENT_TAG}"
+
+          PAGE_URL="https://readthedocs.org/api/v3/projects/${RTD_PROJECT}/versions/?active=true&page_size=100"
+
+          while [ -n "$PAGE_URL" ] && [ "$PAGE_URL" != "null" ]; do
+            RESPONSE=$(curl -s -H "Authorization: Token ${RTD_TOKEN}" "$PAGE_URL")
+
+            echo "$RESPONSE" | jq -c '.results[]' | while read -r VERSION_JSON; do
+              SLUG=$(echo "$VERSION_JSON" | jq -r '.slug')
+              VERTYPE=$(echo "$VERSION_JSON" | jq -r '.type')
+
+              # Nur Tags beruecksichtigen, nicht z.B. den 'latest'-Branch
+              if [ "$VERTYPE" != "tag" ]; then
+                continue
+              fi
+
+              # Muster: v<MAJOR>.<MINOR>.<PATCH>, z.B. v1.2.3
+              if [[ "$SLUG" == v${MAJOR_MINOR}.* ]] && [ "$SLUG" != "$CURRENT_TAG" ]; then
+                echo "Verstecke alte Version: $SLUG"
+                curl -s -X PATCH \
+                  -H "Authorization: Token ${RTD_TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -d '{"hidden": true}' \
+                  "https://readthedocs.org/api/v3/projects/${RTD_PROJECT}/versions/${SLUG}/" > /dev/null
+              fi
+            done
+
+            PAGE_URL=$(echo "$RESPONSE" | jq -r '.next')
+          done
