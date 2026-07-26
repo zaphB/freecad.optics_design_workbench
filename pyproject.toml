@@ -50,13 +50,17 @@ Repository = "https://github.com/zaphB/freecad.optics_design_workbench.git"
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3.4",
-    "pytest-monitor",
-    "pytest-sugar",
-    "psutil",
-    "sphinx",
-    "numpydoc",
-    "sphinx-rtd-theme",  
+  "pytest>=8.3.4",
+  "pytest-monitor",
+  "pytest-sugar",
+  "psutil",
+]
+
+[project.optional-dependencies]
+docs = [
+  "sphinx",
+  "numpydoc",
+  "sphinx-rtd-theme",
 ]
 
 [tool.pytest.ini_options]
