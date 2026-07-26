@@ -37,7 +37,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 html_theme = 'pydata_sphinx_theme'
 html_theme_options = {
-  'github_url': 'https://github.com/zaphB/optics_design_workbench',
+  'github_url': 'https://github.com/zaphB/freecad.optics_design_workbench',
   'show_prev_next': False,
   'navigation_with_keys': True,
 }
