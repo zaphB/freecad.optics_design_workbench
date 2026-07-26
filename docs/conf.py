@@ -28,7 +28,12 @@ extensions = [
 
 numpydoc_show_class_members = False  # verhindert doppelte Attribut-Listen
 autosummary_generate = True
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'pydata_sphinx_theme'
+html_theme_options = {
+  'github_url': 'https://github.com/zaphB/optics_design_workbench',
+  'show_prev_next': False,
+  'navigation_with_keys': True,
+}
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
