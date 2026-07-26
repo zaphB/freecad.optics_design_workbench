@@ -451,8 +451,8 @@ class PointSourceProxy(GenericSourceProxy):
     rayMetadata.update(metadata)
 
     # return actual ray object
-    return ray.Ray(obj, gorigin, gdirection, wavelength=
-                   cachedProperty(obj, 'Wavelength'), 
+    return ray.Ray(obj, gorigin, gdirection, 
+                   wavelength=cachedProperty(obj, 'Wavelength'), 
                    initPower=power, metadata=rayMetadata)
 
 

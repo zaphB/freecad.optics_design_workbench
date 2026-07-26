@@ -31,11 +31,14 @@ class WorkerProcess:
   simulation type is going on and which result folder to use and will run the 
   simulation_loop on its own.
   '''
-  def __init__(self):
+  def __init__(self, isJupyterContext):
     # set index for worker process for easy identification in cli logs
     global _WORKER_INDEX, _LAST_PRINTED_EXECUTABLE_PATH
     self.index = _WORKER_INDEX
     _WORKER_INDEX += 1
+
+    # store flag whether this worker was created in a jupyter context
+    self.isJupyterContext = isJupyterContext
 
     # schedule end of life to circumvent FreeCAD memory leaks, schedule random
     # random lifetime to avoid synchronously killing and restarting all workers
@@ -143,8 +146,9 @@ class WorkerProcess:
                f'for doc in App.listDocuments():\r\n'
                f'  App.closeDocument(doc)'+'\r\n'*3+
                f'App.openDocument({repr(self.simulationFilePath)})\r\n'
-               f'import freecad.optics_design_workbench.simulation\r\n'
-               f'freecad.optics_design_workbench.simulation.runSimulation('
+               f'from freecad.optics_design_workbench import simulation\r\n'
+               f'simulation.setIsJupyterContext({repr(self.isJupyterContext)})\r\n'
+               f'simulation.runSimulation('
                       f'action={repr(self.simulationType)}, '
                       f'slaveInfo=dict(simulationRunFolder={repr(self.simulationRunFolder)}, '
                       f'               parentPid={os.getpid()}))\r\n'

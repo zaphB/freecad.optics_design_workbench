@@ -658,6 +658,12 @@ class SimulationResults:
     except Exception:
       io.warn(f'failed to cleanup progress monitoring path at "{self.progressMonitorPath()}"')
 
+    # remove init conditions tree
+    #try:
+    #  shutil.rmtree(f'{self.basePath}/{self.simulationRunFolder}/initialConditions')
+    #except Exception:
+    #  io.warn(f'failed to cleanup initial condition file path at "{self.progressMonitorPath()}"')
+
     # mark as done
     self._cleanedUp = True
 
@@ -666,3 +672,67 @@ class SimulationResults:
     kwargs['pattern'] = '**'
     kwargs['kind'] = '*'
     findPathsAndSanitize(**kwargs)
+
+
+  # initial condition file api
+
+  def listInitialConditions(self):
+    if not os.path.exists(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/available/'):
+      return False
+    return [f for f in os.listdir(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/available/')
+                                                                if all([c in '0123456789abcdef' for c in f]) ]
+
+  def dumpInitialConditions(self, initialConditions):
+    # ensure folder exist
+    os.makedirs(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/available', exist_ok=True)
+    os.makedirs(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/data', exist_ok=True)
+    # dump available and data files
+    uid = str(hex(int(random.random()*1e15)))[2:]
+    # dump actual data
+    with atomic_write(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/data/{uid}', 
+                      mode='wb', overwrite=True) as f:
+      pickle.dump(initialConditions, f)
+    # create empty available file
+    with atomic_write(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/available/{uid}',
+                      mode='w', overwrite=True) as f:
+      pass
+
+  def consumeInitialCondition(self, timeout=600):
+    t0 = time.time()
+    nothingAvailableSince = None
+    while True:
+      allAvailable = self.listInitialConditions()
+      # False -> not yet ready, wait a little and retry
+      if allAvailable is False:
+        if time.time()-t0 > timeout:
+          raise RuntimeError(f'waiting for initial condition files to appear timed out')
+        time.sleep(1/10)
+        continue
+      # empty list for more than few seconds -> we are done      
+      if not len(allAvailable):
+        if nothingAvailableSince is None:
+          nothingAvailableSince = time.time()
+        if time.time()-nothingAvailableSince > 1:
+          return None
+        time.sleep(1/10)
+        continue
+      else:
+        nothingAvailableSince = None
+
+      # non empty list: pick random
+      available = random.choice(allAvailable)
+
+      # try to delete file
+      try:
+        os.remove(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/available/{available}')
+      except Exception:
+        pass
+      
+      # delete succeeded -> the initial condition data file with the same name is ours and we can 
+      #                     safely open, read, unpickle and delete it
+      else:
+        try:
+          with open(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/data/{available}', 'rb') as _f:
+            return io.unpickle(_f)
+        finally:
+          os.remove(f'{self.basePath}/{self.simulationRunFolder}/initialConditions/data/{available}')
