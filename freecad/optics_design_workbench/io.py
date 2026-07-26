@@ -60,8 +60,8 @@ def _init(forceReInit=False):
   global _IS_INIT, _LOG_DIR
 
   if forceReInit or os.path.realpath(_LOG_DIR or '') != os.path.realpath(_getLogDir() or ''):
-    # isMasterProcess() returns None => situation is unclear so far, do not open log
-    if processes.isMasterProcess() is None:
+    # isMasterProcess() or _getLogDir return None => situation is unclear so far, do not open log
+    if processes.isMasterProcess() is None or _getLogDir() is None:
       return
 
     # isMasterProcess() returns True => we are the master process => open master log

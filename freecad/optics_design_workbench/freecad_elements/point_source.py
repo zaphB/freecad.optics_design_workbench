@@ -451,8 +451,8 @@ class PointSourceProxy(GenericSourceProxy):
     rayMetadata.update(metadata)
 
     # return actual ray object
-    return ray.Ray(obj, gorigin, gdirection, wavelength=
-                   cachedProperty(obj, 'Wavelength'), 
+    return ray.Ray(obj, gorigin, gdirection, 
+                   wavelength=cachedProperty(obj, 'Wavelength'), 
                    initPower=power, metadata=rayMetadata)
 
 
@@ -524,7 +524,7 @@ class PointSourceProxy(GenericSourceProxy):
           phiB = nan
         else:
           phiB = _phiCandidates[argmin(abs(phiA+pi - _phiCandidates))]
-        print(f'{phiA=}, {phiB=}, {phiL1=}, {phiL2=}')
+        #print(f'{phiA=}, {phiB=}, {phiL1=}, {phiL2=}')
 
         # generate the required thetas (radii) to place rays depending on the fanMode (see long
         # comment above for fanModes)

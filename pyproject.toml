@@ -30,6 +30,8 @@ dependencies = [
   "atomicwrites",
   "cloudpickle",
   "PySide6",
+  "jupyter",
+  "ipykernel",
   "jupyterlab", # <- jupyter lab ist just here because we usually want to work with jupyter, not because it is strictly necessary to use the package
 ]
 
@@ -51,9 +53,10 @@ dev = [
     "pytest>=8.3.4",
     "pytest-monitor",
     "pytest-sugar",
-    "jupyter",
-    "ipykernel",
     "psutil",
+    "sphinx",
+    "numpydoc",
+    "sphinx-rtd-theme",  
 ]
 
 [tool.pytest.ini_options]

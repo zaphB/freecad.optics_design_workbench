@@ -28,5 +28,9 @@ tmp
 raw
 .pymon
 
+# exclude generated docs
+docs/_build
+docs/api
+
 # include screenshots in examples
 !examples/**/*.png

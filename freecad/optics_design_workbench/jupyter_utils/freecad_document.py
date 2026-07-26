@@ -670,14 +670,6 @@ class FreecadDocument:
 
         # check plausibility of result
         if len(newFolders) == 0 and not allowEmpty:
-
-          # no new folder appeared, show different exception texts depending on 
-          # fans/single or if error output occurred
-          if action == 'fans' or 'single' in action:
-            raise RuntimeError(f'no new results folder was created during {action} '
-                              f'simulation, did you enable "Enable Store Single Shot '
-                              f'Data" in the active Simulation Settings?'
-                              +self._errorOutText())
           raise RuntimeError(f'no new results folder was created during {action} '
                              f'simulation, is another simulation running? '
                              f'{self._path=}, {self._resultsPath=}'
@@ -694,7 +686,8 @@ class FreecadDocument:
 
       # write command
       self.writeToFreecadShell(f'from freecad.optics_design_workbench import simulation',
-                              f'simulation.runSimulation(action="{action}")')
+                               f'simulation.setIsJupyterContext(True)',
+                               f'simulation.runSimulation(action={repr(action)})')
 
       # start progress tracker background thread
       progressTracker = progress.progressTrackerInstance(doc=self)
@@ -766,6 +759,9 @@ class FreecadDocument:
     # let jupyter become master again after simulation is done
     finally:
       simulation.jupyterBecomeMaster()
+
+      # undo simulation settings overwrite
+
 
   ###########################################################################
   # LAUNCH LOGIC

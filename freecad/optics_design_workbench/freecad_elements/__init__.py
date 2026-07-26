@@ -71,7 +71,7 @@ def collectGlobalInfo():
 
   # helper to bundle properties and transforms to one dict
   def objToDict(obj, ignoreLinks=False):
-    print(obj)
+    #print(obj)
     properties = objPropertiesToDict(obj)
     placementPaths = [p for _, p in allPlacementsAndPaths(obj, ignoreLinks=ignoreLinks)]
     matrices = [[matrixToArray(m) for m in M] 

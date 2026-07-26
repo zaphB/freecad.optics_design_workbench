@@ -60,21 +60,29 @@ except Exception:
 _TRACEMALLOC_INTERVAL = inf
 
 _RESULT_CHUNKING_INTERVAL = 50*60
+_IS_JUPYTER_CONTEXT = False
 _IS_MASTER_PROCESS = None
 _SIMULATING_DOCUMENT = None
-_BACKGROUND_PROCESSES = []
+_WORKER_PROCESSES = []
 _ASSUME_DEAD_TIMEOUT = 15
 
-# process info
+
+#########################################################################################
+# logic to set/unset jupyter master/slave states
+
 def isMasterProcess():
   return _IS_MASTER_PROCESS
+
+def setIsJupyterContext(state):
+  global _IS_JUPYTER_CONTEXT
+  _IS_JUPYTER_CONTEXT = state
 
 def setupJupyterMaster(path):
   '''
   Call this with a path to a FCStd file or results folder to make multiprocessing
   logic aware that this process is a jupyter process. 
   '''
-  global _IS_MASTER_PROCESS
+  global _IS_MASTER_PROCESS, _IS_JUPYTER_CONTEXT
   _IS_MASTER_PROCESS = True
   # complain if already registered
   if io.isRegisteredJupyter():
@@ -84,6 +92,7 @@ def setupJupyterMaster(path):
   if path.endswith('.FCStd'):
     path = path[:-6]+'.OpticsDesign'
   io.registerJupyterLogDir(path)
+  _IS_JUPYTER_CONTEXT = True
 
 def jupyterBecomeSlave():
   '''
@@ -114,21 +123,54 @@ def unsetJupyterMaster():
   Call this to reset the role of this process for multiprocessing logic 
   to 'unknown'.
   '''
-  global _IS_MASTER_PROCESS
+  global _IS_MASTER_PROCESS, _IS_JUPYTER_CONTEXT
   _IS_MASTER_PROCESS = None
+  _IS_JUPYTER_CONTEXT = False
   io.unregisterJupyterLogDir()
 
+
+#########################################################################################
+# logic to find out which worker processes are running/busy and in which the current
+# simulation is at the moment
+
 def isWorkerRunning():
-  #print(isCanceled(), [w.isRunning() for w in _BACKGROUND_PROCESSES])
-  _BACKGROUND_PROCESSES[:] = [w for w in _BACKGROUND_PROCESSES if w.isRunning()]
-  return len(_BACKGROUND_PROCESSES)
+  for w in _WORKER_PROCESSES:
+    if not w.isRunning():
+      io.verb(f'worker {w} exited, clearing it from list')
+  _WORKER_PROCESSES[:] = [w for w in _WORKER_PROCESSES if w.isRunning()]
+  return len(_WORKER_PROCESSES)
+
+def isWorkerBusy():
+  return len([w for w in _WORKER_PROCESSES if w.isBusy()])
+
+def ensureWorkerCount(workerCount):
+  missingWorkers = (workerCount - isWorkerRunning())
+  if missingWorkers > 0:
+    io.verb(f'require {workerCount} worker processes but only {isWorkerRunning()} are alive '
+            f'-> launching {missingWorkers} workers')
+    for _ in range(missingWorkers):
+      _WORKER_PROCESSES.append(worker_process.WorkerProcess(isJupyterContext=_IS_JUPYTER_CONTEXT))
+  elif workerCount != isWorkerRunning():
+    io.verb(f'require {workerCount} worker processes, {isWorkerRunning()} are already alive')
+
+def cleanupUnneededWorkers():
+  for w in _WORKER_PROCESSES:
+    if time.time()-w.wasLastBusy > 10*60:
+      _t0 = time.time()
+      while w.isRunning():
+        if time.time()-_t0 < 5:
+          worker.quit()
+        elif time.time()-_t0 < 10:
+          worker.terminate()
+        else:
+          worker.kill()
+        time.sleep(1e-2)
 
 def simulatingDocument():
   if _SIMULATING_DOCUMENT is not None:
     return _SIMULATING_DOCUMENT
   return App.activeDocument()
 
-# status file info/manipulation
 def _statusFilePath(name):
   return f'{results_store.getResultsFolderPath()}/{name}'
 
@@ -152,7 +194,7 @@ def isRunning( attemptCleanup=True ):
 
   # if is canceled file does not exist or a running
   # worker is known to us, assume we are still running
-  if not isCanceled() or isWorkerRunning():
+  if not isCanceled() or isWorkerBusy():
     return True
 
   # try to resolve inconsistent flag file stats after ungently killed simulations
@@ -170,7 +212,7 @@ def isRunning( attemptCleanup=True ):
         # check two regular criteria first before going on with cleanup attempt
         if not _queryStatus('simulation-is-running'):
           return False
-        if not isCanceled() or isWorkerRunning():
+        if not isCanceled() or isWorkerBusy():
           return True
 
         canceledAt = os.stat(_statusFilePath('simulation-is-canceled')).st_mtime
@@ -196,7 +238,6 @@ def isRunning( attemptCleanup=True ):
   
   # return true if none if the above applies  
   return True
-
 
 def setIsRunning(state):
   return _setStatus('simulation-is-running', state)
@@ -227,6 +268,9 @@ def isFinished():
 def setIsFinished(state):
   _setStatus('simulation-is-done', state)
 
+
+#########################################################################################
+# functions that run the actual simulation loops depending on role of the current process
 
 def runAction(action):
   '''
@@ -292,7 +336,7 @@ def runSimulation(action, slaveInfo={}):
     # slaves expect simulation running state
     else:
       if not isRunning():
-        raise RuntimeError('slave was launched but no simulation seems to be running')
+        raise RuntimeError('slave simulation task was launched but no simulation seems to be running')
         
     # determine simulation mode
     mode = action
@@ -302,16 +346,24 @@ def runSimulation(action, slaveInfo={}):
       continuous = False
     if action == 'fans':
       continuous = False
-    
-    # determine whether to store results or not
-    store = False
-    storeSingleShot = False
-    if settings := freecad_elements.find.activeSimulationSettings():
-      storeSingleShot = settings.EnableStoreSingleShotData
-    if action in ('singlepseudo', 'singletrue', 'fans'):
-      store = storeSingleShot
-    if action in ('pseudo', 'true'):
-      store = True  
+
+    # always store if started from a jupyter context
+    if _IS_JUPYTER_CONTEXT:
+      store = True
+    # determine whether to store results or not from the mode and settings
+    if isMasterProcess():
+      store = False
+      storeSingleShot = False
+      if settings := freecad_elements.find.activeSimulationSettings():
+        storeSingleShot = settings.EnableStoreSingleShotData
+      if action in ('singlepseudo', 'singletrue', 'fans'):
+        store = storeSingleShot
+      if action in ('pseudo', 'true'):
+        store = True
+    # always store if we are slave process (slaves will only be started if dumping
+    # results to disks is intended)
+    else:
+      store = True
 
     # determine whether to draw rays or not
     draw = True
@@ -321,14 +373,21 @@ def runSimulation(action, slaveInfo={}):
     if action in ('pseudo', 'true'):
       draw = drawContinuous
 
-    # always disable drawing in slave processes
-    if not isMasterProcess():
+    # always disable drawing in slave processes and when launched from jupyter
+    if not isMasterProcess() or _IS_JUPYTER_CONTEXT:
       draw = False
 
+    # store flag for special cas fan simulation triggered by jupyter
+    isMultiCoreFans = _IS_JUPYTER_CONTEXT and action == 'fans'
+    if isMultiCoreFans:
+      action = 'multicorefans'
+      store = True # <- store has to be created to dump init condition files
+
     # determine number if workers to spawn (single for single shot simulations, 
-    # according to settings for more than one iteration)
+    # according to settings for more than one iteration OR if fan simulation
+    # triggered by jupyter and has to be calculated parallelized)
     workers = 1
-    if continuous:
+    if continuous or isMultiCoreFans:
       workers = cpuCount()
       if settings := freecad_elements.find.activeSimulationSettings():
         if settings.WorkerProcessCount == 'num_cpus':
@@ -345,6 +404,11 @@ def runSimulation(action, slaveInfo={}):
       endAfterIterations = _parse(settings.EndAfterIterations)
       endAfterRays = _parse(settings.EndAfterRays)
       endAfterHits = _parse(settings.EndAfterHits)
+    # disable all cancel conditions in multicore fan mode
+    if action == 'multicorefans':
+      endAfterIterations = inf
+      endAfterRays = inf
+      endAfterHits = inf
 
     # generate simulation run folder name
     simulationRunFolder = slaveInfo.get('simulationRunFolder', 
@@ -403,11 +467,44 @@ def runSimulation(action, slaveInfo={}):
       else:
         io.verb(f'skip saving document {App.GuiUp=}')
 
-      # actually launch workers
-      for _ in range(backgroundWorkers):
-        _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
-                                                simulationRunFolder=simulationRunFolder))
+      # make sure enough workers are alive
+      ensureWorkerCount(backgroundWorkers)
+
+      # make workers start their work
+      for i in range(backgroundWorkers):
+        _WORKER_PROCESSES[i].startSimulation(simulationType=mode, 
+                                             simulationRunFolder=simulationRunFolder)
         freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
+
+    # define function to ensure appropriate number of worker processes are busy
+    def ensureWorkersAreBusy():
+      # kill and restart workers after they reach their end-of-life that to 
+      # circumvent memory leaks
+      for worker in _WORKER_PROCESSES:
+        if time.time() > worker.endOfLife:
+          io.verb(f'killing worker {worker} that reached end of life...')
+          _t0 = time.time()
+          while worker.isRunning():
+            if time.time()-_t0 < 7:
+              worker.quit()
+            elif time.time()-_t0 < 10:
+              worker.terminate()
+            else:
+              worker.kill()
+          break
+
+      # ensure expected number of workers are busy
+      ensureWorkerCount(backgroundWorkers)
+      for i in range(backgroundWorkers):
+        if not (p:=_WORKER_PROCESSES[i]).isBusy():
+          # make sure to avoid starting work in un-busy workers if simulation is done
+          # (minUpdateInteval to zero to enforce checking if simulation is done right now)
+          freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone(minUpdateInterval=0)
+
+          # let worker start simulation job
+          io.verb(f'found worker #{p.index} not busy, starting simulation on this worker...')
+          p.startSimulation(simulationType=mode, 
+                            simulationRunFolder=simulationRunFolder)
 
     # doing post-worker-launch init
     io.verb(f'doing post-worker-launch init of all components...')
@@ -418,6 +515,28 @@ def runSimulation(action, slaveInfo={}):
     # report to shell that simulation starts
     if isMasterProcess():
       io.info(f'starting simulation {mode=}, {store=}, {draw=}, {workers=}, {continuous=}')
+    
+    #
+    # TODO: completely rewrite the simulation mainloop logic: split generation of initial conditions for rays
+    #       and ray tracing. Idea: master generates initial conditions, offers these to clients via zmq and 
+    #       only do the ray tracing. Nothing is shared through files on disk anymore, only via zmq messaging.
+    #       the master process is the only process that dumps results to disk from time to time.
+    #       This will be a huge chunk of work, but the simulation_loop will look much cleaner because the slaved
+    #       will have much less logic to handle. Cases with enabled/disabled drawing, single/multi processing,
+    #       fans started by jupyter or not will all enter quite different branches of runSimulation, which is
+    #       bad style. With zmq all the logic branching will be done by the master only, slaves just receive
+    #       initial conditions for ray-tracing and do the tracing.  
+    #       Plus, zmq can scale across multiple machines and easily switch transports. Jupyter is bases on 
+    #       zmq anyways, therefore it is not even a new dependency.
+    #
+    #       When rewriting all this the 'keepGuiResponsive()' hack can hopefully be abandoned, too. For this an
+    #       elegant solution to updating the progress window is needed. Goal: get rid of all the code duplication
+    #       that piled up because the various ways in which the simulation can be started have very different 
+    #       needs: 1) running with Qt GUI (freecad), 2) running as background worker (freecad -c),
+    #       3) running in external python/jupyter 4) worker started from external python/jupyter (freecad
+    #       without -c option but with invisible GUI and no proper eventloop running).
+    #       => concept is needed that allows to be run as a 'backend' in all four cases without code duplication
+    #
 
     ##########################################################################################
     # mainloop A: run actual simulation work if we are a background worker or the master
@@ -439,8 +558,16 @@ def runSimulation(action, slaveInfo={}):
         for obj in freecad_elements.find.lightSources():
           lightSourceExists = True
 
-          # run iteration for the light source
-          obj.Proxy.runSimulationIteration(obj=obj, mode=mode, draw=draw, store=store)
+          # special case multicore-fans: do not use light sources own ray generator,
+          # instead ask result store for rays
+          useInitialConditions = None
+          if action == 'multicorefans':
+            if (initConditions:=store.consumeInitialCondition()) is None:
+              raise freecad_elements.SimulationEnded()
+            useInitialConditions = initConditions
+
+          obj.Proxy.runSimulationIteration(obj=obj, mode=mode, draw=draw, store=store, 
+                                           useInitialConditions=useInitialConditions)
 
           # raise simulation canceled exception if parent PID is not alive
           if not isMasterProcess():
@@ -450,7 +577,8 @@ def runSimulation(action, slaveInfo={}):
               raise RuntimeError(f'parent pid {slaveInfo["parentPid"]} seems to have died, exiting as well...')
 
           # handle GUI events and raise if simulation is done
-          freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
+          if action != 'multicorefans':
+            freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
 
           # log top 10 biggest memory allocations
           if isfinite(_TRACEMALLOC_INTERVAL):
@@ -469,7 +597,8 @@ def runSimulation(action, slaveInfo={}):
 
         if store:
           # tell storage object that iteration is done
-          store.incrementIterationCount()
+          if action != 'multicorefans':
+            store.incrementIterationCount()
 
           # makes sure disk writes are happening (without this line no progress would be written
           # to disk in the rare case of no .addRay or .addRayHit calls at all during simulation)
@@ -477,7 +606,8 @@ def runSimulation(action, slaveInfo={}):
 
           if isMasterProcess():
             # make sure progress is updated in master process (this will also place the finished 
-            # file if one of the specified end criteria is reached)
+            # file if one of the specified end criteria is reached, disable this in case of 
+            # multicorefans mode)
             store.getProgress()
         
             # chunk result files every hour to make loading the results faster later
@@ -486,32 +616,16 @@ def runSimulation(action, slaveInfo={}):
               lastResultChunking = time.time()
               store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
 
-            # kill and restart workers after they reach their end-of-life that to 
-            # circumvent memory leaks
-            for worker in _BACKGROUND_PROCESSES:
-              if time.time() > worker.endOfLife:
-                io.verb(f'killing worker {worker} that reached end of life...')
-                _t0 = time.time()
-                while worker.isRunning():
-                  if time.time()-_t0 < 7:
-                    worker.quit()
-                  elif time.time()-_t0 < 10:
-                    worker.terminate()
-                  else:
-                    worker.kill()
-                break
-
-            # start new worker after old one was killed
-            while isWorkerRunning() < backgroundWorkers:
-              _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
-                                                      simulationRunFolder=simulationRunFolder))
+            # kill workers beyond their lifetime, restart died workers, etc
+            ensureWorkersAreBusy()
 
         # keep GUI responsive and limit loop speed
-        time.sleep(1e-2)
-        freecad_elements.keepGuiResponsive()
+        if action != 'multicorefans':
+          time.sleep(1e-2)
+          freecad_elements.keepGuiResponsiveAndRaiseIfSimulationDone()
 
         # end mainloop after first iteration if not in continuous (=singleshot) mode      
-        if not continuous:
+        if not continuous and action != 'multicorefans':
           raise freecad_elements.SimulationEnded()
  
       # this point should never be reached under normal conditions
@@ -523,10 +637,35 @@ def runSimulation(action, slaveInfo={}):
     io.verb(f'gui process is lazy and just tracks progress')
     lastResultChunking = time.time()
 
+    # special case multi core fans: go through all light sources and fetch all initial conditions for rays
+    rayInitialConditions = []
+    if action == 'multicorefans':
+      for obj in freecad_elements.find.lightSources():
+        rayInitialConditions.extend( obj.Proxy.runSimulationIteration(obj=obj, mode=mode, returnInitialConditions=True) )
+    chunkSize = min([ 50, max([ 1, len(rayInitialConditions)//30 ]) ])
+
     timer = QTimer()
     def updateProgress():
-      nonlocal lastResultChunking
-      
+      nonlocal lastResultChunking, rayInitialConditions
+
+      # a little bit of serious work is still needed in multicorefans -> we have to generate
+      # all fan parameters and drop them to disk as soon as previous ones were consumed
+      if action == 'multicorefans':
+        if len(rayInitialConditions) > 0:
+          jobFiles = store.listInitialConditions()
+          while len(rayInitialConditions)>0 and (not jobFiles or len(jobFiles) < 100*backgroundWorkers):
+            rayInitialConditions, _dump = rayInitialConditions[chunkSize:], rayInitialConditions[:chunkSize]
+            #io.warn(f'dumping {len(_dump)} initial condition files to disk, {len(rayInitialConditions)} initial conditions left')
+            # replace unpickleable attributes with suitable replacements
+            for ray in _dump:
+              ray.lightSource = ray.lightSource.Name
+              ray.initPoint = (ray.initPoint.x, ray.initPoint.y, ray.initPoint.z)
+              ray.initDirection = (ray.initDirection.x, ray.initDirection.y, ray.initDirection.z)
+            store.dumpInitialConditions( _dump )
+            jobFiles = store.listInitialConditions()
+        else:
+          timer.stop()
+
       if store and isMasterProcess():
         # make sure progress is updated (this will also place cancel/done files if one 
         # of the specified end criteria is reached)
@@ -538,30 +677,20 @@ def runSimulation(action, slaveInfo={}):
           lastResultChunking = time.time()
           store.chunkFiles(updateGuiCallback=freecad_elements.keepGuiResponsive)
 
-        # kill and restart workers after they reach their end-of-life that to 
-        # circumvent memory leaks
-        for worker in _BACKGROUND_PROCESSES:
-          if time.time() > worker.endOfLife:
-            io.verb(f'killing worker {worker} that reached end of life...')
-            _t0 = time.time()
-            while worker.isRunning():
-              if time.time()-_t0 < 7:
-                w.quit()
-              elif time.time()-_t0 < 10:
-                w.terminate()
-              else:
-                w.kill()
-            break
-
-        # start new worker after old one was killed
-        while isWorkerRunning() < backgroundWorkers:
-          _BACKGROUND_PROCESSES.append(worker_process.WorkerProcess(simulationType=mode, 
-                                                  simulationRunFolder=simulationRunFolder))
+        # kill workers beyond their lifetime, restart died workers, etc
+        # (make sure not to raise SimulationEnded exception because this is running in a timer)
+        # (disabled in action == 'multicorefans' mode)
+        if action != 'multicorefans':
+          try:
+            ensureWorkersAreBusy()
+          except Exception:
+            pass
 
       # stop if canceled or done
-      if isFinished():
-        io.verb('simulation is done, exiting mainloop...')
-        timer.stop()
+      if action != 'multicorefans':
+        if isFinished():
+          io.verb('simulation is done, exiting mainloop...')
+          timer.stop()
 
       # stop if run was canceled
       if isCanceled():
@@ -573,7 +702,7 @@ def runSimulation(action, slaveInfo={}):
 
     # this busy-loop makes the timer useless, but it is needed because cleanup is done in
     # the finally block. Maybe restructure this in the future to improve GUI responsiveness
-    while isWorkerRunning():
+    while isWorkerBusy():
       time.sleep(1e-2)
       freecad_elements.keepGuiResponsive()
 
@@ -609,26 +738,14 @@ def runSimulation(action, slaveInfo={}):
       # wait for workers to finish
       _t0 = time.time()
       lastPrint = time.time()
-      while isWorkerRunning():
-
-        # keep GUI responsive and limit loop speed
-        time.sleep(1e-2)
-        freecad_elements.keepGuiResponsive()
-
-        # quit/kill worker processes if they take too long
-        if time.time()-_t0 > 3:
-          for w in _BACKGROUND_PROCESSES:
-            if time.time()-_t0 < 7:
-              w.quit()
-            elif time.time()-_t0 < 10:
-              w.terminate()
-            else:
-              w.kill()
-
+      while _busyCount:=isWorkerBusy():
         # report progress
         if time.time()-lastPrint > 3:
-          io.info(f'waiting for {len(_BACKGROUND_PROCESSES)} worker processes to finish...')
+          io.info(f'waiting for {_busyCount} worker processes to finish...')
           lastPrint = time.time()
+
+      # check which workers have not been used in a long time
+      cleanupUnneededWorkers()
 
       # make sure all logfiles of worker processes are collected and merged into main log
       io.gatherSlaveFiles()

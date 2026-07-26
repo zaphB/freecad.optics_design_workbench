@@ -48,15 +48,32 @@ class GenericSourceProxy(GenericFreecadElementProxy):
   def onExitSimulation(self, obj, ident):
     pass
 
-  def runSimulationIteration(self, obj, *, mode, draw=False, store=False, **kwargs):
+  def runSimulationIteration(self, obj, *, mode, draw=False, store=False, returnInitialConditions=False, useInitialConditions=None, **kwargs):
     # prepare transforms etc that will be used many times
     gpM, gpMi, pM, pMi = self._getCoordinateTransformMatricesWithoutLinks(obj)
 
     # clear displayed rays on begin of each simulation iteration
     self.clear(obj)
 
-    # generate rays that we want to trace in this iteration
-    for ray in self._generateRays(obj, mode=mode, **kwargs):
+    # use generator passed as argument
+    if useInitialConditions is not None:
+      rayGenerator = useInitialConditions
+    else:
+      rayGenerator = self._generateRays(obj, mode=mode, **kwargs)
+
+    # if requested, return all ray initial conditions instead if tracing them
+    if returnInitialConditions:
+      return list(rayGenerator)
+
+    # generate rays that we want to trace in this iteration and trace them
+    for ray in rayGenerator:
+
+      # replace ray.lightSource with proper object in case it is string
+      # and reconstruct FreeCAD vector/matrix datatypes from tuples
+      if type(ray.lightSource) is str:
+        ray.lightSource = simulation.simulatingDocument().getObject(ray.lightSource)
+        ray.initPoint = App.Vector(ray.initPoint)
+        ray.initDirection = App.Vector(ray.initDirection)
 
       # add to ray object to results storage if desired
       rayResults = None
