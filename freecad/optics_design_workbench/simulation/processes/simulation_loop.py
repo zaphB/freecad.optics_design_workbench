@@ -528,7 +528,14 @@ def runSimulation(action, slaveInfo={}):
     #       initial conditions for ray-tracing and do the tracing.  
     #       Plus, zmq can scale across multiple machines and easily switch transports. Jupyter is bases on 
     #       zmq anyways, therefore it is not even a new dependency.
-    #       When rewriting all this the 'keepGuiResponsive()' hack can hopefully be abandoned, too.
+    #
+    #       When rewriting all this the 'keepGuiResponsive()' hack can hopefully be abandoned, too. For this an
+    #       elegant solution to updating the progress window is needed. Goal: get rid of all the code duplication
+    #       that piled up because the various ways in which the simulation can be started have very different 
+    #       needs: 1) running with Qt GUI (freecad), 2) running as background worker (freecad -c),
+    #       3) running in external python/jupyter 4) worker started from external python/jupyter (freecad
+    #       without -c option but with invisible GUI and no proper eventloop running).
+    #       => concept is needed that allows to be run as a 'backend' in all four cases without code duplication
     #
 
     ##########################################################################################
