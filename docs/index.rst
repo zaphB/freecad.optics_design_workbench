@@ -7,18 +7,13 @@ optics_design_workbench documentation
    :caption: Contents:
 
    usage
-
-API-Reference
-============
+   examples
 
 .. autosummary::
    :toctree: api
    :recursive:
-   optics_design_workbench
 
-Indices
-=====
+   optics_design_workbench
 
 * :ref:`genindex`
 * :ref:`modindex`
-* :ref:`search`
