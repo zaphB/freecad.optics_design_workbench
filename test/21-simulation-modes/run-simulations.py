@@ -44,7 +44,7 @@ def cfg(f, request):
     assert f.cfg.Active.get() is False
     yield f.sequentialCfg
 
-def test_simulationEndAfertHits(f, cfg, numCpus):
+def test_simulationEndAferHits(f, cfg, numCpus):
   cfg.WorkerProcessCount = numCpus
   cfg.EndAfterRays = 'inf'
   cfg.EndAfterHits = 1e3  

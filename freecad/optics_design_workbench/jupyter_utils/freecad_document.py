@@ -52,11 +52,11 @@ for sig in (signal.SIGHUP, signal.SIGTERM):
 _ALL_DOCUMENTS = []
 
 # default path to freecad executable
-_DEFAULT_FREECAD_EXECUTABLE = 'FreeCAD'
+_GET_FREECAD_EXECUTABLE = lambda: (os.environ.get('TEST_FREECAD_BINARY', '') or 'FreeCAD')
 
 
 def setDefaultFreecadExecutable(path):
-  global _DEFAULT_FREECAD_EXECUTABLE
+  global _GET_FREECAD_EXECUTABLE
 
   # check if path points to executable file if path looks like a filesystem path
   if '/' in path:
@@ -92,11 +92,11 @@ def setDefaultFreecadExecutable(path):
         raise ValueError(f'path {path} is not found by whereis')
 
   # store absolute path in global var
-  _DEFAULT_FREECAD_EXECUTABLE = path
+  _GET_FREECAD_EXECUTABLE = lambda: path
 
 
 def freecadVersion():
-  p = subprocess.Popen([_DEFAULT_FREECAD_EXECUTABLE, '-c'],
+  p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), '-c'],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL,
                         stdin=subprocess.PIPE, 
@@ -789,7 +789,7 @@ class FreecadDocument:
 
     # launch child process - DONT load file here or it will be loaded without 
     #                        ViewProvider objects because GUI is not yet up
-    self._p = subprocess.Popen([_DEFAULT_FREECAD_EXECUTABLE, '-c'],
+    self._p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), '-c'],
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 stdin=subprocess.PIPE, 
@@ -1259,7 +1259,7 @@ def openFreecadGui(*args, **kwargs):
   document = FreecadDocument(*args, **kwargs)
 
   # launch freecad process
-  p = subprocess.Popen([_DEFAULT_FREECAD_EXECUTABLE, document._path],
+  p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), document._path],
                         stdout=subprocess.DEVNULL, 
                         stderr=subprocess.DEVNULL)
   _didFinishPrint = False

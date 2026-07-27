@@ -1,5 +1,5 @@
 '''
-
+Collection of classes and functions to communicate with FreeCAD from a jupyter notebook environment.
 '''
 
 __license__ = 'LGPL-3.0-or-later'
