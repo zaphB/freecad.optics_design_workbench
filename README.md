@@ -1,6 +1,11 @@
+![Tests](./badge-tests.svg) 
+
+
 # Optics Design Workbench
 
 This workbench was inspired by the [OpticsWorkbench](https://github.com/chbergmann/OpticsWorkbench) and aims to extend its functionality towards design and optimization of optical assemblies.
+
+The [documentation](https://optics-design-workbench.readthedocs.io) is far from complete but growing.
 
 Feel free to ask any question in the [forum thread](https://forum.freecad.org/viewtopic.php?t=89264).
 

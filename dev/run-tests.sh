@@ -13,7 +13,7 @@ while [[ "$1" == -* ]]; do
   fi
 done
 if [[ ${#OPTS[@]} == 0 ]]; then
-  OPTS=('-v' '--junitxml=junit.xml')
+  OPTS=(--cov=freecad --junitxml=junit.xml)
   ISDEFAULTOPTS=1
 fi
 
@@ -101,7 +101,7 @@ if [[ $ISDEFAULTTESTS == 1 ]] && [[ $ISDEFAULTOPTS == 1 ]]; then
   # make pass/fail badge
   uv run genbadge tests -i junit.xml -o badge-tests.svg
   # make coverage badge
-  uv run coverage-badge -o badge-coverage.svg
+  uv run coverage-badge -o badge-coverage.svg -f
   # make coverage html report
   uv run coverage html
 fi

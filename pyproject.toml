@@ -51,19 +51,23 @@ Repository = "https://github.com/zaphB/freecad.optics_design_workbench.git"
 [dependency-groups]
 dev = [
   "pytest>=8.3.4",
-  "pytest-monitor",
   "pytest-sugar",
+  "pytest-cov>=7.1.0",
   "psutil",
-]
-
-[project.optional-dependencies]
-docs = [
+  "coverage>=7.15.2",
+  "coverage-badge>=1.1.2",
+  "genbadge[tests]>=1.1.3",
+  "nbconvert",
   "sphinx",
   "numpydoc",
   "pydata-sphinx-theme",
+  "sphinx-autobuild>=2025.8.25",
 ]
 
 [tool.pytest.ini_options]
+markers = [
+  'long: tests that run excessively long',
+]
 pythonpath = [
   'freecad/optics_design_workbench',
 ]
