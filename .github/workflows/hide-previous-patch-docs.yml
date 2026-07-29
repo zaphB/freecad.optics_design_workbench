@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Suche aktive Tag-Versionen fuer v${MAJOR_MINOR}.*, ausser ${CURRENT_TAG}"
+          echo "Find aktive tag-versions for v${MAJOR_MINOR}.* except ${CURRENT_TAG}"
 
           PAGE_URL="https://readthedocs.org/api/v3/projects/${RTD_PROJECT}/versions/?active=true&page_size=100"
 
@@ -39,14 +39,13 @@ jobs:
               SLUG=$(echo "$VERSION_JSON" | jq -r '.slug')
               VERTYPE=$(echo "$VERSION_JSON" | jq -r '.type')
 
-              # Nur Tags beruecksichtigen, nicht z.B. den 'latest'-Branch
+              # Only consider tag-versions, not e.g. 'latest'
               if [ "$VERTYPE" != "tag" ]; then
                 continue
               fi
 
-              # Muster: v<MAJOR>.<MINOR>.<PATCH>, z.B. v1.2.3
               if [[ "$SLUG" == v${MAJOR_MINOR}.* ]] && [ "$SLUG" != "$CURRENT_TAG" ]; then
-                echo "Verstecke alte Version: $SLUG"
+                echo "hide previous patch version: $SLUG"
                 curl -s -X PATCH \
                   -H "Authorization: Token ${RTD_TOKEN}" \
                   -H "Content-Type: application/json" \

@@ -3,4 +3,9 @@
 # change dir to docs folder of this project
 cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/../docs"
 
-uv run --all-extras sphinx-build . _build/html
+# update docs
+if [[ "$1" == "dev" ]]; then
+  uv run --dev sphinx-autobuild -E . _build/html --open-browser --watch=../freecad --ignore "*.tmp"
+else
+  uv run --dev sphinx-build -E -b html . _build/html
+fi

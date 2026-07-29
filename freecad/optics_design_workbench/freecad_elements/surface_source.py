@@ -504,7 +504,7 @@ class SurfaceSourceProxy(PointSourceProxy):
         # generate grid of surface points attempting regular spacing
         if time.time()-lastPrint > 10:
           io.verb(f'placing {raysOnFace=:.0f} rays on faces... '
-                  f'{f'(currently at {_i+1}/{len(allFacesAndPlacements)})' if _i>0 else ''}\n'
+                  f'{f"(currently at {_i+1}/{len(allFacesAndPlacements)})" if _i>0 else ""}\n'
                   f'depending on face complexity it may take a while until rays become visible, '
                   f'because sampling uv maps may take time')
           lastPrint = time.time()

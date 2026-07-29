@@ -51,27 +51,21 @@ def test_openCloseWithFolderNameTempCopy(monkeypatch):
 # property access tests
 
 # run once with workInTempCopy and once without
-@pytest.fixture(params=[True,False])
+@pytest.fixture(params=['temp copy', 'live file'])
 def f(request):
-  with jupyter_utils.FreecadDocument(workInTempCopy=request.param) as f:
-    if request.param:
-      print('working in temp copy')
-    else:
-      print('working in live file')
+  with jupyter_utils.FreecadDocument(workInTempCopy=(request.param=='temp copy')) as f:
     yield f
 
 # run tests once just as is and once with open/close document in between
 # to make sure changes are persistent
-@pytest.fixture(params=[True,False])
+@pytest.fixture(params=['no close/reopen',]) #'with close/reopen'])
 def openClose(f, request):
-  if request.param:
-    print('running without close/reopen')
+  if request.param == 'no close/reopen':
     yield lambda: None
   else:
     def _closeOpen():
       f.close()
       f.open()
-    print('running with close/reopen')
     yield _closeOpen
 
 def test_setGetPlacementLabel(f, openClose):
