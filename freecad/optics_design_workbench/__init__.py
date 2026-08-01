@@ -18,7 +18,14 @@ def _determinePackageVersion():
     try:
       __version__ = version('freecad.optics_design_workbench')
     except Exception:
-      __version__ = '?'
+      try:
+        import re
+        import os
+        with open(os.path.dirname(__file__)+'/../../package.xml') as _f:
+          __version__ = re.search(r'<version>(.*)</version>', _f.read()).group(1).strip()
+      except Exception:
+        raise
+        __version__ = '?'
 
 # make sure __version__ is set
 _determinePackageVersion()
@@ -43,16 +50,23 @@ def versionInfo(_returnText=False):
     freecadVersion = jupyter_utils.freecadVersion()
   from . import detect_pyside
   res = []
+  _print = print
   if _returnText:
-    print = lambda l: res.append(l)
-  print(f'python version:          {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')
-  print(f'workbench version:       {__version__}')
-  print(f'FreeCAD version:         {freecadVersion or "?"}')
-  print(f'running within FreeCAD?  {"yes" if FreeCAD else "no"}')
+    _print = lambda l: res.append(l)
+  _print(f'python version:          {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')
+  _print(f'workbench version:       {__version__}')
+  _print(f'FreeCAD version:         {freecadVersion or "?"}')
+  _print(f'running within FreeCAD?  {"yes" if FreeCAD else "no"}')
   if detect_pyside.detectQtMajorVersion():
-    print(f'Qt major version:        {detect_pyside.detectQtMajorVersion()}')
-  print(f'sys.prefix:              {sys.prefix}')
-  print(f'sys.base_prefix:         {sys.base_prefix}')
+    _print(f'Qt major version:        {detect_pyside.detectQtMajorVersion()}')
+  _print(f'sys.prefix:              {sys.prefix}')
+  _print(f'sys.base_prefix:         {sys.base_prefix}')
+  try:
+    import zmq
+    _print(f'libzmq version:          {zmq.zmq_version()}')
+    _print(f'pyzmq version:           {zmq.__version__}')
+  except Exception:
+    _print(f'libzmq/pyzmq:            not available')
   if _returnText:
     return '\n'.join(res)
 
