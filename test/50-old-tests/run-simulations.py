@@ -17,8 +17,6 @@ import os
 import pickle
 import shutil
 
-FREECAD_BINARY = os.environ.get('TEST_FREECAD_BINARY', '/usr/bin/FreeCAD')
-
 baseDir = os.path.abspath(os.path.dirname(__file__))
 
 def _cleanupResults(filename):
@@ -46,7 +44,9 @@ def _runFile(filename, cleanup=True, cancelAfter=None, timeout=60*60):
     _filename = filename+'.FCStd'
 
   # run true simulation
-  p = subprocess.Popen([FREECAD_BINARY, _filename, '-c'],
+  from optics_design_workbench.jupyter_utils import freecad_document
+  freecadBinary = freecad_document._GET_FREECAD_EXECUTABLE()
+  p = subprocess.Popen([freecadBinary, _filename, '-c'],
                         cwd=baseDir, 
                         #stdout=subprocess.DEVNULL,
                         #stderr=subprocess.DEVNULL,
@@ -214,6 +214,7 @@ def collectAllFCStd():
         yield root, f, _f
 
 allArgs = list(collectAllFCStd())
+@pytest.mark.long
 @pytest.mark.parametrize('args', allArgs, ids=[a[1] for a in allArgs])
 def test_brieflyRunFCStdFiles(args):
   root, f, _f = args

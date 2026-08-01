@@ -1,4 +1,4 @@
-![Tests](./badge-tests.svg) 
+![Tests](./badge-tests.svg) ![Coverage](./badge-coverage.svg) 
 
 
 # Optics Design Workbench
