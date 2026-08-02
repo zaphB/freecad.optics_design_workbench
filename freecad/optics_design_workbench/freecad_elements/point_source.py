@@ -605,7 +605,7 @@ class PointSourceProxy(GenericSourceProxy):
           indicesFanSide2 = list(-(1+arange(len(valuesFanSide2))))
 
         # if just one side exists: sort numerically (not absolute value) and
-        # ray closest do optical axis gets index=zero couting up/down to both
+        # ray closest to optical axis gets index=zero counting up/down to both
         # sides from there
         else:
           valuesFanSide1 = sorted(valuesFanSide1)
