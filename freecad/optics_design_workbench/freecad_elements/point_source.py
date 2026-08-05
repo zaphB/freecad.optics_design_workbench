@@ -608,7 +608,7 @@ class PointSourceProxy(GenericSourceProxy):
         # ray closest do optical axis gets index=zero couting up/down to both
         # sides from there
         else:
-          valuesFanSide1 = sorted(valuesFanSide1)
+          valuesFanSide1 = array(sorted(valuesFanSide1))
           _i0 = argmin(abs(valuesFanSide1))
           indicesFanSide1 = list(arange(len(valuesFanSide1))-_i0)
           indicesFanSide2 = []
