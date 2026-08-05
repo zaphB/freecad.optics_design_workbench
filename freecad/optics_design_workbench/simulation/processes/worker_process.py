@@ -25,6 +25,9 @@ from .. import processes
 _WORKER_INDEX = 0
 _LAST_PRINTED_EXECUTABLE_PATH = 0
 
+_ignoreErrorsUntil = 0
+
+
 class WorkerProcess:
   '''
   This class represents one background process worker. It needs to known which
@@ -88,6 +91,7 @@ class WorkerProcess:
     # start thread that read stderr and forward to our stdout (only if more than
     # 10 lines are generated in a short time, indicating a stacktrace)
     def _readStderr():
+      global _ignoreErrorsUntil
       recentLines = []
       forward = False
       while self._stdioErrorCount <= 10:
@@ -97,7 +101,9 @@ class WorkerProcess:
           self._stdioErrorCount += 1
         else:
           data = data.replace('>>>', '')
-          if data.strip():
+          if '__init__.py:165' or 'PLEASE READ (and report)' in data:
+            _ignoreErrorsUntil = time.time()+1
+          if time.time() > _ignoreErrorsUntil and data.strip():
             # keep buffer of lines of recent 2 seconds
             recentLines.append([time.time(), data])
             recentLines = [ (t,l) for t,l in recentLines if time.time()-t<2 ]

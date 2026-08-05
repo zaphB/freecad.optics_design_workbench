@@ -32,6 +32,8 @@ from . import parameter_sweeper
 _PRINT_FREECAD_COMMUNICATION = False
 _PRINT_SETTER_AND_CALL_LINES = False
 
+_ignoreErrorsUntil = 0
+
 # signal handler that kills all running freecad processes
 # in case this process is killed
 def handler(signum, frame):
@@ -384,7 +386,8 @@ class FreecadObject(FreecadProperty):
                            f'or to use the internal name instead.')
 
       # handle value errors by retrying with "internal name" style instead of label
-      except ValueError:
+      except ValueError as e:
+        io.verb(f'rasied ValueError({e}) -> setting _internalObjectName to True')
         self.__dict__['_internalObjectName'] = True
         self._ensureExists()
 
@@ -814,6 +817,7 @@ class FreecadDocument:
     self._t.start()
 
     def readError():
+      global _ignoreErrorsUntil
       for line in iter(self._p.stderr.readline, ''):
         # remove prompt characters from beginning of line
         while line.lstrip().startswith('>>>') or line.lstrip().startswith('...'):
@@ -835,12 +839,21 @@ class FreecadDocument:
           # ignore if line is 'Requested non-existent style parameter token'-type of message type of 
           # line which some FreeCAD versions before 1.1 spammed on startup and the bug may not be fully
           # fixed yet as some reports of regression exist
-          if 'requested non-existent style parameter token' not in line.lower():
-            # remove line ending characters and add to queue
-            while line.endswith('\r') or line.endswith('\n'):
-              line = line[:-1]
-            io.warn(f'received error line {repr(line)}', logOnly=True)
-            self._qe.put(line)
+          if ('requested non-existent style parameter token' not in line.lower()
+              and 'Fontconfig warning:' not in line ):
+
+            # ignore errors for next second if delayedWarn was detected
+            if 'delayedWarn' in line:
+              _ignoreErrorsUntil = time.time()+5
+
+            if _ignoreErrorsUntil > time.time():
+              io.info(line)
+            else:
+              # remove line ending characters and add to queue
+              while line.endswith('\r') or line.endswith('\n'):
+                line = line[:-1]
+              io.warn(f'received error line {repr(line)}', logOnly=True)
+              self._qe.put(line)
         time.sleep(1e-3)
       self._p.stdout.close()
     self._te = threading.Thread(target=readError)
@@ -961,6 +974,13 @@ class FreecadDocument:
       io.verb('> '+cmdStr.replace('\r', '').strip('\n'))
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
+    # sending something that generates output in addition seems to be necessary in 
+    # recent AppImage versions
+    def _dummy():
+      time.sleep(1e-3)
+      self._p.stdin.write('print("")\r\n\r\n')
+      self._p.stdin.flush()
+    threading.Thread(target=_dummy, daemon=True).start()
 
   def _flushOutput(self, timeout=60, forceCareful=False, keepErrs=False):
     self._updateInteractionTime()
@@ -977,16 +997,23 @@ class FreecadDocument:
       lastPrintedRn = 0
       rn = None
       while True:
+        # in case some initial errors are still being printed
+        # wait a little
+        while (needsSleep:=(_ignoreErrorsUntil-time.time())) > 0:
+          time.sleep(needsSleep)
+          self.readFreecadShell()
+
         # ask to print random number every few seconds 
         # (scale wait time with time that has passed)
         if time.time()-lastPrintedRn > 1/5*(time.time()-t0):
           lastPrintedRn = time.time()
           rn = f'{random.random():.8f}'
           self.writeToFreecadShell(f'print("{rn}")')
-        
+
         # if random number appears in output: success
         out = self.readFreecadShell()
-        #print(f'waiting for {rn}, found {out}')
+        #if len(out):
+        #  print(f'waiting for {rn}, found {out}')
         if rn in out:
           return
 
@@ -1000,8 +1027,9 @@ class FreecadDocument:
         # if time is up: raise timeout error
         if time.time()-t0 > timeout:
           raise RuntimeError(f'failed to flush output buffer of FreeCAD, '
-                            f'is a process featuring heavy output printing '
-                            f'running?')
+                             f'is a process featuring heavy output printing '
+                             f'running?')
+        # limit loop speed        
         time.sleep(1e-3)
 
   def readFreecadShell(self, maxLines=inf):
@@ -1011,7 +1039,10 @@ class FreecadDocument:
       # fetch lines until queue.Empty is raised 
       # or maxLines limit is reached
       while len(result) < maxLines:
-        result.append(self._q.get_nowait())
+        line = self._q.get_nowait()
+        if _PRINT_FREECAD_COMMUNICATION:
+          io.verb('< '+line.replace('\r', '').strip('\n'))
+        result.append(line)
     except queue.Empty:
       pass
     return result
@@ -1119,9 +1150,10 @@ class FreecadDocument:
         return returnResult
 
       if error:=self.readFreecadShellErr():
-        raise RuntimeError((f'{errText.strip()}\n' if errText else '')
-                           +f'exception was raised while handling '
-                           +f'command(s) {data}:\n\n'+error)
+        if 'PLEASE READ (and report)' not in error: # <- ignore new import warning
+          raise RuntimeError((f'{errText.strip()}\n' if errText else '')
+                            +f'exception was raised while handling '
+                            +f'command(s) {data}:\n\n'+error)
 
       # check for result line
       if line:=self.readFreecadShellLine():
