@@ -339,9 +339,10 @@ class Ray():
         gpMi = pM*gpMi
 
         # only care if bounding box is closer to start point than maxRayLength and 
-        # if bounding box actually intersects with the ray
+        # if bounding box actually intersects with the ray (some objects to hot have
+        # .Shells, in these cases use .Shape directly)
         if hasattr(group, 'Shape'):
-          for shell in cachedShells(cachedShape(group)):
+          for shell in cachedShells(cachedShape(group)) or [cachedShape(group)]:
 
             # find start and direction vectors in local coordinates of optical group
             lstart = gpMi*start 
