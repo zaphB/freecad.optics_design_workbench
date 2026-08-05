@@ -194,13 +194,12 @@ def repairAllProxies():
     # loop through all objects (and linked objects)
     from . import find
     for obj in find._allObjects():
-
+      
       # check only objects with recognizable names and without proxy
       if ( obj.Name.startswith('Optical')
-            and hasattr(obj, 'Proxy')
-            and obj.Proxy is None ):
+            and (not hasattr(obj, 'Proxy') or obj.Proxy is None) ):
 
-        io.verb(f'checking {obj.Name}')
+        io.verb(f'{obj.Name=} ({obj.Label=}) looks like it needs repair... ')
 
         # go though all proxy types the workbench as
         from ..freecad_elements import ( OpticalGroupProxy, OpticalGroupViewProxy, PointSourceProxy, 
@@ -226,10 +225,12 @@ def repairAllProxies():
                 existingProps += 1
           # match? -> repair
           if existingProps > 5 and existingProps > totalProps-3:
-            io.verb(f're-creating proxies for {obj.Label=} ({obj.Name=})')
+            io.verb(f' -> indeed! re-creating proxies for {obj.Label=} ({obj.Name=})')
             fixedSomething = True
             obj.Proxy = proxy
             obj.ViewObject.Proxy = ViewProxy(obj)
+          else:
+            io.verb(f' -> nevermind, properties look unfamiliar, leaving object as it is')
     pre = ''
     if not fixedSomething:
       pre = 'nothing to repair, '
