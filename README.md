@@ -87,6 +87,8 @@ All parameters of the FreeCAD model are accessible from an external python shell
 
 ## Troubleshooting
 
+When encountering errors please make sure that the workbench is up-to-date (Addon Manager->Optics Design Workbench->Update) and that all python dependencies have the latest version (Addon Manager->Little "gear" button->Update all python packages).
+
 When things don't work as expected first make sure you are actually running want you intend to run and whether the same workbench version is installed on the python and the FreeCAD side. To check this, run
 
 ```python

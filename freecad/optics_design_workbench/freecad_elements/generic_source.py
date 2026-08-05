@@ -162,7 +162,10 @@ class GenericSourceViewProxy(GenericFreecadElementViewProxy):
 
   def claimChildren(self):
     '''Return a list of objects that will be modified by this feature'''
-    return NON_SERIALIZABLE_STORE[self].ElementList
+    try:
+      return NON_SERIALIZABLE_STORE[self].ElementList
+    except:
+      return []
 
   def onDelete(self, vobj, subelements):
     # make sure all ray segments are deleted

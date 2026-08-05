@@ -38,6 +38,7 @@ _static
 .coverage
 htmlcov
 junit.xml
+benchmark-scores.yaml
 
 # include screenshots in examples
 !examples/**/*.png

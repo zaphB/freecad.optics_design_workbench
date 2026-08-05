@@ -16,6 +16,7 @@ from .simulation_actions import *
 from .common import *
 from . import find
 
+
 def loadAll():
   '''
   Load all FreeCAD components defined in the submodules and add them to the interface.
@@ -26,6 +27,9 @@ def loadAll():
   loadGroups()
   loadSimulationSettings()
   loadSimulationActions()
+
+  # run auto repair of document
+  repairAllProxies()
 
 
 def collectGlobalInfo():
