@@ -7,6 +7,9 @@ __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
+import time
+import threading
+
 from .point_source import *
 from .surface_source import *
 from .replay_source import *
@@ -29,7 +32,10 @@ def loadAll():
   loadSimulationActions()
 
   # run auto repair of document
-  repairAllProxies()
+  def delayedRepair():
+    time.sleep(5)
+    repairAllProxies()
+  threading.Thread(target=delayedRepair, daemon=True).start() 
 
 
 def collectGlobalInfo():

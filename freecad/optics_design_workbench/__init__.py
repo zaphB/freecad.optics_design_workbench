@@ -164,14 +164,15 @@ def _hackilyUpdateSysPathIfPythonDependenciesMissing():
       # emit warning immediately
       warnings.warn(warnText)
 
-      # emit exception with delay to make it visible in the freecad GUI
-      import threading
-      def delayedWarn(sleep):
-        import time
-        time.sleep(sleep)
-        raise ImportError(warnText)
-      for sleep in [.1, .5, 2, 8, 16, 32]:
-        threading.Thread(target=delayedWarn, args=(sleep,), daemon=True).start()
+      # emit exception with delay to make it visible in the freecad GUI (if -c option is not present)
+      if '-c' not in sys.argv:
+        import threading
+        def delayedWarn(sleep):
+          import time
+          time.sleep(sleep)
+          raise ImportError(warnText)
+        for sleep in [.5, 3, 8, 16]:
+          threading.Thread(target=delayedWarn, args=(sleep,), daemon=True).start()
 
 # run on module load
 _hackilyUpdateSysPathIfPythonDependenciesMissing()
