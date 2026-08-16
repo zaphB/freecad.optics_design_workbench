@@ -34,7 +34,7 @@ def loadAll():
   # run auto repair of document
   def delayedRepair():
     time.sleep(5)
-    repairAllProxies()
+    repairAllProxies(quiet=True)
   threading.Thread(target=delayedRepair, daemon=True).start() 
 
 

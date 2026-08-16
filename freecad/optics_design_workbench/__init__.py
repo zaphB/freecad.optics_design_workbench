@@ -118,6 +118,7 @@ def _hackilyUpdateSysPathIfPythonDependenciesMissing():
 
                 # check candidate paths and add if needed
                 candidate = os.path.realpath(f'{base}{w}/python{ma}{sep}{mi+d}{suff}')
+                
                 if os.path.exists(candidate):
                   if candidate not in sys.path:
                     injections.append(candidate)

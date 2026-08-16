@@ -198,12 +198,10 @@ class OpticalGroupProxy(common.GenericFreecadElementProxy):
         setattr(obj, prop, parsed)
 
   def onInitializeSimulation(self, obj, state, ident):
-    # clear cached random number generators on start and exit of simulation
-    self._clearVrv(obj)
+    pass
 
   def onExitSimulation(self, obj, ident):
-    # clear cached random number generators on start and exit of simulation
-    self._clearVrv(obj)
+    pass
 
   def onRayHit(self, source, obj, point, direction, power, isEntering, metadata, store):
     if store and obj.RecordHits:

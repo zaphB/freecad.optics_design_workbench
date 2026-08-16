@@ -178,7 +178,7 @@ def keepGuiResponsiveAndRaiseIfSimulationDone(**kwargs):
 # AUTOMATIC PROXY RESTAURATION
 
 _LAST_REPAIR_CALL = 0
-def repairAllProxies():
+def repairAllProxies(quiet=False):
   '''
   Go through all objects in document and check for objects with properties matching 
   one of the workbench classes, but without any proxy or view proxy. Assume the document
@@ -188,7 +188,8 @@ def repairAllProxies():
   if time.time()-_LAST_REPAIR_CALL > 1:
     _LAST_REPAIR_CALL = time.time()
     t0 = time.time()
-    io.verb(f'begin proxy auto-repair...')
+    if not quiet:
+      io.verb(f'begin proxy auto-repair...')
     fixedSomething = False
 
     # loop through all objects (and linked objects)
@@ -199,7 +200,8 @@ def repairAllProxies():
       if ( obj.Name.startswith('Optical')
             and (not hasattr(obj, 'Proxy') or obj.Proxy is None) ):
 
-        io.verb(f'{obj.Name=} ({obj.Label=}) looks like it needs repair... ')
+        if not quiet:
+          io.verb(f'{obj.Name=} ({obj.Label=}) looks like it needs repair... ')
 
         # go though all proxy types the workbench as
         from ..freecad_elements import ( OpticalGroupProxy, OpticalGroupViewProxy, PointSourceProxy, 
@@ -225,16 +227,19 @@ def repairAllProxies():
                 existingProps += 1
           # match? -> repair
           if existingProps > 5 and existingProps > totalProps-3:
-            io.verb(f' -> indeed! re-creating proxies for {obj.Label=} ({obj.Name=})')
+            if not quiet:
+              io.verb(f' -> indeed! re-creating proxies for {obj.Label=} ({obj.Name=})')
             fixedSomething = True
             obj.Proxy = proxy
             obj.ViewObject.Proxy = ViewProxy(obj)
           else:
-            io.verb(f' -> nevermind, properties look unfamiliar, leaving object as it is')
+            if not quiet:
+              io.verb(f' -> nevermind, properties look unfamiliar, leaving object as it is')
     pre = ''
     if not fixedSomething:
       pre = 'nothing to repair, '
-    io.verb(f'{pre}finished auto-repairing proxies in {time.time()-t0:.1f} s')
+    if not quiet:
+      io.verb(f'{pre}finished auto-repairing proxies in {time.time()-t0:.1f} s')
 
 ###################################################################################
 # PROTOTYPES FOR FREECAD ELEMENT PROXY CLASSES

@@ -137,12 +137,14 @@ class PointSourceProxy(GenericSourceProxy):
       if float(getattr(obj, prop)) < 3:
         setattr(obj, prop, '3')
   
-    # reset random number generator mode to ? if power density expression is changed
+    # clear cached random number variable and reset random number generator mode to ?
+    # if a property that affects random number generation is changed
     if prop in ('PowerDensity', 'PhiDomain', 
                 'ThetaDomain', 'RadiusDomain', 
                 'ThetaResolutionNumericMode', 
                 'RadiusResolutionNumericMode'
-                'PhiResolutionNumericMode'):
+                'PhiResolutionNumericMode',
+                'FocalLength', 'Divergence'):
       self._clearVrv(obj)
 
     # sync theta and radius resolution

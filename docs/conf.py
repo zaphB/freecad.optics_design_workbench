@@ -26,11 +26,13 @@ print(optics_design_workbench.__file__)
 print('='*50)
 
 extensions = [
-    'sphinx.ext.autodoc',
-    'sphinx.ext.autosummary',
-    'sphinx.ext.viewcode',
-    'sphinx.ext.intersphinx',
-    'numpydoc',
+  'sphinx.ext.autodoc',
+  'sphinx.ext.autosummary',
+  'sphinx.ext.viewcode',
+  'sphinx.ext.intersphinx',
+  'numpydoc',
+  'nbsphinx',
+  'notebook_directive', # <- custom directive to embed notebooks
 ]
 
 numpydoc_show_class_members = False  # verhindert doppelte Attribut-Listen
@@ -51,17 +53,18 @@ html_theme_options = {
   'navigation_depth': 4, # sidebar depth
   'logo': {
       'text': 'Optics Design Workbench',
-      'image_light': '_static/workbench.svg',
-      'image_dark': '_static/workbench.svg', 
-  }
+      'image_light': '_static/icons/workbench.svg',
+      'image_dark': '_static/icons/workbench.svg', 
+  },
 }
 html_static_path = ['_static']
+html_css_files = ['notebook.css']
 html_title = 'FreeCAD Optics Design Workbench Docs'
 
 # insert this at begin of every doc page
 rst_prolog = '''
 .. warning::
-   This documentation is still a work in progress. Missing an example, tutorial, or API reference you need? Open an issue and let me know what you'd like to see:
+   This documentation is still a work in progress. Missing an example, tutorial, or API reference you need? Getting confused by an ambiguous explanation? Open an issue and let me know what you'd like to see:
    https://github.com/zaphB/freecad.optics_design_workbench/issues
 
 '''

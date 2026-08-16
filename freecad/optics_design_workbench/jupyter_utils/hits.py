@@ -19,6 +19,10 @@ from . import histogram
 nx, ny, nz = array([1,0,0]), array([0,1,0]), array([0,0,1])
 
 class Hits:
+  '''
+  Class representing a hit coordinate point cloud.
+  '''
+  
   def __init__(self, hits):
     self.hits = hits
 
@@ -254,6 +258,9 @@ class Hits:
     rI, fI, p, trf = self.hits['rayIndex'], self.hits['fanIndex'], self.hits['points'], self.hits['totalRaysInFan']
     pXY = self.planeProject3dPoints(p, **kwargs)
 
+    # assume healthy symmetry, if any fan is not symmetric set to False
+    healthySymmetry = True
+
     # loop through fans/rays and calculate distance, curvature etc.
     centerDists, neighborDists = [], []
     curvs, missingRays, skippedRays = [], 0, 0
@@ -314,9 +321,10 @@ class Hits:
           elif signP < 0 and signN > 0:
             dCenterSign = -1
           else:
-            if signN != 0 and signP != 0:
+            if signN != 0 and signP != 0 and exp(abs(log(signP/signN))) < 5:
               io.warn(f'unsure about center distance value signs, the fan-hit pattern is probably '
-                      f'very asymmetric ({dot(p0-pCenter, posIndexDirection)=}, {dot(p0-pCenter, negIndexDirection)=})')
+                      f'very asymmetric ({dot(p0-pCenter, posIndexDirection)=:.1e}, {dot(p0-pCenter, negIndexDirection)=:.1e})')
+            healthySymmetry = False
             dCenterSign = sign( signP - signN )
 
           # add center dist entry
@@ -330,7 +338,7 @@ class Hits:
     # return as dict
     return dict(centerDists=array(centerDists), neighborDists=array(neighborDists), 
                 curvs=array(curvs), missingRays=missingRays, skippedRays=skippedRays,
-                rI=rI, fI=fI, pXY=pXY, trf=trf)
+                rI=rI, fI=fI, pXY=pXY, trf=trf, healthySymmetry=healthySymmetry)
 
   def fanMissingRays(self):
     return self._calcFanDensityEtc()['missingRays']
@@ -413,7 +421,7 @@ class Hits:
     # return all results as dictionary
     return dict(fanDensities=fanDensities, fanDensityFuncs=fanDensityFuncs,
                 causticIntensities=causticIntensities, causticIntensityFuncs=causticIntensityFuncs,
-                pCenter=pCenter)
+                pCenter=pCenter, healthySymmetry=self._calcFanDensityEtc()['healthySymmetry'] )
     
   def fanEstimatedPowerDensities(self, pCenter=None):
     return {i: array(d).T for i, d in self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['fanDensities'].items() }
@@ -426,3 +434,10 @@ class Hits:
 
   def fanEstimatedCausticIntensityFuncs(self, pCenter=None):
     return self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['causticIntensityFuncs']
+
+  def fanSymmetryHealthy(self, pCenter=None):
+    '''
+    Return True if fan rays hit an a somewhat ordered line. If the hit pattern is strongly distorted and not close to a (bent) 
+    line anymore, this function will return False and all the other fan-estimated quantities may not be trustworthy.
+    '''
+    return self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['healthySymmetry']

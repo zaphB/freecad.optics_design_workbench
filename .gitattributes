@@ -1,2 +1,3 @@
-*.ipynb filter=clean-ipynb
+test/**/*.ipynb filter=clean-ipynb
+benchmarks/**/*.ipynb filter=clean-ipynb
 

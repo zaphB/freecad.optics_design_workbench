@@ -229,22 +229,23 @@ class MetaParameter:
 class ParameterSweeper:
   '''
   The parameter sweeper allows to conveniently set/get/sweep/optimize 
-  parameters in the freecad files using given names, instead of the 
-  lengthy descriptions in the document tree.
-
-  Arguments:
-
-  getParameterFunc : function
-    Define how named parameters are mapped to nodes in the freecad document. 
-    The function has to accept one parameter, the FreecadDocument instance and
-    is expected to return a dictionary. Keys in the returned dictionary are
-    the sweepable parameter names, values of the dictionary are the 
-    FreecadDocument parameter nodes.
-    The odd indirect definition through as a function is necessary, because
-    reopening the freecad file requires to rebuilt the references to freecad
-    objects.
+  parameters in the .FCStd files using handy short names instead of the 
+  lengthy descriptions document tree paths.
   '''
   def __init__(self, getParametersFunc, freecadDocumentKwargs={}):
+    '''
+    Arguments:
+
+    getParameterFunc : function
+      Define how named parameters are mapped to nodes in the freecad document. 
+      The function has to accept one parameter, the FreecadDocument instance and
+      is expected to return a dictionary. Keys in the returned dictionary are
+      the sweepable parameter names, values of the dictionary are the 
+      FreecadDocument parameter nodes.
+      The odd indirect definition through as a function is necessary, because
+      reopening the freecad file requires to rebuilt the references to freecad
+      objects.
+    '''
     # close all open sweepers when a new one is created to prevent
     # to make life in jupyter notebooks easier
     while len(_ALL_OPEN_SWEEPERS):

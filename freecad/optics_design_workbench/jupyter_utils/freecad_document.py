@@ -130,7 +130,6 @@ def Matrix(*a):
   return array(a)
 
 
-
 class FreecadExpression:
   def __init__(self, exprString):
     self._exprString = exprString
@@ -176,10 +175,9 @@ class FreecadConstraintDict(FreecadPropertyDict):
 
 class FreecadProperty:
   '''
-  FreecadProperty represents a property of an object in the document tree and can 
-  be created from normal python shells without any connection to FreeCAD. It can 
-  be read from and written to as if it was the real freecad property. All 
-  read/writes will be forwarded to the running Freecad child process.
+  The FreecadObject class represents an object in the .FCStd document tree and can be created from normal python shells. It can be read from and
+  written to as if it was the internal FreeCAD object. All read/writes will be forwarded
+  to the running FreeCAD child process.
   '''
   def __init__(self, doc, obj, path, isCall=False, internalObjectName=False):
     self.__dict__['_doc'] = doc
@@ -330,7 +328,12 @@ class FreecadProperty:
     try:
       return eval(_str)
     except Exception:
-      return _str
+      if _str.endswith(' mm'):
+        try:
+          return eval(_str)
+        except Exception:
+          pass
+    return _str
 
   # ----------------------------------
   # CUSTOM ATTRIBUTES AND METHODS
@@ -351,10 +354,9 @@ class FreecadProperty:
 
 class FreecadObject(FreecadProperty):
   '''
-  FreecadObject represents an object from the document tree and can be created from
-  normal python shells without any connection to FreeCAD. It can be read from and
-  written to as if it was the real freecad object. All read/writes will be forwarded
-  to the running Freecad child process.
+  The FreecadObject class represents a property of an object in the .FCStd document tree and can be created from normal python shells. It can be read from and
+  written to as if it was the internal FreeCAD object. All read/writes will be forwarded
+  to the running FreeCAD child process.
   '''
   def __init__(self, doc, obj, internalObjectName=False):
     self.__dict__['_doc'] = doc
@@ -451,12 +453,13 @@ def _autodetectFcstdPath(basePath=None):
 
 class FreecadDocument:
   '''
-  FreecadDocument class represents a FCStd document and can be created from normal 
-  python shells without any connection to FreeCAD. The FCStd file properties can
+  The FreecadDocument class represents a .FCStd document and can be created from any 
+  python shell. The .FCStd file properties can
   be manipulated and optical simulations can be started as if we were running within
-  the FreeCAD-shell.
+  the FreeCAD shell.
   
-  The document is intended to be used as a context manager to clean up after itself.
+  FreecadDocument instances are intended to be used as a context manager to ensure
+  proper clean up of child processes and file handles.
   '''
   def __init__(self, path=None, workInTempCopy=False, showProgress=True):
     # register self in global list
@@ -528,6 +531,9 @@ class FreecadDocument:
 
   def __str__(self):
     return f'<FreecadDocument {os.path.basename(self._path)}>'
+  
+  def path(self):
+    return self._path
 
   def resultsPath(self):
     return self._resultsPath
@@ -943,14 +949,14 @@ class FreecadDocument:
   def _fastModeEnabled(self):
     if not self._permanentlyDisableFastMode:
       T = array(self._freecadInteractionTimesList)
-      # enable fast mode if more than 100 freecad interactions
-      # within last 3 seconds, only disable if less then 100
-      # interactions within 10 seconds 
+      # enable fast mode if more than 3000 freecad interactions
+      # within last 10 seconds, only disable if less then 1000
+      # interactions within 30 seconds
       #io.verb(f'{sum( time.time()-T < 5 )=}')
       if self._previousFastModeEnabled:
-        enable = sum( time.time()-T < 10 ) > 100
+        enable = sum( time.time()-T < 30 ) > 1000
       else:
-        enable = sum( time.time()-T < 3 ) > 100
+        enable = sum( time.time()-T < 10 ) > 3000
     else:
       enable = False
 
@@ -1018,7 +1024,7 @@ class FreecadDocument:
           return
 
         # warn of takes long
-        if time.time()-lastWarned > 5:
+        if time.time()-lastWarned > 15:
           lastWarned = time.time()
           io.warn(f'long waiting time for freecad process to become responsive, '
                   f'waiting since {io.secondsToStr(time.time()-t0)} '
@@ -1176,7 +1182,7 @@ class FreecadDocument:
           returnAtIteration = iteration + 10
 
       # warn of takes long
-      if time.time()-lastWarned > 5:
+      if time.time()-lastWarned > 15:
         lastWarned = time.time()
         io.warn(f'long waiting time for response from freecad process, waiting '
                 f'since {io.secondsToStr(time.time()-sentCommandT0)} '
@@ -1289,6 +1295,10 @@ def openFreecadGui(*args, **kwargs):
 
   # create dummy-document object to detect all necessary paths 
   document = FreecadDocument(*args, **kwargs)
+  
+  # return quietly if we are running within pytest session
+  if "PYTEST_CURRENT_TEST" in os.environ:
+    return
 
   # launch freecad process
   p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), document._path],
@@ -1350,10 +1360,17 @@ def _rawFolders(basePath='.'):
   return basePath, folders, indices
 
 def rawFolders(basePath='.'):
+  '''
+  Return RawFolderRange of all raw folders under the given basePath.
+  '''
   basePath, folders, indices = _rawFolders(basePath=basePath)
   return RawFolderRange( [os.path.relpath(f'{basePath}/{f}') for f in folders] )
 
 def rawFolderByIndex(index=-1, basePath='.'):
+  '''
+  return contents of the raw folder with given index wrapped in a RawFolder object.
+  Negative indices are counting from the end of the folder range.
+  '''
   basePath, folders, indices = _rawFolders(basePath=basePath)
 
   # interpret positive indices just like number in the directory name
@@ -1367,6 +1384,9 @@ def rawFolderByIndex(index=-1, basePath='.'):
 
 @functools.wraps(rawFolderByIndex)
 def latestRawFolder(*args, **kwargs):
+  '''
+  return contents of the latest raw folder wrapped in a RawFolder object.
+  '''
   return rawFolderByIndex(*args, index=-1, **kwargs)
 
 
