@@ -64,6 +64,8 @@ class PointSourceProxy(GenericSourceProxy):
         ('Fans', 2, 'Integer', 'Number of ray fans to place in ray fan mode.'),
         ('FanPhi0', '0', 'String', 'Change this to rotate fans around optical axis.'),
         ('RaysPerFan', 20, 'Integer', 'Number of rays to place per fan in ray fan mode.'),
+        ('FanModePowerSpan', 0.9, 'Float', 'Fraction of total emitted power to consider when placing '
+                                           'rays in fan mode.'),
       ]),
     ]+super()._properties()
 
@@ -527,6 +529,24 @@ class PointSourceProxy(GenericSourceProxy):
         else:
           phiB = _phiCandidates[argmin(abs(phiA+pi - _phiCandidates))]
         #print(f'{phiA=}, {phiB=}, {phiL1=}, {phiL2=}')
+
+        # calculate desired span and update l1 and l2 if needed
+        if obj.FanModePowerSpan > 0 and obj.FanModePowerSpan < 1:
+          var = 'theta' if isfinite(float(obj.FocalLength)) else 'r'
+          powerVsTheta = sy.lambdify( var, sy.sympify(obj.PowerDensity)
+                                        .subs('theta', 'abs(theta)')
+                                        .subs('phi', f'Piecewise( ( ({phiA}), ({var})>0 ), '
+                                                                f'( ({phiB}),  True     ) )') )
+          limit = max([abs(l1), abs(l2)])
+          _thetas = linspace(-limit, limit, int(1e5))
+          _cumPowers = cumsum( powerVsTheta(_thetas) )
+          _cumPowers /= max(_cumPowers)
+          _l1, _l2 = _thetas[ argmin(abs(_cumPowers - (1-obj.FanModePowerSpan)/2 )) ], _thetas[ argmin(abs(_cumPowers - (1 - (1-obj.FanModePowerSpan)/2) )) ]
+          maxL = max([ abs(_l1), abs(_l2) ])
+          if abs(l1) > maxL:
+            l1 = sign(l1)*maxL
+          if abs(l2) > maxL:
+            l2 = sign(l2)*maxL
 
         # generate the required thetas (radii) to place rays depending on the fanMode (see long
         # comment above for fanModes)

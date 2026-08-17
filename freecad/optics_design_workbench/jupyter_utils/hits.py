@@ -381,8 +381,8 @@ class Hits:
       pCenter = self.fanCenter()
 
     # get fan neighbor dists and distances from center
-    nfI, nrI, ndist = self.fanNeighborDists()
     cfI, crI, cdist = self.fanCenterDists(pCenter=pCenter)
+    nfI, nrI, ndist = self.fanNeighborDists()
     
     # construct per fan estimated power density
     fanDensities = {}
@@ -414,7 +414,8 @@ class Hits:
     fanDensityFuncs = { i: lambda pos, _d=array(d).T: interp(pos, *_d, left=0, right=0) for i, d in fanDensities.items() }
 
     # construct lambdas to interpolate found caustic densities in a range p1 and p2 of distance from center
-    causticIntensityFuncs = { i: lambda p1, p2, _d=array(d): sum([p for r1,r2,p in _d 
+    # intensity has a strange definition which is designed to guide optimizers to avoid caustics
+    causticIntensityFuncs = { i: lambda p1, p2, _d=array(d): sum([ 1 + abs(r1-r2) for r1,r2,p in _d 
                                                                         if r1<=max([p1,p2]) and min([p1,p2])<=r2 ])
                                                                                        for i, d in causticIntensities.items() }
 
