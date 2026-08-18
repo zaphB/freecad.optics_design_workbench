@@ -21,7 +21,7 @@ def changeTestDir(monkeypatch):
 
 # parametrized fixture yielding every notebook in the
 allNotebooks = sorted(pathlib.Path(__file__).parent.rglob("*.ipynb"))
-@pytest.fixture(params=allNotebooks, ids=lambda p: p.stem)
+@pytest.fixture(params=allNotebooks, ids=lambda p: p.stem if hasattr(p, 'stem') else '?')
 def eachNotebook(request):
   return request.param
 
