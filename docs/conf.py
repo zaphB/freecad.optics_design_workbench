@@ -21,6 +21,7 @@ _path = os.path.abspath('../freecad/')
 if not os.path.exists(_path):
   raise ValueError(f'path to module {_path} not found')
 sys.path.insert(0, _path)
+sys.path.append('.')
 import optics_design_workbench
 print(optics_design_workbench.__file__)
 print('='*50)
