@@ -172,8 +172,7 @@ def _hackilyUpdateSysPathIfPythonDependenciesMissing():
           import time
           time.sleep(sleep)
           raise ImportError(warnText)
-        for sleep in [.5, 3, 8, 16]:
-          threading.Thread(target=delayedWarn, args=(sleep,), daemon=True).start()
+        threading.Thread(target=delayedWarn, args=(2,), daemon=True).start()
 
 # run on module load
 _hackilyUpdateSysPathIfPythonDependenciesMissing()
