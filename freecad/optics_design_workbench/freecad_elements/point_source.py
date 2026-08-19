@@ -540,7 +540,7 @@ class PointSourceProxy(GenericSourceProxy):
           limit = max([abs(l1), abs(l2)])
           _thetas = linspace(-limit, limit, int(1e5))
           _cumPowers = cumsum( powerVsTheta(_thetas) )
-          _cumPowers /= max(_cumPowers)
+          _cumPowers = _cumPowers/max(_cumPowers)
           _l1, _l2 = _thetas[ argmin(abs(_cumPowers - (1-obj.FanModePowerSpan)/2 )) ], _thetas[ argmin(abs(_cumPowers - (1 - (1-obj.FanModePowerSpan)/2) )) ]
           maxL = max([ abs(_l1), abs(_l2) ])
           if abs(l1) > maxL:

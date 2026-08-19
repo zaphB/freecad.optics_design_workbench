@@ -340,11 +340,12 @@ class OpticalGroupViewProxy(common.GenericFreecadElementViewProxy):
 
   def getIcon(self):
     '''Return the icon which will appear in the tree view. This method is optional and if not defined a default icon is shown.'''
-    return find.iconpath(NON_SERIALIZABLE_STORE[self].OpticalType.lower())
+    if self in NON_SERIALIZABLE_STORE.keys():
+      return find.iconpath(NON_SERIALIZABLE_STORE[self].OpticalType.lower())
+    return find.iconpath('vacuum')
 
   def attach(self, vobj):
     NON_SERIALIZABLE_STORE[self] = vobj.Object
-    pass
 
   def updateData(self, obj, prop):
     '''If a property of the handled feature has changed we have the chance to handle this here'''

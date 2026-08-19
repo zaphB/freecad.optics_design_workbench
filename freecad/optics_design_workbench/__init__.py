@@ -135,9 +135,9 @@ def _hackilyUpdateSysPathIfPythonDependenciesMissing():
         "Thanks a lot for your help!\n\n"
         "The optics_design_workbench requires the following python package(s) to be "
         "importable in the freecad python shell: "+dependencies+". ")
-      warningTextMid = ("(which will make this annoying warning disappear, too). Proper way (1) "
+      warningTextMid = ("(which will make this annoying warning disappear, too). Proper way #1 "
         "is to use the AddOn manger to install the workbench. It should take care of installing the "
-        "python dependencies, but this may fail in some edge cases. Proper way (2) is to invoke pip "
+        "python dependencies, but this may fail in some edge cases. Proper way #2 is to invoke pip "
         "from within the freecad python shell like this: 'import pip; pip.main(['install', 'atomicwrites'])', "
         "but again this may fail in some edge cases. ")
       try:
@@ -149,9 +149,9 @@ def _hackilyUpdateSysPathIfPythonDependenciesMissing():
       except Exception:
         warnText = (warningTextBegin+"These package(s) were not importable even after injecting the following "
           "system python's packages folders into sys.path: "+', '.join(injections)+f". "+severeness
-          +warningTextMid+"Last resort is the hacky way (3): install "
-          "the before-mentioned python package(s) in your system python shell and hope for the best. "
-          "Good luck!")
+          +warningTextMid+"Last resort is the hacky way #3: install "
+          "the before-mentioned python package(s) for your system's global python (e.g. /usr/lib/python...) "
+          "and hope for the best. Good luck!")
       warnText += '\n\n'+versionInfo(_returnText=True)+'\n\n'+'*'*80+'\n\n'
       def breakLine(l):
         res = []
@@ -167,14 +167,13 @@ def _hackilyUpdateSysPathIfPythonDependenciesMissing():
 
       # emit exception with delay to make it visible in the freecad GUI (if -c option is not present)
       if '-c' not in sys.argv:
-        pass
-        #import threading
-        #def delayedWarn(sleep):
-        #  import time
-        #  import warnings
-        #  time.sleep(sleep)
-        #  warnings.warn(warnText)
-        #threading.Thread(target=delayedWarn, args=(2,), daemon=True).start()
+        import threading
+        def delayedWarn(sleep):
+          import time
+          import warnings
+          time.sleep(sleep)
+          warnings.warn(warnText)
+        threading.Thread(target=delayedWarn, args=(5,), daemon=True).start()
 
 # run on module load
 _hackilyUpdateSysPathIfPythonDependenciesMissing()

@@ -10,6 +10,7 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 import time
 import threading
 
+from ..detect_pyside import *
 from .point_source import *
 from .surface_source import *
 from .replay_source import *
@@ -31,11 +32,17 @@ def loadAll():
   loadSimulationSettings()
   loadSimulationActions()
 
-  # run auto repair of document
-  def delayedRepair():
-    time.sleep(5)
+  # run auto repair of document using (cannot be done in background thread)
+  timer = QTimer()
+  _repairIterations = 0
+  def _delayedRepair():
+    nonlocal _repairIterations
     repairAllProxies(quiet=True)
-  threading.Thread(target=delayedRepair, daemon=True).start() 
+    _repairIterations += 1
+    if _repairIterations > 3:
+      timer.stop()
+  timer.timeout.connect(_delayedRepair)
+  timer.start(3000)
 
 
 def collectGlobalInfo():

@@ -15,7 +15,7 @@ from optics_design_workbench import jupyter_utils
 # run all tests in this module with cwd set the examples/1-getting-started directory
 @pytest.fixture(autouse=True)
 def changeTestDir(monkeypatch):
-  p = os.path.dirname(__file__+'/../../examples/1-getting-started')
+  p = os.path.dirname(__file__)+'/../../examples/1-getting-started'
   print(f'running test in folder {p}')
   monkeypatch.chdir(p)
 
