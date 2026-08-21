@@ -127,8 +127,8 @@ Use the *make simulation settings* |add-settings| button to add an *OpticalSimul
 Multiple *OpticalSimulationsSettings* are allowed in a project to conveniently switch between e.g. coarse and fine simulation settings. Only one of them can have its *Active* property set to *True*. The *Active* property is kept in sync with the *Visibility* view property, therefore an inactive simulation settings object can conveniently be switched to *Active=True* by selecting it and pressing space. Switching a simulation settings object to *Active=True* will automatically set all other settings objects to *Active=False*.
 
 
-Adding an detector
-------------------
+Adding a detector
+-----------------
 
 After learning how to setup and configure ray tracing simulations, our next and final task for this chapter will be to simulate and visualize the power density at a given beam cross section.
 
