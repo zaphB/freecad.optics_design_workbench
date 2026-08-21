@@ -92,7 +92,8 @@ echo
 ./dev/download-latest-appimage.sh
 
 # run actual tests
-uv run pytest "${OPTS[@]}" "${TESTS[@]}" || exit 1
+uv run pytest "${OPTS[@]}" "${TESTS[@]}"
+exitCode=$?
 
 # run coverage report updates only when all tests were run
 # and only default options were used (e.g. no -m 'filter' was used)
@@ -106,8 +107,8 @@ if [[ $ISDEFAULTTESTS == 1 ]] && [[ $ISDEFAULTOPTS == 1 ]]; then
   uv run coverage html
 fi
 
-# run cleanup only for full test run
-if [[ $ISDEFAULTTESTS == 1 ]]; then
+# run cleanup only for full test run and if successful
+if [[ $exitCode == 0 ]] && [[ $ISDEFAULTTESTS == 1 ]]; then
   echo 
   echo '=============================='
   echo 'running post test cleanup...'
@@ -115,5 +116,5 @@ if [[ $ISDEFAULTTESTS == 1 ]]; then
   echo 'all done'
 fi
 
-# exit success
-exit 0
+# exit with returncode given by pytest
+exit $exitCode
