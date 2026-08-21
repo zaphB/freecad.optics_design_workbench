@@ -166,7 +166,7 @@ A more flexible way to sweep and optimize
 
 
 
-For detailed list of all available see the API reference of the two classes discussed in the this section:
+For detailed list of all available methods and arguments see the API reference of the class discussed in the this section:
 
 .. currentmodule:: optics_design_workbench.jupyter_utils
 .. autosummary:: 
@@ -179,5 +179,5 @@ For detailed list of all available see the API reference of the two classes disc
 :Footnotes:
 
   .. [#] I agree that this workflow is a little awkward and having to 
-    wait for the FreeCAD startup every time you open the GUI gets 
-    annoying a while. The best solution would of course be be to have jupyter notebook and FreeCAD GUI open in parallel and keep all changes in sync between both. This challenging for technical reasons but will hopefully be implemented in the future.
+    wait for the FreeCAD startup every time you open the GUI 
+    is annoying. The best solution would of course be be to have jupyter notebook and FreeCAD GUI open in parallel and keep all changes in sync between both. This challenging for technical reasons but will hopefully be implemented in the future.
