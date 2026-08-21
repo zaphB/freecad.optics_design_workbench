@@ -1,0 +1,36 @@
+/* avoid bright background appearing in dark theme */
+.bd-content {
+  color: var(--pst-color-text-base);
+  background: var(--pst-color-background);
+}
+
+/* avoid padding and bright background color injected by the notebook html */
+.jp-Notebook {
+  padding: inherit !important;
+  background: inherit !important;
+  font-size: inherit !important;
+}
+
+/* improve cell execution count number readability */
+.jp-InputPrompt {
+  color: var(--pst-color-text-base) !important;
+}
+
+/* make sure code input/output areas use PyData's surface color. */
+.inline-notebook .input_area,
+.inline-notebook .output_area,
+.inline-notebook pre {
+  background: var(--pst-color-surface) !important;
+  color: var(--pst-color-on-surface) !important;
+}
+
+/* tweak lower padding of notebook cells */
+.inline-notebook main {
+  padding-top: 0px;
+  padding-bottom: 8px;
+}
+
+/* slightly increase bottom padding for sections */
+article > section {
+  padding-bottom: 35px;
+}
