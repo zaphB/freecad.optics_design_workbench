@@ -62,6 +62,7 @@ dev = [
   "numpydoc",
   "pydata-sphinx-theme",
   "sphinx-autobuild>=2025.8.25",
+  "nbsphinx>=0.9.8",
 ]
 
 [tool.pytest.ini_options]

@@ -92,6 +92,12 @@ def cachedProperty(obj, prop, method=None, args=(), isMethodInPlace=False):
 def cachedShape(obj):
   return cachedProperty(obj, 'Shape')
 
+def cachedShells(obj):
+  return cachedProperty(obj, 'Shells')
+
+def cachedSolids(obj):
+  return cachedProperty(obj, 'Solids')
+
 def cachedPlacementMatrix(obj):
   return cachedProperty(obj, 'Placement', method='toMatrix')
 

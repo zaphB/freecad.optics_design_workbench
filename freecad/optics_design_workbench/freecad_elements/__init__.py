@@ -7,6 +7,10 @@ __copyright__ = 'Copyright 2024  W. Braun (epiray GmbH)'
 __authors__ = 'P. Bredol'
 __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 
+import time
+import threading
+
+from ..detect_pyside import *
 from .point_source import *
 from .surface_source import *
 from .replay_source import *
@@ -15,6 +19,7 @@ from .simulation_settings import *
 from .simulation_actions import *
 from .common import *
 from . import find
+
 
 def loadAll():
   '''
@@ -26,6 +31,18 @@ def loadAll():
   loadGroups()
   loadSimulationSettings()
   loadSimulationActions()
+
+  # run auto repair of document using (cannot be done in background thread)
+  timer = QTimer()
+  _repairIterations = 0
+  def _delayedRepair():
+    nonlocal _repairIterations
+    repairAllProxies(quiet=True)
+    _repairIterations += 1
+    if _repairIterations > 3:
+      timer.stop()
+  timer.timeout.connect(_delayedRepair)
+  timer.start(3000)
 
 
 def collectGlobalInfo():

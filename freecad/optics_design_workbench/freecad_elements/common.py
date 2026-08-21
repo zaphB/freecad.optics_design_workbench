@@ -175,6 +175,73 @@ def keepGuiResponsiveAndRaiseIfSimulationDone(**kwargs):
 
 
 ###################################################################################
+# AUTOMATIC PROXY RESTAURATION
+
+_LAST_REPAIR_CALL = 0
+def repairAllProxies(quiet=False):
+  '''
+  Go through all objects in document and check for objects with properties matching 
+  one of the workbench classes, but without any proxy or view proxy. Assume the document
+  was damaged and create new proxies in these cases. 
+  '''
+  global _LAST_REPAIR_CALL
+  if time.time()-_LAST_REPAIR_CALL > 1:
+    _LAST_REPAIR_CALL = time.time()
+    t0 = time.time()
+    if not quiet:
+      io.verb(f'begin proxy auto-repair...')
+    fixedSomething = False
+
+    # loop through all objects (and linked objects)
+    from . import find
+    for obj in find._allObjects():
+      
+      # check only objects with recognizable names and without proxy
+      if ( obj.Name.startswith('Optical')
+            and (not hasattr(obj, 'Proxy') or obj.Proxy is None) ):
+
+        if not quiet:
+          io.verb(f'{obj.Name=} ({obj.Label=}) looks like it needs repair... ')
+
+        # go though all proxy types the workbench as
+        from ..freecad_elements import ( OpticalGroupProxy, OpticalGroupViewProxy, PointSourceProxy, 
+                    PointSourceViewProxy, ReplaySourceProxy, ReplaySourceViewProxy, SimulationSettingsProxy,
+                    SimulationSettingsViewProxy, SurfaceSourceProxy, SurfaceSourceViewProxy )
+        for Proxy, ViewProxy in [
+          (OpticalGroupProxy, OpticalGroupViewProxy),
+          (PointSourceProxy, PointSourceViewProxy),
+          (ReplaySourceProxy, ReplaySourceViewProxy),
+          (SimulationSettingsProxy, SimulationSettingsViewProxy),
+          (SurfaceSourceProxy, SurfaceSourceViewProxy)
+        ]:
+
+          # instantiate proxy and check whether property match is good enough
+          proxy = Proxy()
+          totalProps = 0
+          existingProps = 0
+          for cat, props in proxy._properties():
+            totalProps += len(props)
+            for prop in props:
+              propName = prop[0]
+              if hasattr(obj, propName):
+                existingProps += 1
+          # match? -> repair
+          if existingProps > 5 and existingProps > totalProps-3:
+            if not quiet:
+              io.verb(f' -> indeed! re-creating proxies for {obj.Label=} ({obj.Name=})')
+            fixedSomething = True
+            obj.Proxy = proxy
+            obj.ViewObject.Proxy = ViewProxy(obj)
+          else:
+            if not quiet:
+              io.verb(f' -> nevermind, properties look unfamiliar, leaving object as it is')
+    pre = ''
+    if not fixedSomething:
+      pre = 'nothing to repair, '
+    if not quiet:
+      io.verb(f'{pre}finished auto-repairing proxies in {time.time()-t0:.1f} s')
+
+###################################################################################
 # PROTOTYPES FOR FREECAD ELEMENT PROXY CLASSES
 
 class GenericFreecadElementProxy:
@@ -295,6 +362,7 @@ class GenericFreecadElementProxy:
 
   def execute(self, obj):
     '''Do something when doing a recomputation, this method is mandatory'''
+    repairAllProxies()
     self._ensurePropertiesExist(obj)
 
   def onChanged(self, obj, prop):

@@ -552,8 +552,8 @@ class SimulationResults:
   def performanceDescription(self):
     # disable reporting to prevent endless recursion
     p = self.getProgress(_neverReport=True)
-    return (f'{60*60*p.get("totalTracedRays", 0)/(time.time()-self.t0):.1e} rays/hour, '
-            f'{60*60*p.get("totalRecordedHits", 0)/(time.time()-self.t0):.1e} recorded hits/hour')
+    return (f'{p.get("totalTracedRays", 0)/(time.time()-self.t0):.1e} rays/s, '
+            f'{p.get("totalRecordedHits", 0)/(time.time()-self.t0):.1e} recorded hits/s')
 
   def getProgressByWorker(self):
     # find all files in progress dir
