@@ -39,7 +39,7 @@ def _allObjects(doc=None, checkedDocs=None):
       return True
 
   # iterate through all objects in odc
-  for obj in doc.Objects:
+  for obj in getattr(doc, "Objects", None) or []:
     if _isDeleted(obj):
       continue
 

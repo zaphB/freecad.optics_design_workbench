@@ -159,11 +159,11 @@ def cleanupUnneededWorkers():
       _t0 = time.time()
       while w.isRunning():
         if time.time()-_t0 < 5:
-          worker.quit()
+          w.quit()
         elif time.time()-_t0 < 10:
-          worker.terminate()
+          w.terminate()
         else:
-          worker.kill()
+          w.kill()
         time.sleep(1e-2)
 
 def simulatingDocument():

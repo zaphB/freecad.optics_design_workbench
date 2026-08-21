@@ -102,7 +102,7 @@ class SweeperOptimizeWorker:
       self._process = _mpCtx().Process(
                           target=_unpickleAndWork, 
                           args=(pickledSelf, 
-                                freecad_document._DEFAULT_FREECAD_EXECUTABLE), 
+                                freecad_document._GET_FREECAD_EXECUTABLE()), 
                           daemon=True ) # <- kill process after parent has exited
 
   def freshClone(self):
@@ -229,22 +229,23 @@ class MetaParameter:
 class ParameterSweeper:
   '''
   The parameter sweeper allows to conveniently set/get/sweep/optimize 
-  parameters in the freecad files using given names, instead of the 
-  lengthy descriptions in the document tree.
-
-  Arguments:
-
-  getParameterFunc : function
-    Define how named parameters are mapped to nodes in the freecad document. 
-    The function has to accept one parameter, the FreecadDocument instance and
-    is expected to return a dictionary. Keys in the returned dictionary are
-    the sweepable parameter names, values of the dictionary are the 
-    FreecadDocument parameter nodes.
-    The odd indirect definition through as a function is necessary, because
-    reopening the freecad file requires to rebuilt the references to freecad
-    objects.
+  parameters in the .FCStd files using handy short names instead of the 
+  lengthy descriptions document tree paths.
   '''
   def __init__(self, getParametersFunc, freecadDocumentKwargs={}):
+    '''
+    Arguments:
+
+    getParameterFunc : function
+      Define how named parameters are mapped to nodes in the freecad document. 
+      The function has to accept one parameter, the FreecadDocument instance and
+      is expected to return a dictionary. Keys in the returned dictionary are
+      the sweepable parameter names, values of the dictionary are the 
+      FreecadDocument parameter nodes.
+      The odd indirect definition through as a function is necessary, because
+      reopening the freecad file requires to rebuilt the references to freecad
+      objects.
+    '''
     # close all open sweepers when a new one is created to prevent
     # to make life in jupyter notebooks easier
     while len(_ALL_OPEN_SWEEPERS):
@@ -260,8 +261,20 @@ class ParameterSweeper:
     self._optimizeStepsArgCache = {}
   
   def addMetaParameters(self, metaParameterFunc):
+    '''
+    Register meta parameters, that is parameters that are not 1:1 corresponding to 
+    FreeCAD model parameters. This method expects one function as the argument. The
+    first parameter to this function is 'f', the FreecadDocument. Each further 
+    function parameter is a MetaParameter key. The return value is expected to be
+    a dictionary, each key of which is again a parameter name.
+    When the meta-pareter is set using sweeper.set(...), the passed function will
+    be called and the resulting dict will be passed to sweeper.set(...) recursively.
+    '''
     newMetaParams = {}
-    for argName in list(inspect.signature(metaParameterFunc).parameters.keys())[1:]:
+    relevantArgs = list(inspect.signature(metaParameterFunc).parameters.keys())[1:]
+    if not len(relevantArgs):
+      raise ValueError(f'function ')
+    for argName in relevantArgs:
       if argName in list(self.parameters().keys()):
         raise ValueError(f'meta parameter function argument {repr(argName)} '
                          f'conflicts with existing parameter. Did you already '
@@ -394,14 +407,20 @@ class ParameterSweeper:
       for setKey, setVal in kwargs.items():
         # restrict set val if bounds are exceeded
         b1, b2 = boundsDict[setKey]
-        if setVal < b1:
-          io.warn(f'trying to set parameter {setKey} to {setVal}, which is below '
-                  f'lower bound {b1}. Setting to lower bound {b1} instead.')
-          setVal = b1
-        if setVal > b2:
-          io.warn(f'trying to set parameter {setKey} to {setVal}, which is above '
-                  f'upper bound {b2}. Setting to upper bound {b2} instead.')
-          setVal = b2
+        try:
+          setVal > b1
+        except TypeError:
+          # silently skip bounds checks if param value is not comparable (e.g. string)
+          pass
+        else:
+          if setVal < b1:
+            io.warn(f'trying to set parameter {setKey} to {setVal}, which is below '
+                    f'lower bound {b1}. Setting to lower bound {b1} instead.')
+            setVal = b1
+          if setVal > b2:
+            io.warn(f'trying to set parameter {setKey} to {setVal}, which is above '
+                    f'upper bound {b2}. Setting to upper bound {b2} instead.')
+            setVal = b2
 
         # update value but dont apply meta params right away 
         paramDict[setKey].set(setVal, dontApplyMetaParamYet=True)
@@ -498,6 +517,8 @@ class ParameterSweeper:
     global CLOSE_FREECAD_TIMEOUT
 
     # Cache positional argument values, too. Assume Nones mean parameter was not given
+    if not hasattr(self, '_optimizeStepsPosArgCache'):
+      self.optimizeStrategyBegin()
     self._optimizeStepsPosArgCache.update({k:v for k,v in locals().items() if k not in ('self', 'args') and v is not None})
     progressCallback = self._optimizeStepsPosArgCache.get('progressCallback', None)
     relWaitForParallel = self._optimizeStepsPosArgCache.get('relWaitForParallel', .5)
@@ -615,9 +636,10 @@ class ParameterSweeper:
                 ax1.set_ylim([l-.05*(u-l), u+0.5*(u-l)])
             ax1.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
-            ax1.set_title(f'penalty history ({len(activeWorkers)}/{jobCount} workers busy)', fontsize=10)
+            ax1.set_title(f'minimizeFunc history ({len(activeWorkers)}/{jobCount} workers busy)', fontsize=10)
 
             # save plot to disk
+            tight_layout()
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
 
             # show plot in notebook
@@ -817,10 +839,18 @@ class ParameterSweeper:
             sca(ax1)
             sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
                             style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
-                                        ).set(xlabel='time', ylabel='penalty')
+                                        ).set(xlabel='time', ylabel='minimizeFunc value')
             gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))
-            gca().set_title(f'penalty history', fontsize=10) 
+            gca().set_title(f'minimizeFunc history', fontsize=10) 
+            _allFinitePenalties = [p[1] for p in allParamsHist if isfinite(p[1])]
+            if len(_allFinitePenalties) > 50:
+              l, u = min(_allFinitePenalties), quantile(_allFinitePenalties, .5)
+              if min(_allFinitePenalties) > 0 and u/l > 30:
+                ax1.semilogy()
+                ax1.set_ylim([l / (u/l)**0.05, u * (u/l)**0.5])
+              else:
+                ax1.set_ylim([l-.05*(u-l), u+0.5*(u-l)])
 
             # save plot to disk
             savefig(f'{self.resultsPath()}/optimize-progress.pdf')
@@ -843,7 +873,7 @@ class ParameterSweeper:
 
           # update history lists and shorten if necessary
           if penalty < bestPenaltySoFar:
-            io.verb(f'found new optimum: {penalty=}, {paramDict=}')
+            io.verb(f'found new optimum: {minimizeFunc=}, {paramDict=}')
             allParamsHist.append([time.time(), penalty, True, 
                                   os.path.realpath(resultFolder.path()), paramDict, 
                                   optimizeParams])

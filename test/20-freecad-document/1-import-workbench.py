@@ -6,6 +6,7 @@ __url__ = 'https://github.com/zaphB/freecad.optics_design_workbench'
 from numpy import *
 import pytest
 import os
+import time
 
 from optics_design_workbench import jupyter_utils
 
@@ -19,6 +20,7 @@ def changeTestDir(monkeypatch):
 
 def test_workbenchRegistered():
   with jupyter_utils.FreecadDocument() as f:
+    time.sleep(5)
     res = f.execInFreecadShell(r'''
         allWb = Gui.listWorkbenches().keys()
         print(f'registered workbenches: {allWb}')
@@ -28,5 +30,6 @@ def test_workbenchRegistered():
 
 def test_importWorkbenchModule():
   with jupyter_utils.FreecadDocument() as f:
+    time.sleep(5)
     print( f.execInFreecadShell('import freecad.optics_design_workbench') )
     print( f.execInFreecadShell('print( freecad.optics_design_workbench.versionInfo() )') )

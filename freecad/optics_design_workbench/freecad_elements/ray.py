@@ -293,36 +293,39 @@ class Ray():
     of given start and direction. Start and direction are expected to be
     given in global coordinates.
     '''
+
+    # IMPORTANT NOTE ON MEMORY LEAKS: 
+    
+    # This loop makes various calls that cause the memory allocations on the C++ side, e.g. 
+    # obj.Shape, shape.BoundBox, Part.makeLine, line.Curve, etc. Each of these calls 
+    # potentially causes memory leaks because it is not possible to free this memory from
+    # the python side (that's us). Experience has shown that FreeCAD/OCC do not clean up 
+    # completely even after many hours, only if  the simulation has ended. Freecad/OCCs 
+    # memory management apparently waits for the python frame to end before cleanup up, in
+    # our case this only when we give control back to the FreeCAD GUI and we cannot continue
+    # to simulate. Therefore, in a simulation that runs continuously for a long time we have
+    # to possibility to trigger FreeCAD/OCCs garbage collection mechanisms.
+
+    # Here is what we can do to keep memory consumption under control:
+    # Where possible use raytracing_cache functions cachedBoundBox, cachedShape, ... These 
+    # will avoid recreating any C++ objects as e.g. obj.Shape would do. This works for 
+    # Shapes, Faces, Surfaces etc of static geometric objects in the project. This is not 
+    # useful for anything that depends on the current ray, because it does not make sense 
+    # to cache it if the next ray will be different and no two rays will be identical in 
+    # Monte Carlo runs. 
+    # Transforming a Shape/Face/etc creates a copy on the C++ side thus allocates memory 
+    # that we cannot free explicitly.
+    # It is thus important to use transformation matrices to convert _ray_ coordinates to
+    # local coordinate systems of Shapes/Faces/etc. wherever possible to be able to work
+    # with the cached Shape/Face/etc objects as often as possible.
+
     distTol = self._getDistTol(distTol)
     intersects = []
-    
-    # loop through all relevant optical groups
+
+    # loop through all relevant optical groups and identify possible candidates for next
+    # intersections using cheaply calculable things first
+    candidates = []
     for group in find.relevantOpticalObjects(self.lightSource, sequenceIndex=sequenceIndex):
-
-      # IMPORTANT NOTE ON MEMORY LEAKS: 
-      
-      # This loop makes various calls that cause the memory allocations on the C++ side, e.g. 
-      # obj.Shape, shape.BoundBox, Part.makeLine, line.Curve, etc. Each of these calls 
-      # potentially causes memory leaks because it is not possible to free this memory from
-      # the python side (that's us). Experience has shown that FreeCAD/OCC do not clean up 
-      # completely even after many hours, only if  the simulation has ended. Freecad/OCCs 
-      # memory management apparently waits for the python frame to end before cleanup up, in
-      # our case this only when we give control back to the FreeCAD GUI and we cannot continue
-      # to simulate. Therefore, in a simulation that runs continuously for a long time we have
-      # to possibility to trigger FreeCAD/OCCs garbage collection mechanisms.
-
-      # Here is what we can do to keep memory consumption under control:
-      # Where possible use raytracing_cache functions cachedBoundBox, cachedShape, ... These 
-      # will avoid recreating any C++ objects as e.g. obj.Shape would do. This works for 
-      # Shapes, Faces, Surfaces etc of static geometric objects in the project. This is not 
-      # useful for anything that depends on the current ray, because it does not make sense 
-      # to cache it if the next ray will be different and no two rays will be identical in 
-      # Monte Carlo runs. 
-      # Transforming a Shape/Face/etc creates a copy on the C++ side thus allocates memory 
-      # that we cannot free explicitly.
-      # It is thus important to use transformation matrices to convert _ray_ coordinates to
-      # local coordinate systems of Shapes/Faces/etc. wherever possible to be able to work
-      # with the cached Shape/Face/etc objects as often as possible.
 
       # get all global placement transform matrices from group and run intersect checks
       # for all of them (links may cause multiple placement transforms to coexist)
@@ -336,70 +339,119 @@ class Ray():
         gpMi = pM*gpMi
 
         # only care if bounding box is closer to start point than maxRayLength and 
-        # if bounding box actually intersects with the ray
+        # if bounding box actually intersects with the ray (some objects to hot have
+        # .Shells, in these cases use .Shape directly)
         if hasattr(group, 'Shape'):
-          # fetch bounding box
-          sbb = cachedBoundBox(cachedShape(group), enlarge=distTol)
+          for shell in cachedShells(cachedShape(group)) or [cachedShape(group)]:
 
-          # find start and direction vectors in local coordinates of optical group
-          lstart = gpMi*start 
-          ldirection = gpMi*(start+direction)-lstart
+            # find start and direction vectors in local coordinates of optical group
+            lstart = gpMi*start 
+            ldirection = gpMi*(start+direction)-lstart
 
-          # create line already here because it involves a small (unavoidable) memory leak
-          line = Part.makeLine(lstart, lstart+ldirection/ldirection.Length*maxRayLength)
-          # check if bounding box is hit by ray
-          if ( ( not isfinite(maxRayLength)
-                  or any([(sbb.getPoint(i)-lstart).Length < 2*maxRayLength 
-                                                              for i in range(8)]) )
-              and sbb.intersect(lstart, ldirection) ):
+            # fetch bounding box and calculate min dist between bounding box and lstart
+            # (which is zero if lstart lies within bound box)
+            sbb = cachedBoundBox(shell, enlarge=distTol)
+            if sbb.isInside(lstart):
+              bbDist = 0
+            else:
+              bbDist = (sbb.closestPoint(lstart)-lstart).Length
             
-            # loop through all faces
-            for face in cachedFaces(cachedShape(group)):
+            # check if bounding box closer than maxRayLength to ray origin
+            if ( not isfinite(maxRayLength)
+                  or bbDist < maxRayLength ):
+
+              # add to list of candidates
+              candidates.append([lstart, ldirection, group, shell, sbb, gpM, gpMi, pM, pMi, bbDist])
+    
+    # sort all identified candidates by their bounding box distances to lstart
+    candidates = sorted(candidates, key=lambda e: e[-1])
+
+    # go trough candidates and now do the more expensive checks, find exact intersections
+    # and go through all faces
+    for lstart, ldirection, group, shell, sbb, gpM, gpMi, pM, pMi, bbDist in candidates:                
+
+      if (bbDist < maxRayLength # <- do this check again because maxRayLength have become shorter
+          and sbb.intersect(lstart, ldirection) ):
+        
+        # create line already here because it involves a small (unavoidable) memory leak
+        line = Part.makeLine(lstart, lstart+ldirection/ldirection.Length*maxRayLength)
+
+        # first collect all faced and their bounding box dists to lstart in this list
+        faceCandidates = []
+
+        # loop through all faces
+        for face in cachedFaces(shell):
+
+          # this loop may run for quite some time, keep GUI responsive by handling events
+          keepGuiResponsiveAndRaiseIfSimulationDone()
+
+          # fetch face bounding box and calculate min dist between bounding box and lstart
+          # (which is zero if lstart lies within bound box)
+          fbb = cachedBoundBox(face, enlarge=distTol)
+          if fbb.isInside(lstart):
+            fbbDist = 0
+          else:
+            fbbDist = (fbb.closestPoint(lstart)-lstart).Length
+
+          # only care if bounding box of face is close enough to lstart and intersects with ray
+          if ( fbbDist < maxRayLength
+               and fbb.intersect(lstart, ldirection) ):
+
+            # add valid candidate
+            faceCandidates.append([face, fbb, line, fbbDist])
+
+        # sort all identified candidates faces by their bounding box distances to lstart
+        faceCandidates = sorted(faceCandidates, key=lambda e: e[-1])
+
+        # go through face candidates and do the expensive calculations to find exact intersection point
+        for face, fbb, line, fbbDist in faceCandidates:
+
+          # find intersection points and loop through all of them
+          if ( fbbDist < maxRayLength  # <- do this check again because maxRayLength have become shorter
+               and (intersect := line.Curve.intersect(cachedSurface(face))) ):
+            points, _ = intersect
+            for point in points:
 
               # this loop may run for quite some time, keep GUI responsive by handling events
               keepGuiResponsiveAndRaiseIfSimulationDone()
 
-              # only care if bounding box of face intersects with ray
-              fbb = cachedBoundBox(face, enlarge=distTol)
-              if fbb.intersect(lstart, ldirection):
+              vec = Vector(point.X, point.Y, point.Z)
+              vert = Part.Vertex(point)
 
-                # find intersection points and loop through all of them
-                if intersect := line.Curve.intersect(cachedSurface(face)):
-                  points, _ = intersect
-                  for point in points:
+              # if found intersection point has some finite distance from 
+              # origin and lies within the target face and on the line,
+              # add to candidate list
+              if ( (vec-lstart).Length > distTol
+                    and vert.distToShape(line)[0] < distTol
+                    and vert.distToShape(face)[0] < distTol):
+                intersects.append([group, (gpM, gpMi, face), gpM*vec, (vec-lstart).Length])
 
-                    # this loop may run for quite some time, keep GUI responsive by handling events
-                    keepGuiResponsiveAndRaiseIfSimulationDone()
+                # update maxRayLength to length of found intersection plus a little tolerance
+                # because we only want to find the nearest intersection, i.e. nearer to than
+                # initial point than all intersections that we already found
+                maxRayLength = (vec-lstart).Length + 5*distTol
 
-                    vec = Vector(point.X, point.Y, point.Z)
-                    vert = Part.Vertex(point)
+    # return None if no intersection was found
+    if not len(intersects):
+      return None
 
-                    # if found intersection point has some finite distance from 
-                    # origin and lies within the target face and on the line,
-                    # add to candidate list
-                    if ( (vec-lstart).Length > distTol
-                          and vert.distToShape(line)[0] < distTol
-                          and vert.distToShape(face)[0] < distTol):
-                      intersects.append([group, (gpM, gpMi, face), gpM*vec, (vec-lstart).Length])
+    # get rid of all intersects with distance further than 2*distTol from closest
+    minDist = min([i[-1] for i in intersects])
+    intersects = [i for i in intersects if i[-1] < minDist+2*distTol ]
 
-    # return intersection that is closest to start (if any), if multiple intersections 
-    # exist that are closer than 2*distTol to the the closest intersection, prefer the
-    # closest, and the ones that have nothing to do with the current medium 
-    minDist = inf
-    result = None
-    for group, face, vec, distance in sorted(intersects, key=lambda e: e[-1]):
-      minDist = min([minDist, distance])
-      # end loop if we are further away from closest intersection than 2*distTol
-      if distance > minDist + 2*distTol:
-        break
-      # overwrite result if no result yet of if intersection is not with current medium
-      if result is None or group != currentMedium:
-        result = (group, face, vec)
-      # stop looking after intersection not with current medium was found
+    # sort found intersections by distance
+    intersects = sorted(intersects, key=lambda e: e[-1])
+
+    # Check if any intersection remaining in the list is not intersection with currentMedium
+    # if so -> return this intersection 
+    for group, face, vec, distance in intersects:
       if group != currentMedium:
-        break
-    return result
+        return (group, face, vec)
+    
+    # if all intersections are with currentMedium, return the closest one
+    return intersects[0][:-1]
   
+
   def getNormal(self, face, fromPoint, toPoint, epsLength=1e-6):
     '''
     calculate the normal vector given, inherited from OpticsWorkbench

@@ -32,6 +32,8 @@ from . import parameter_sweeper
 _PRINT_FREECAD_COMMUNICATION = False
 _PRINT_SETTER_AND_CALL_LINES = False
 
+_ignoreErrorsUntil = 0
+
 # signal handler that kills all running freecad processes
 # in case this process is killed
 def handler(signum, frame):
@@ -128,7 +130,6 @@ def Matrix(*a):
   return array(a)
 
 
-
 class FreecadExpression:
   def __init__(self, exprString):
     self._exprString = exprString
@@ -174,10 +175,9 @@ class FreecadConstraintDict(FreecadPropertyDict):
 
 class FreecadProperty:
   '''
-  FreecadProperty represents a property of an object in the document tree and can 
-  be created from normal python shells without any connection to FreeCAD. It can 
-  be read from and written to as if it was the real freecad property. All 
-  read/writes will be forwarded to the running Freecad child process.
+  The FreecadObject class represents an object in the .FCStd document tree and can be created from normal python shells. It can be read from and
+  written to as if it was the internal FreeCAD object. All read/writes will be forwarded
+  to the running FreeCAD child process.
   '''
   def __init__(self, doc, obj, path, isCall=False, internalObjectName=False):
     self.__dict__['_doc'] = doc
@@ -328,7 +328,12 @@ class FreecadProperty:
     try:
       return eval(_str)
     except Exception:
-      return _str
+      if _str.endswith(' mm'):
+        try:
+          return eval(_str)
+        except Exception:
+          pass
+    return _str
 
   # ----------------------------------
   # CUSTOM ATTRIBUTES AND METHODS
@@ -349,10 +354,9 @@ class FreecadProperty:
 
 class FreecadObject(FreecadProperty):
   '''
-  FreecadObject represents an object from the document tree and can be created from
-  normal python shells without any connection to FreeCAD. It can be read from and
-  written to as if it was the real freecad object. All read/writes will be forwarded
-  to the running Freecad child process.
+  The FreecadObject class represents a property of an object in the .FCStd document tree and can be created from normal python shells. It can be read from and
+  written to as if it was the internal FreeCAD object. All read/writes will be forwarded
+  to the running FreeCAD child process.
   '''
   def __init__(self, doc, obj, internalObjectName=False):
     self.__dict__['_doc'] = doc
@@ -384,7 +388,8 @@ class FreecadObject(FreecadProperty):
                            f'or to use the internal name instead.')
 
       # handle value errors by retrying with "internal name" style instead of label
-      except ValueError:
+      except ValueError as e:
+        io.verb(f'rasied ValueError({e}) -> setting _internalObjectName to True')
         self.__dict__['_internalObjectName'] = True
         self._ensureExists()
 
@@ -448,12 +453,13 @@ def _autodetectFcstdPath(basePath=None):
 
 class FreecadDocument:
   '''
-  FreecadDocument class represents a FCStd document and can be created from normal 
-  python shells without any connection to FreeCAD. The FCStd file properties can
+  The FreecadDocument class represents a .FCStd document and can be created from any 
+  python shell. The .FCStd file properties can
   be manipulated and optical simulations can be started as if we were running within
-  the FreeCAD-shell.
+  the FreeCAD shell.
   
-  The document is intended to be used as a context manager to clean up after itself.
+  FreecadDocument instances are intended to be used as a context manager to ensure
+  proper clean up of child processes and file handles.
   '''
   def __init__(self, path=None, workInTempCopy=False, showProgress=True):
     # register self in global list
@@ -525,6 +531,9 @@ class FreecadDocument:
 
   def __str__(self):
     return f'<FreecadDocument {os.path.basename(self._path)}>'
+  
+  def path(self):
+    return self._path
 
   def resultsPath(self):
     return self._resultsPath
@@ -814,6 +823,7 @@ class FreecadDocument:
     self._t.start()
 
     def readError():
+      global _ignoreErrorsUntil
       for line in iter(self._p.stderr.readline, ''):
         # remove prompt characters from beginning of line
         while line.lstrip().startswith('>>>') or line.lstrip().startswith('...'):
@@ -835,12 +845,21 @@ class FreecadDocument:
           # ignore if line is 'Requested non-existent style parameter token'-type of message type of 
           # line which some FreeCAD versions before 1.1 spammed on startup and the bug may not be fully
           # fixed yet as some reports of regression exist
-          if 'requested non-existent style parameter token' not in line.lower():
-            # remove line ending characters and add to queue
-            while line.endswith('\r') or line.endswith('\n'):
-              line = line[:-1]
-            io.warn(f'received error line {repr(line)}', logOnly=True)
-            self._qe.put(line)
+          if ('requested non-existent style parameter token' not in line.lower()
+              and 'Fontconfig warning:' not in line ):
+
+            # ignore errors for next second if delayedWarn was detected
+            if 'delayedWarn' in line:
+              _ignoreErrorsUntil = time.time()+5
+
+            if _ignoreErrorsUntil > time.time():
+              io.info(line)
+            else:
+              # remove line ending characters and add to queue
+              while line.endswith('\r') or line.endswith('\n'):
+                line = line[:-1]
+              io.warn(f'received error line {repr(line)}', logOnly=True)
+              self._qe.put(line)
         time.sleep(1e-3)
       self._p.stdout.close()
     self._te = threading.Thread(target=readError)
@@ -930,14 +949,14 @@ class FreecadDocument:
   def _fastModeEnabled(self):
     if not self._permanentlyDisableFastMode:
       T = array(self._freecadInteractionTimesList)
-      # enable fast mode if more than 100 freecad interactions
-      # within last 3 seconds, only disable if less then 100
-      # interactions within 10 seconds 
+      # enable fast mode if more than 3000 freecad interactions
+      # within last 10 seconds, only disable if less then 1000
+      # interactions within 30 seconds
       #io.verb(f'{sum( time.time()-T < 5 )=}')
       if self._previousFastModeEnabled:
-        enable = sum( time.time()-T < 10 ) > 100
+        enable = sum( time.time()-T < 30 ) > 1000
       else:
-        enable = sum( time.time()-T < 3 ) > 100
+        enable = sum( time.time()-T < 10 ) > 3000
     else:
       enable = False
 
@@ -961,6 +980,13 @@ class FreecadDocument:
       io.verb('> '+cmdStr.replace('\r', '').strip('\n'))
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
+    # sending something that generates output in addition seems to be necessary in 
+    # recent AppImage versions
+    def _dummy():
+      time.sleep(1e-3)
+      self._p.stdin.write('print("")\r\n\r\n')
+      self._p.stdin.flush()
+    threading.Thread(target=_dummy, daemon=True).start()
 
   def _flushOutput(self, timeout=60, forceCareful=False, keepErrs=False):
     self._updateInteractionTime()
@@ -977,21 +1003,28 @@ class FreecadDocument:
       lastPrintedRn = 0
       rn = None
       while True:
+        # in case some initial errors are still being printed
+        # wait a little
+        while (needsSleep:=(_ignoreErrorsUntil-time.time())) > 0:
+          time.sleep(needsSleep)
+          self.readFreecadShell()
+
         # ask to print random number every few seconds 
         # (scale wait time with time that has passed)
         if time.time()-lastPrintedRn > 1/5*(time.time()-t0):
           lastPrintedRn = time.time()
           rn = f'{random.random():.8f}'
           self.writeToFreecadShell(f'print("{rn}")')
-        
+
         # if random number appears in output: success
         out = self.readFreecadShell()
-        #print(f'waiting for {rn}, found {out}')
+        #if len(out):
+        #  print(f'waiting for {rn}, found {out}')
         if rn in out:
           return
 
         # warn of takes long
-        if time.time()-lastWarned > 5:
+        if time.time()-lastWarned > 15:
           lastWarned = time.time()
           io.warn(f'long waiting time for freecad process to become responsive, '
                   f'waiting since {io.secondsToStr(time.time()-t0)} '
@@ -1000,8 +1033,9 @@ class FreecadDocument:
         # if time is up: raise timeout error
         if time.time()-t0 > timeout:
           raise RuntimeError(f'failed to flush output buffer of FreeCAD, '
-                            f'is a process featuring heavy output printing '
-                            f'running?')
+                             f'is a process featuring heavy output printing '
+                             f'running?')
+        # limit loop speed        
         time.sleep(1e-3)
 
   def readFreecadShell(self, maxLines=inf):
@@ -1011,7 +1045,10 @@ class FreecadDocument:
       # fetch lines until queue.Empty is raised 
       # or maxLines limit is reached
       while len(result) < maxLines:
-        result.append(self._q.get_nowait())
+        line = self._q.get_nowait()
+        if _PRINT_FREECAD_COMMUNICATION:
+          io.verb('< '+line.replace('\r', '').strip('\n'))
+        result.append(line)
     except queue.Empty:
       pass
     return result
@@ -1119,9 +1156,10 @@ class FreecadDocument:
         return returnResult
 
       if error:=self.readFreecadShellErr():
-        raise RuntimeError((f'{errText.strip()}\n' if errText else '')
-                           +f'exception was raised while handling '
-                           +f'command(s) {data}:\n\n'+error)
+        if 'PLEASE READ (and report)' not in error: # <- ignore new import warning
+          raise RuntimeError((f'{errText.strip()}\n' if errText else '')
+                            +f'exception was raised while handling '
+                            +f'command(s) {data}:\n\n'+error)
 
       # check for result line
       if line:=self.readFreecadShellLine():
@@ -1144,7 +1182,7 @@ class FreecadDocument:
           returnAtIteration = iteration + 10
 
       # warn of takes long
-      if time.time()-lastWarned > 5:
+      if time.time()-lastWarned > 15:
         lastWarned = time.time()
         io.warn(f'long waiting time for response from freecad process, waiting '
                 f'since {io.secondsToStr(time.time()-sentCommandT0)} '
@@ -1257,6 +1295,10 @@ def openFreecadGui(*args, **kwargs):
 
   # create dummy-document object to detect all necessary paths 
   document = FreecadDocument(*args, **kwargs)
+  
+  # return quietly if we are running within pytest session
+  if "PYTEST_CURRENT_TEST" in os.environ:
+    return
 
   # launch freecad process
   p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), document._path],
@@ -1318,10 +1360,17 @@ def _rawFolders(basePath='.'):
   return basePath, folders, indices
 
 def rawFolders(basePath='.'):
+  '''
+  Return RawFolderRange of all raw folders under the given basePath.
+  '''
   basePath, folders, indices = _rawFolders(basePath=basePath)
   return RawFolderRange( [os.path.relpath(f'{basePath}/{f}') for f in folders] )
 
 def rawFolderByIndex(index=-1, basePath='.'):
+  '''
+  return contents of the raw folder with given index wrapped in a RawFolder object.
+  Negative indices are counting from the end of the folder range.
+  '''
   basePath, folders, indices = _rawFolders(basePath=basePath)
 
   # interpret positive indices just like number in the directory name
@@ -1335,6 +1384,9 @@ def rawFolderByIndex(index=-1, basePath='.'):
 
 @functools.wraps(rawFolderByIndex)
 def latestRawFolder(*args, **kwargs):
+  '''
+  return contents of the latest raw folder wrapped in a RawFolder object.
+  '''
   return rawFolderByIndex(*args, index=-1, **kwargs)
 
 

@@ -17,6 +17,10 @@ from .. import io
 
 
 class Histogram:
+  '''
+  Class representing a 2D polar or cartesian histogram.
+  '''
+  
   def __init__(self, X, Y, planeNormal, xInPlaneVec, radius=None,
                binCoords='cartesian', origin=None, **kwargs):
     self._planeNormal = planeNormal
