@@ -5,10 +5,18 @@ Getting Started
 
 The Optics Design Workbench is (or intends to be) a physically accurate geometric forward ray-tracer with seamless FreeCAD and jupyter-lab integration. Ray tracing is a suitable approximation to calculate the propagation of waves whenever diffraction and interference effects are negligible. As the name implies the optics design workbench is mainly intended for optics design and uses the language of optics in all its components. However it is in principle applicable to any wave propagation problem when the ray tracing approximation is viable.
 
-The `Optics Design Workbench`_ is inspired by the `Optics Workbench`_ but follows different goals. The optics workbench puts its focus on being self-explanatory to allow for a smooth learning-by-doing experience without the need to bother with external software like jupyter notebooks. The optics design workbench includes more complex simulation and optimization schemes at the cost of having "a bit of a learning curve". So if you neither need light sources with freely configurable emission power density distribution, nor Monte-Carlo simulation nor a python integration to interface optimizers, give the optics workbench a try first.
+..
+  --------------------------------------------------------------
+  only change the following paragraph after making sure 
+  the Optics Workbench author agrees
+
+The `Optics Design Workbench`_ is inspired by the `Optics Workbench`_ but follows different goals. The Optics Workbench puts its focus on being self-explanatory to allow for a smooth learning-by-doing experience without the need to bother with external software like jupyter notebooks. The Optics Design Workbench includes more complex simulation and optimization schemes at the cost of having "a bit of a learning curve". So if you neither need light sources with freely configurable power density distribution, nor Monte-Carlo simulation nor a jupyter integration, the `Optics Workbench`_ is most likely the better choice.
 
 .. _`Optics Workbench`: https://github.com/chbergmann/OpticsWorkbench
 .. _`Optics Design Workbench`: .
+..
+  --------------------------------------------------------------
+
 
 As mentioned, the workbench comes with *two* integrations, or two faces if you want: The workbench is a FreeCAD Addon, designed to be used in the FreeCAD GUI and integrate well with the CAD model development process. At the same time it is a python package optimized for usage in jupyter lab environments to enjoy the benefits of the entire scientific python ecosystem, e.g. data visualization, fit routines, optimizers, connectivity with other software, FEM solvers or your own python package. In this documentation the python package is usually mentioned in the context of jupyter notebooks, but in principle it can be installed in any other python environment which you have the power to install packages into. Depending on your application you will likely use either the FreeCAD GUI integration or the jupyter integration more intensely than the other, however you will likely have to gain a basic understanding of both integrations to complete any meaningful task.
 
