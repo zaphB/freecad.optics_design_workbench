@@ -1,3 +1,25 @@
+/* slightly extend content column to better fit figures and long titles */
+.bd-page-width {
+  max-width: 120rem;
+}
+.bd-article-container {
+  max-width: 75rem;
+}
+
+/* change sizing of right column */
+.bd-sidebar-secondary {
+  width: auto;
+  max-width: 15rem;
+  max-width: 90rem;
+}
+
+/* tweak formatting of module path line shown above API doc page headings */
+.modpath-caption {
+  font-size: 0.85em;
+  color: var(--pst-color-text-muted);
+  margin-bottom: -0.4em;
+}
+
 /* avoid bright background appearing in dark theme */
 .bd-content {
   color: var(--pst-color-text-base);
