@@ -87,7 +87,7 @@ class SweeperOptimizeWorker:
     # Also remove the threading lock object (and make sure to own it 
     # beforehand), which cannot be passed to the child process.
     # The lock will be recreated next time it is needed.
-    with sweeper.freecadDocumentLock():
+    with sweeper._freecadDocumentLock():
       self._sweeperInstance = sweeper
       self._sweeperInstance.close()
       self._sweeperInstance._freecadLock = None
@@ -228,24 +228,26 @@ class MetaParameter:
 
 class ParameterSweeper:
   '''
-  The parameter sweeper allows to conveniently set/get/sweep/optimize 
-  parameters in the .FCStd files using handy short names instead of the 
-  lengthy descriptions document tree paths.
+  The parameter sweeper allows to conveniently set/get/sweep/optimize parameters in the .FCStd files using handy short names instead of the lengthy descriptions document tree paths.
+
+  Parameters
+  ----------
+
+  getParametersFunc : function
+    Define how named parameters are mapped to nodes in the freecad document. 
+    The function has to accept one parameter, the FreecadDocument instance and
+    is expected to return a dictionary. Keys in the returned dictionary are
+    the sweepable parameter names, values of the dictionary are the 
+    FreecadDocument parameter nodes.
+    The odd indirect definition through as a function is necessary, because
+    reopening the freecad file requires to rebuilt the references to freecad
+    objects.
+
+  freecadDocumentKwargs : dict, optional
+    Dictionary of keyword arguments that want to pass the the FreecadDocument
+    object that the sweeper creates internally.
   '''
   def __init__(self, getParametersFunc, freecadDocumentKwargs={}):
-    '''
-    Arguments:
-
-    getParameterFunc : function
-      Define how named parameters are mapped to nodes in the freecad document. 
-      The function has to accept one parameter, the FreecadDocument instance and
-      is expected to return a dictionary. Keys in the returned dictionary are
-      the sweepable parameter names, values of the dictionary are the 
-      FreecadDocument parameter nodes.
-      The odd indirect definition through as a function is necessary, because
-      reopening the freecad file requires to rebuilt the references to freecad
-      objects.
-    '''
     # close all open sweepers when a new one is created to prevent
     # to make life in jupyter notebooks easier
     while len(_ALL_OPEN_SWEEPERS):
@@ -262,13 +264,21 @@ class ParameterSweeper:
   
   def addMetaParameters(self, metaParameterFunc):
     '''
-    Register meta parameters, that is parameters that are not 1:1 corresponding to 
-    FreeCAD model parameters. This method expects one function as the argument. The
-    first parameter to this function is 'f', the FreecadDocument. Each further 
-    function parameter is a MetaParameter key. The return value is expected to be
-    a dictionary, each key of which is again a parameter name.
-    When the meta-pareter is set using sweeper.set(...), the passed function will
-    be called and the resulting dict will be passed to sweeper.set(...) recursively.
+    Register metaparameters, that is parameters that are not 1:1 corresponding to 
+    FreeCAD model parameters.
+
+    Parameters
+    ----------
+
+    metaParameterFunc : function
+      Function that defines how to-be-added metaparameters are mapped to existing
+      parameters. The first argument to the function is the FreecadDocument instance,
+      every further argument is a new metaparameter. Argument names must not conflict
+      with existing parameter names.
+      The function must return a dictionary, each key of which corresponds to an
+      existing parameter (or metaparameter).
+      When a metaparameter is set using sweeper.set(...), the passed function will
+      be called and the resulting dict will be passed to sweeper.set(...) recursively.
     '''
     newMetaParams = {}
     relevantArgs = list(inspect.signature(metaParameterFunc).parameters.keys())[1:]
@@ -295,7 +305,7 @@ class ParameterSweeper:
     # reset self.parameters cache to make sure meta params appear on next call
     self.parameters.cache_clear()
 
-  def freecadDocumentLock(self):
+  def _freecadDocumentLock(self):
     if self._freecadLock is None:
       self._freecadLock = threading.RLock()
     return self._freecadLock
@@ -309,7 +319,8 @@ class ParameterSweeper:
       time.sleep(1/3)
 
   def save(self):
-    with self.freecadDocumentLock():
+    'Save FCStd file to disk.'
+    with self._freecadDocumentLock():
       if self._freecadDocument:
         self._freecadDocument.save()
 
@@ -317,7 +328,8 @@ class ParameterSweeper:
     self.close()
 
   def close(self):
-    with self.freecadDocumentLock():
+    'Close underlying FCStd file handle.'
+    with self._freecadDocumentLock():
       try:
         if self._freecadDocument:
           self._freecadDocument.close()
@@ -336,6 +348,15 @@ class ParameterSweeper:
       self._closeDocumentAfterInactivityThread = None
 
   def setWorkInTempCopyMode(self, mode):
+    '''
+    Set whether this sweeper works on the original FCStd file or in a tmp copy.
+
+    Parameters
+    ----------
+
+    mode : bool
+      False -> work in live copy, True -> work in tmp copy.
+    '''
     # close file if mode changed to ensure it is re-opened with proper mode
     # on next occasion
     prevMode = self._freecadDocumentKwargs.get('workInTempCopy', None)
@@ -347,10 +368,17 @@ class ParameterSweeper:
     self._freecadDocumentKwargs['workInTempCopy'] = mode
 
   def getWorkInTempCopyMode(self):
+    '''
+    Returns
+    -------
+    
+    bool
+      False -> this sweeper works on the original FCStd file, True -> this sweeper works in a tmp copy.
+    '''
     return self._freecadDocumentKwargs.get('workInTempCopy', None)
 
   def open(self):
-    with self.freecadDocumentLock():
+    with self._freecadDocumentLock():
       if self._freecadDocument is None or not self._freecadDocument.isRunning():
         # append self to global sweeper list
         _ALL_OPEN_SWEEPERS.append(self)
@@ -370,16 +398,30 @@ class ParameterSweeper:
         self._closeDocumentAfterInactivityThread.start()
 
   def freecadDocument(self):
-    with self.freecadDocumentLock():
+    '''
+    Returns
+    -------
+    
+    FreecadDocument
+      Document reference used by this sweeper.
+    '''
+    with self._freecadDocumentLock():
       self.open()
       return self._freecadDocument
 
   @functools.cache
   def resultsPath(self):
+    '''
+    Returns
+    -------
+
+    str
+      Path at which this sweeper stores simulation results.
+    '''
     return self.freecadDocument().resultsPath()
 
   def _parameterNodeDict(self):
-    with self.freecadDocumentLock():
+    with self._freecadDocumentLock():
       res = self._getParametersFunc(self.freecadDocument())
       res.update(self._metaParameterDict)
       if not len(res):
@@ -389,11 +431,33 @@ class ParameterSweeper:
 
   @functools.cache
   def parameters(self):
-    with self.freecadDocumentLock():
+    '''
+    Get dictionary of all parameters that this sweeper knows.
+
+    Returns
+    -------
+
+    dict
+      Dictionary of all parameters. Keys are (meta)parameter names, values are the respective parameter values.
+      Metaparameter values cannot be deduced from the FCSTd document state, therefore any metaparameter will show
+      up as *nan* in this dictionary if it has not been set before. If it has been set before, it will show up 
+      as the last set value.
+    '''
+    with self._freecadDocumentLock():
       return {k: v.get() for k,v in self._parameterNodeDict().items()}
 
   def set(self, **kwargs):
-    with self.freecadDocumentLock():
+    '''
+    Update parameter values.
+
+    Parameters
+    ----------
+
+    **kwargs : any
+      Takes arbitrary number of parameters. Parameter names must be existing sweeper parameters or metaparameters.
+      Values are the values to be set.
+    '''
+    with self._freecadDocumentLock():
       boundsDict = self.bounds()
       paramDict = self._parameterNodeDict()
 
@@ -451,6 +515,16 @@ class ParameterSweeper:
       self.parameters.cache_clear()
 
   def setBounds(self, **kwargs):
+    '''
+    Update parameter bounds.
+
+    Parameters
+    ----------
+
+    **kwargs : any
+      Takes arbitrary number of parameters. Parameter names must be existing sweeper parameters or metaparameters.
+      Values have to be length two tuples (or similar) containing a lower and an upper limit.
+    '''
     paramNames = self.parameters().keys()
     # make sure keys exist and bounds are well formed
     for k, v in kwargs.items():
@@ -468,9 +542,26 @@ class ParameterSweeper:
       self._bounds[k] = sorted(list(v))
 
   def bounds(self):
+    '''
+    Returns
+    -------
+    
+    dict
+      Dictionary of all parameter bounds.
+    '''
     return {k: self._bounds.get(k, (-inf, inf)) for k in self.parameters().keys()}
 
   def optimizeStrategyBegin(self, **kwargs):
+    '''
+    Has to be called before starting a multi-step optimization strategy.
+
+    Parameters
+    ----------
+
+    **kwargs : any
+      Any keyword argument passed to this method will be stored as a default
+      value for every following optimize strategy step.
+    '''
     self._optimizeStepsArgCache = {}
     self._optimizeStepsPosArgCache = kwargs
 
@@ -483,36 +574,24 @@ class ParameterSweeper:
                            maxWorkerReviveCount=None,
                            workerReviveDelay=None,):
     '''
-    Pass one or more dictionaries with optimize args to run
-    optimization steps with varied free parameters, methods, etc. in parallel
+    Run one or more optimizers in parallel. 
 
-    Passing dictionaries only will cause a sequence of optimize-calls with parameters
-    given by the dictionary. All dictionaries inherit keys from prededing arg-dict.
-    Only changed keys need to be specified. The following example will run one optimize
-    with default method and the remaining args given in the first dict. The second 
-    optimize run will use the same arguments as the first, except for method='evolution'. 
-    
-    optimizer.optimizeStrategyStep(
-      dict(method=None, minimizeFunc=...),
-    )
-    optimizer.optimizeStrategyStep(
-      dict(method='evolution') 
-    )
+    Parameters
+    ----------
 
-    If a list of dictionaries is passed instead of a dictionary, two optimize calls
-    will be run in parallel. Again later dicts in the list inherit from previous dicts.
-    The following example will first run the default method and a Nelder-Mead optimizer
-    in parallel. After one of them finished, we will wait relWaitForParallel*runtime 
-    for the other optimize run and then proceed with a method=evolution run, which itself
-    will start with the best result obtained before:
-
-    optimizer.optimizeStrategyStep(
-      dict(method=None, minimizeFunc=...),
-      dict(method='Nelder-Mead') 
-    )
-    optimizer.optimizeStrategyStep(
-      dict(method='evolution') 
-    )
+    *args : dict
+      Pass one or more dictionaries, dictionaries must be argument lists valid for :meth:`optimize`. 
+      Each dictionary will start one parallel 
+      self.optimize call. All dictionaries inherit keys from keys passed to self.optimizeStrategyBegin
+      and from preceding dictionaries in *args.
+      The following example will run one optimize with default method and the remaining args
+      given in the first dict. The second optimize run will use the same arguments as the first, 
+      except for method='evolution':
+      
+      >>> optimizer.optimizeStrategyStep(
+            dict(minimizeFunc=...),
+            dict(method='evolution') 
+          )
     '''
     global CLOSE_FREECAD_TIMEOUT
 
@@ -768,18 +847,50 @@ class ParameterSweeper:
         CLOSE_FREECAD_TIMEOUT = 90
 
   def optimizeStrategyEnd(self):
+    'Has to be called after a multi-step optimization strategy is finished.'
     self._optimizeStepsArgCache = {}
     self.purgeTempFolder()
   
-
   def purgeTempFolder(self):
+    'Permanently delete all temp copies created in the current simulation project.'
     self.freecadDocument().purgeTempFolder()
 
+  def runSimulation(self, simulationMode, paramDict=None, **kwargs):
+    '''
+    Run a ray-tracing simulation.
+
+    Parameters
+    ----------
+
+    simulationMode : str
+      Select ray-tracing simulation mode. Must be one of 'fans', 'true', 'pseudo'.
+
+    paramDict : dict, optional
+      Dictionary of parameter names and values to be set before the simulation starts.
+
+    **kwargs : any
+      Internally calls :meth:`FreecadDocument.runSimulation`, any further keyword arguments are forwarded.
+
+    Returns
+    -------
+
+    :class:`FreecadDocument.RawFolder`
+      Folder reference containing the simulation results.
+
+    '''
+    @retries.retryOnError(subject='setting parameters and running simulation',
+                          maxRetries=4, callbackAfterRetries=2, callback=self.close)
+    def _runSimulation():
+      if paramDict is not None:
+        self.set(**paramDict)
+      with self._freecadDocumentLock():
+        return self.freecadDocument().runSimulation(simulationMode, **kwargs)
+    return _runSimulation()
 
   def optimize(self, minimizeFunc, parameters, simulationMode, 
                prepareSimulation=None, simulationKwargs={},
                minimizerKwargs={}, progressPlotInterval=30, 
-               method=None, historyDumpPath=None, 
+               method='Nelder-Mead', historyDumpPath=None, 
                historyDumpInterval=inf, 
                freecadRestartInterval=3*60*60, **kwargs):
     # save optimize params to variable
@@ -795,7 +906,7 @@ class ParameterSweeper:
     bestPenaltySoFar, bestParametersSoFar, bestResultSoFar = inf, None, None
 
     parameters = list(parameters)
-    with self.freecadDocumentLock():
+    with self._freecadDocumentLock():
 
       # wrap minimize func, run simulation before and pass additional args
       def _simulateAndCalcMinimizeFunc(args):
@@ -810,7 +921,7 @@ class ParameterSweeper:
           @retries.retryOnError(subject='preparing simulation')
           def _prepareSimulation():
             if prepareSimulation:
-              with self.freecadDocumentLock():
+              with self._freecadDocumentLock():
                 prepareSimulation(self.freecadDocument(), **kwargs)
           _prepareSimulation()
 
@@ -818,15 +929,7 @@ class ParameterSweeper:
           _b = self.bounds()
           paramDict = {k: v*(_b[k][1]-_b[k][0])+_b[k][0] if all(isfinite(_b[k])) else v 
                                                           for k,v in zip(parameters, args)}
-
-          # run simulation, if simulating fails, set penalty to very large number
-          @retries.retryOnError(subject='setting parameters and running simulation',
-                                maxRetries=4, callbackAfterRetries=2, callback=self.close)
-          def _runSimulation():
-            self.set(**paramDict)
-            with self.freecadDocumentLock():
-              return self.freecadDocument().runSimulation(simulationMode, **simulationKwargs)
-          resultFolder = _runSimulation()
+          resultFolder = self.runSimulation(simulationMode, paramDict=paramDict, **simulationKwargs)
 
           # plot progress if it is time (do this before the call to minimize func to make sure 
           # any output of minimize func will be visible below the progress info)

@@ -158,22 +158,75 @@ The entire jupyter notebook file is available for download here__.
 .. __: https://github.com/zaphB/freecad.optics_design_workbench/tree/master/examples/1-getting-started/optimize-spotsize.ipynb
 
 
-A more flexible way to sweep and optimize
------------------------------------------
+Sweep and optimize using the *ParameterSweeper*
+-----------------------------------------------
 
+The *ParameterSweeper* class is an abstraction on top of *FreecadDocument* that separates the FCStd document tree paths from the sweeping/optimization logic. We create the *ParamterSweeper* by passing a function that returns a dictionary of all relevant document parameters:
 
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 13-14
 
+This function has to accept the FreecadDocument as an argument, which will allow the *ParameterSweeper* to extract all the selected freecad objects and properties later. The dictionary keys will serve as parameter names when using the *ParameterSweeper*, so it makes sense to choose them short but meaningful. In this example the returned dictionary has two entries, thus we define two parameters for our *ParameterSweeper*. One is sphere's radius and goes by the name **r**, the other one is the sphere's z-position and goes by the name **z**.
 
+After this initial setup we can forget about the FCStd document tree paths and only use the names **r** and **z**. The change a parameter value we use the sweepers *.set()* method.
 
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 15
+
+To read the parameter values we use the sweepers *.parameters()* method, which returns a dictionary of all parameters.
+
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 16
+
+We can make sure that parameters stay within certain bounds using the *.setBounds()* method.
+
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 17
+
+Any *.set()* call that violates these bounds will be capped to the set bounds and emit a warning.
+
+Using the *ParameterSweeper*, the optimization loop from the previous section becomes much shorter and more readable, too:
+
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 18
+
+.. __: https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html#scipy.optimize.minimize
+
+Most importantly, the *ParameterSweeper* offers a useful wrapper around `scipy.optimize.minimize`__, which allows to find parameters that minimize a function, e.g. the *calcFwhm* of this example.
+
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 19
+
+The *.optimize* method of the sweeper object requires the function to minimize, the list of parameters that it is allowed to vary, and the *simulationMode*. In this example we only allow to vary the lens radius and use *true random* Monte Carlo simulation just as we did in the optimization loop. The optimizer will use the current parameter value as the starting value and will respect the parameter bounds that we set using *.setBounds*.
+
+.. __: `/index.html#advanced-examples`
+
+A plot showing the history of values of *minimizeFunc* found by the optimizer will be shown and updated every few minutes. Such optimization runs require many evaluations of the function to minimize and thus many simulation runs. As a result, even this simple spherical lens optimization takes many hours to finish on a simple desktop computer. The key for fast optimization is to cleverly combine fan and Monte-Carlo simulation modes, to choose the right set of parameters and bounds and to formulate a *minimizeFunc* that is smooth in all parameters. Recipes how to do this for a few (almost) real word examples are covered in the `Advanced Examples`__.
+
+Before finishing this chapter on the jupyter integration one last concept should be mentioned: *Metaparameters*. Regular parameters of the *ParameterSweeper* have a 1:1 correspondence with a property in the document tree of the FCStd file. This correspondence is established by the function that we pass to the *ParameterSweeper* constructor. For *Metaparameters*, this direct correspondence does not exists. Instead, we define them by a function that calculates a parameter dictionary given one or more *Metaparameters*:    
+
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 21-22
+
+The *.addMetaParameters* method of the sweeper expects a function. The first argument of this function is our FreecadDocument (not needed here but may come in handy). Every further parameter to this function will be registered as a new *Metaparameter*. The returned dictionary describes how other parameters should be set depending on our new *Metaparameter*. This allow us to update multiple properties in the document tree with a single *Metaparameter* or to use mathematical functions in between. In the example shown here we define a new *Metaparameter* with the name **lensRadius**. Setting **lensRadius** will update both regular parameters **z** and **r**. The sphere's radius **r** will be set to **lensRadius** and the sphere's placement **z** will be updated to maintain a fixed lens thickness of 2mm. For the sweeper's methods *.set()*, *.optimize()*, etc. the *Metaparamters* can be used the same way as ordinary parameters.
+
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 23-24
+
+One important difference between regular parameters and *Metaparameters* is that there is generally no way to retrieve the value of a *Metaparameter* from the FCStd file, because the mapping functions used to define *Metaparamters* are not necessarily invertible. Therefore, after registering a *Metaparameter* its value will be *nan* until we *.set()* it for the first time. After setting a *Metaparameter*, the sweeper will cache the last set value and the *.parameters()* dict will contain this cached value. However, updating **z** or **r** will render this cached value of **lensRadius** meaningless, but the *sweeper* object will not know about this. It is our responsibility to keep the hierarchy of parameters and *Metaparameters* in mind.
 
 For detailed list of all available methods and arguments see the API reference of the class discussed in the this section:
 
 .. currentmodule:: optics_design_workbench.jupyter_utils
-.. autosummary:: 
+.. autosummary::
+  :recursive:
   :toctree: api
 
   ParameterSweeper
 
+The entire jupyter notebook file is available for download here__.
+
+.. __: https://github.com/zaphB/freecad.optics_design_workbench/tree/master/examples/1-getting-started/optimize-spotsize.ipynb
 
 
 :Footnotes:

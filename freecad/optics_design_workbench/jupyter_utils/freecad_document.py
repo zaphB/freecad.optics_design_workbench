@@ -58,6 +58,15 @@ _GET_FREECAD_EXECUTABLE = lambda: (os.environ.get('TEST_FREECAD_BINARY', '') or 
 
 
 def setDefaultFreecadExecutable(path):
+  '''
+  Select custom FreeCAD executable path.
+
+  Parameters
+  ----------
+  
+  path : str
+    Path to FreeCAD executable to use. This executable will be used globally.
+  '''
   global _GET_FREECAD_EXECUTABLE
 
   # check if path points to executable file if path looks like a filesystem path
@@ -98,6 +107,15 @@ def setDefaultFreecadExecutable(path):
 
 
 def freecadVersion():
+  '''
+  Obtain FreeCAD version info.
+
+  Returns
+  -------
+
+  str
+    FreeCAD Version description
+  '''
   p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), '-c'],
                         stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL,
@@ -328,9 +346,24 @@ class FreecadProperty:
     try:
       return eval(_str)
     except Exception:
+      if _str.endswith(' m'):
+        try:
+          return 1e3*eval(_str[:-2])
+        except Exception:
+          pass
       if _str.endswith(' mm'):
         try:
-          return eval(_str)
+          return eval(_str[:-3])
+        except Exception:
+          pass
+      if _str.endswith(' um'):
+        try:
+          return 1e-3*eval(_str[:-3])
+        except Exception:
+          pass
+      if _str.endswith(' nm'):
+        try:
+          return 1e-6*eval(_str[:-3])
         except Exception:
           pass
     return _str
@@ -460,6 +493,20 @@ class FreecadDocument:
   
   FreecadDocument instances are intended to be used as a context manager to ensure
   proper clean up of child processes and file handles.
+
+  Parameters
+  ----------
+
+  path : str, optional
+    Path to FCStd file that we would like to open. If no path argument is passed, try
+    to autodetect FCStd file.
+
+  workInTempCopy : bool, optional
+    Set to True if this FreecadDocument instance should work in a separate temporary 
+    FCStd file. Default is False.
+
+  showProgress : bool, optional
+    Set to False to switch off any progress reporting. Defaults to True.
   '''
   def __init__(self, path=None, workInTempCopy=False, showProgress=True):
     # register self in global list
@@ -533,9 +580,23 @@ class FreecadDocument:
     return f'<FreecadDocument {os.path.basename(self._path)}>'
   
   def path(self):
+    '''
+    Returns
+    -------
+
+    str
+      Path of FCStd file
+    '''
     return self._path
 
   def resultsPath(self):
+    '''
+    Returns
+    -------
+
+    str
+      Path under which simulation results are stored.
+    '''
     return self._resultsPath
 
   def _getTempFolder(self, create=False):
@@ -544,6 +605,7 @@ class FreecadDocument:
     return tempDirName
 
   def purgeTempFolder(self):
+    'Delete all temporary files'
     # dont clean if this is a tmp-document
     if self._workInTempCopy:
       raise ValueError(f'this freecad document was opened using workInTempCopy=True, '
@@ -552,6 +614,14 @@ class FreecadDocument:
     shutil.rmtree(self._getTempFolder())
 
   def isWorkInTempCopy(self):
+    '''
+    Returns
+    -------
+
+    bool
+      False -> This instance works in the selected FCStd file in place, True -> this 
+      instance works on a temporary copy of the FCSTd file.
+    '''
     if self._workInTempCopy:
       return True
     return '.OpticsDesign/tmp'.lower() in self._path.lower()
@@ -630,9 +700,40 @@ class FreecadDocument:
     return self.getObject(name)
 
   def getObject(self, name):
+    '''
+    Get a reference to an object from the FCStd file.
+
+    Parameters
+    ----------
+
+    name : str
+      Name or label of the object.
+
+    Returns
+    -------
+
+    :class:`FreecadObject`
+      Reference to the object.
+
+    '''
     return FreecadObject(self, name)
 
   def objects(self, internalNames=False):
+    '''
+    Retrieve names or labels of all freecad objects in the current document.
+
+    Parameters
+    ----------
+
+    internalNames : bool, optional
+      False -> return labels, True -> return names
+
+    Returns
+    -------
+
+    list
+      List of strings containing all object names or labels.
+    '''
     if internalNames:
       return sorted(list(set(eval(self.execInFreecadShell(f'[o.Name for o in App.activeDocument().Objects]')))))
     return sorted(list(set(eval(self.execInFreecadShell(f'[o.Label for o in App.activeDocument().Objects]')))))
@@ -640,19 +741,33 @@ class FreecadDocument:
   def runSimulation(self, action='true', endIf=None, endIfMaxLoad=.5):
     '''
     Start a simulation. 
-    
-    The action argument specifies the simulation kind and has to be one of
-    "true", "singletrue", "pseudo", "singlepseudo" or "fans". 
-    
-    The endIf argument allows to pass a custom callback which will be executed
-    continuously during the simulation with the current result folder path as
-    its argument.
 
-    The endIfMaxLoad argument must be between 0.01 and 1 and specifies which 
-    percentage of the overall time the endIf callback is allowed to run on 
-    average. The mainloop will add delays between endIf(...)-calls. In any
-    case, the endIf(..) will run not more often than once per second, and at
-    least once per hour.
+    Parameters
+    ----------
+
+    action : str
+      Specifies the simulation mode, has to be one of
+      "true", "singletrue", "pseudo", "singlepseudo" or "fans". 
+    
+    endIf : function | None, optional
+      Custom callback which will be executed
+      continuously during the simulation with the current result folder path as
+      its argument. If the callback returns True, the simulation is ended.
+      Defaults to None.
+
+    endIfMaxLoad : float, optional
+      Must be between 0.01 and 1. 
+      Specify which fraction of the overall simulation time the endIf callback is
+      allowed to consume on 
+      average. The mainloop will add delays between endIf(...)-calls. In any
+      case, the endIf(..) will run not more often than once per second, and at
+      least once per hour.
+
+    Returns
+    -------
+
+    :class:`RawFolder`
+      Reference to result folder.
     '''
     try:
       # behave as slave process while simulation is running (the FreeCAD simulation master
@@ -781,6 +896,8 @@ class FreecadDocument:
 
   def open(self):
     '''
+    Open the FCStd file.
+
     This method launches a freecad process with the -c option to make it
     remote controllable through stdio, but with the GUI loaded to avoid
     breaking all ViewProvider objects in the FCStd file on saving.
@@ -930,6 +1047,13 @@ class FreecadDocument:
             f'error output recently:\n\n{errorOut}')
 
   def lastInteractionTime(self):
+    '''
+    Returns
+    -------
+
+    float
+      Timestamp of last interaction with the freecad shell.
+    '''
     return self._freecadInteractionTimesList[-1]
 
   def _updateInteractionTime(self):
@@ -972,6 +1096,17 @@ class FreecadDocument:
     return enable
 
   def writeToFreecadShell(self, *data):
+    r'''
+    Write text lines to freecad shell.
+
+    Parameters
+    ----------
+
+    *data : list
+      Pass arbitrary number of positional string arguments. Each Argument is written
+      as an individual line. The freecad shell uses \r\n newlines, therefore prefer
+      passing all lines as individual arguments.
+    '''
     self._updateInteractionTime()
     cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*2 # add plenty of newlines at the and to
                                                # make sure command is complete also 
@@ -1039,6 +1174,15 @@ class FreecadDocument:
         time.sleep(1e-3)
 
   def readFreecadShell(self, maxLines=inf):
+    '''
+    read content from the freecad shell.
+
+    Returns
+    -------
+
+    list 
+      List of strings, each string is a line that was read from the freecad shell.
+    '''
     self._updateInteractionTime()
     result = []
     try:

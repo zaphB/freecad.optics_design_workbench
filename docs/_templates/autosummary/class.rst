@@ -1,0 +1,36 @@
+.. rst-class:: modpath-caption
+
+   {{ module }}.
+   
+{{ objname | escape | underline }}
+
+.. currentmodule:: {{ module }}
+
+.. autoclass:: {{ objname }}
+   :members:
+   :show-inheritance:
+   :inherited-members:
+
+   {% block methods %}
+   {% if methods %}
+   .. rubric:: {{ _('Methods') }}
+
+   .. autosummary::
+      :toctree:
+   {% for item in methods %}
+      ~{{ name }}.{{ item }}
+   {%- endfor %}
+   {% endif %}
+   {% endblock %}
+
+   {% block attributes %}
+   {% if attributes %}
+   .. rubric:: {{ _('Attributes') }}
+
+   .. autosummary::
+      :toctree:
+   {% for item in attributes %}
+      ~{{ name }}.{{ item }}
+   {%- endfor %}
+   {% endif %}
+   {% endblock %}

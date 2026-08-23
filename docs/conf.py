@@ -36,7 +36,7 @@ extensions = [
   'notebook_directive', # <- custom directive to embed notebooks
 ]
 
-numpydoc_show_class_members = False  # verhindert doppelte Attribut-Listen
+numpydoc_show_class_members = False # switch off numpy-docs methods generator (is handled by custom _template instead)
 autosummary_generate = True
 
 templates_path = ['_templates']
@@ -59,7 +59,7 @@ html_theme_options = {
   },
 }
 html_static_path = ['_static']
-html_css_files = ['notebook.css']
+html_css_files = ['tweaks.css']
 html_title = 'FreeCAD Optics Design Workbench Docs'
 
 # insert this at begin of every doc page
