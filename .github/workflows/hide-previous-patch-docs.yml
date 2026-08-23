@@ -22,7 +22,7 @@ jobs:
       - name: Hide previous patch versions on Read the Docs
         env:
           RTD_TOKEN: ${{ secrets.RTD_API_TOKEN }}
-          RTD_PROJECT: optics_design_workbench
+          RTD_PROJECT: optics-design-workbench
           MAJOR_MINOR: ${{ steps.version.outputs.major_minor }}
           CURRENT_TAG: ${{ steps.version.outputs.tag }}
         run: |
