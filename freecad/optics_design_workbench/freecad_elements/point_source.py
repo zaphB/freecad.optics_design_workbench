@@ -628,11 +628,36 @@ class PointSourceProxy(GenericSourceProxy):
 
         # if just one side exists: sort numerically (not absolute value) and
         # ray closest to optical axis gets index=zero counting up/down to both
-        # sides from there
+        # sides from there, if two rays have similar distance to optical axis
+        # do not use index == 0 but start with +1 and -1
         else:
           valuesFanSide1 = array(sorted(valuesFanSide1))
-          _i0 = argmin(abs(valuesFanSide1))
-          indicesFanSide1 = list(arange(len(valuesFanSide1))-_i0)
+          if len(valuesFanSide1) <= 1:
+            indicesFanSide1 = [0]
+          else:
+            _i0, _i1 = argsort(abs(valuesFanSide1))[:2]
+            # case 1: there is one unique central ray very close to optical axis
+            # -> central ray has index == 0
+            if abs(valuesFanSide1[_i0]) < abs(valuesFanSide1[_i1])/10:
+              io.verb(f'using fan ray indexing including index 0 {_i0=}, {_i1=}')
+              indicesFanSide1 = list(arange(len(valuesFanSide1))-_i0)
+
+            # case 1.5: the two indices closest to optical axis are no neighbors
+            # -> default to using default ray index == 0 but emit warning
+            elif abs(_i0-_i1) != 1:
+              io.warn(f'failed to auto detect whether to include fan index == 0 ({_i0=}, {_i1=})')
+              indicesFanSide1 = list(arange(len(valuesFanSide1))-_i0)
+
+            # case 2: two rays have similar spacing to optical axis
+            # -> do not use index == 0 but start with +1 and -1 
+            else:
+              _I = arange(len(valuesFanSide1))
+              _i0, _i1 = sorted([_i0, _i1])
+              _I[_I<=_i0] -= _i0+1
+              _I[_I>=_i1] -= _i1-1
+              indicesFanSide1 = list(_I)
+              io.verb(f'using fan ray indexing excluding index 0 ({_i0=}, {_i1=})')
+          # no second side -> no second side indices
           indicesFanSide2 = []
 
         # pack both fan sides values, indices and phiA/B into one list, iterate
