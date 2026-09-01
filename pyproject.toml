@@ -29,7 +29,6 @@ dependencies = [
   "seaborn",
   "atomicwrites",
   "cloudpickle",
-  "PySide6",
   "jupyter",
   "ipykernel",
   "jupyterlab", # <- jupyter lab ist just here because we usually want to work with jupyter, not because it is strictly necessary to use the package
