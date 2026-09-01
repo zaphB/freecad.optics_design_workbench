@@ -1289,6 +1289,7 @@ class FreecadDocument:
     # wait for single line response
     lastWarned = time.time()
     sentCommandT0 = time.time()
+    lastSend = time.time()
     collectedLines = []
     iteration = 0
     returnAtIteration = inf
@@ -1325,7 +1326,11 @@ class FreecadDocument:
           returnResult = line
           returnAtIteration = iteration + 10
 
-      # warn of takes long
+      # write lots of newlines all the time, this seems to be needed to make 
+      # AppImage builds respond on time
+      self.writeToFreecadShell('\r\n')
+
+      # warn if takes long
       if time.time()-lastWarned > 15:
         lastWarned = time.time()
         io.warn(f'long waiting time for response from freecad process, waiting '
