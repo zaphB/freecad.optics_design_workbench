@@ -33,7 +33,7 @@ while [[ "$1" != "" ]]; do
         expanded=$(ls "$1"/**/*.py)
         TESTS+=($expanded)
       else
-        echo "skipping invalid: $1"
+	TESTS+=("$1")
       fi
     fi
   fi
