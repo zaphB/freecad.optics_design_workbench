@@ -599,7 +599,7 @@ class ParameterSweeper:
     '''
     global CLOSE_FREECAD_TIMEOUT
 
-    # Cache positional argument values, too. Assume Nones mean parameter was not given
+    # cache positional argument values, too. Assume Nones mean parameter was not given
     if not hasattr(self, '_optimizeStepsPosArgCache'):
       self.optimizeStrategyBegin()
     self._optimizeStepsPosArgCache.update({k:v for k,v in locals().items() if k not in ('self', 'args') and v is not None})
@@ -610,6 +610,7 @@ class ParameterSweeper:
     saveInterval = self._optimizeStepsPosArgCache.get('saveInterval', 5*60)
     maxWorkerReviveCount = self._optimizeStepsPosArgCache.get('maxWorkerReviveCount', 3)
     workerReviveDelay = self._optimizeStepsPosArgCache.get('workerReviveDelay', 1800)
+    endIfFuncBelow = self._optimizeStepsArgCache.get('endIfFuncBelow', -inf)
 
     # add cache contents to all arg dicts
     for kwargs in args:
@@ -787,22 +788,30 @@ class ParameterSweeper:
             io.verb(f'all workers finished, exiting...')
             break
 
-          # if at least one worker finished and none of the other workers managed
-          # to improve the penalty since relWaitForParallel*runtime, exit all remaining
-          # workers
-          if ( not isfinite(tryToEndWorkersSince)
-               and time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
+          # check other exit criteria
+          if not isfinite(tryToEndWorkersSince):
+
+            # if at least one worker finished and none of the other workers managed to improve the 
+            # penalty since relWaitForParallel*runtime, exit all remaining workers
+            if (time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
                                                       + absWaitForParallel
-               and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0)
-                                                          + absWaitForParallel ):
-            io.verb(f'at least one worker finished '
-                    f'({io.secondsToStr(time.time()-lastWorkerFinished)} ago) '
-                    f'and others did not improve for more '
-                    f'than {io.secondsToStr(relWaitForParallel*(lastWorkerFinished-t0))}, '
-                    f'(last improvement {io.secondsToStr(time.time()-lastPenaltyImprovement)} ago) '
-                    f'quitting remaining workers...')
-            tryToEndWorkersSince = time.time()
-          
+                and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0)
+                                                            + absWaitForParallel ):
+              io.verb(f'at least one worker finished '
+                      f'({io.secondsToStr(time.time()-lastWorkerFinished)} ago) '
+                      f'and others did not improve for more '
+                      f'than {io.secondsToStr(relWaitForParallel*(lastWorkerFinished-t0))}, '
+                      f'(last improvement {io.secondsToStr(time.time()-lastPenaltyImprovement)} ago) '
+                      f'quitting remaining workers...')
+              tryToEndWorkersSince = time.time()
+
+            # if one worker managed to reach penalty below target exit all workers 
+            if bestPenalty < endIfFuncBelow:
+              io.verb(f'penalty reached target threshold {endIfFuncBelow=}, {bestPenalty=} '
+                      f'(last improvement {io.secondsToStr(time.time()-lastPenaltyImprovement)} ago) '
+                      f'quitting remaining workers...')
+              tryToEndWorkersSince = time.time()
+
           # send kill/terminate signals depending on wait time
           if time.time()-tryToEndWorkersSince > 0:
             # remove workers that have not been started yet
