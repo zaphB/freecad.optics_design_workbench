@@ -44,19 +44,19 @@ Learning with examples
 
   getting-started-all-components
 
-
-Advanced Examples
------------------
-
-After working through the `basic examples`_ and familiarizing yourself with the workbench, the following advanced examples aim to sketch real world simulation tasks:
-
-.. toctree::
-  :maxdepth: 1
-
-  example-collimate-pointsource
-  example-lambertiansource
-  example-aspheric-lens
-  example-spectrometer
+..
+  Advanced Examples
+  -----------------
+  .
+  After working through the `basic examples`_ and familiarizing yourself with the workbench, the following advanced examples aim to sketch real world simulation tasks:
+  .
+  .. toctree::
+    :maxdepth: 1
+  .
+    example-collimate-pointsource
+    example-lambertiansource
+    example-aspheric-lens
+    example-spectrometer
 
 
 API Reference
