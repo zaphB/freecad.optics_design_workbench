@@ -380,6 +380,9 @@ class Hits:
     if pCenter is None:
       pCenter = self.fanCenter()
 
+    # find how many rays exist in fan
+    totalRaysInFan = mean(self.hits['totalRaysInFan'])
+
     # get fan neighbor dists and distances from center
     cfI, crI, cdist = self.fanCenterDists(pCenter=pCenter)
     nfI, nrI, ndist = self.fanNeighborDists()
@@ -424,6 +427,12 @@ class Hits:
                 causticIntensities=causticIntensities, causticIntensityFuncs=causticIntensityFuncs,
                 pCenter=pCenter, healthySymmetry=self._calcFanDensityEtc()['healthySymmetry'] )
     
+  def fanEstimatedPowerEfficiency(self, withinRadius, pCenter=None):
+    fI, _, dists = self.fanCenterDists(pCenter=pCenter)
+    totalRaysInFan = mean(self.hits['totalRaysInFan'])
+    totalFanCount = len(set(fI))
+    return sum(abs(dists)<withinRadius)/totalRaysInFan/totalFanCount
+
   def fanEstimatedPowerDensities(self, pCenter=None):
     return {i: array(d).T for i, d in self._fanPowerDensityEtc(pCenter=(None if pCenter is None else tuple(pCenter)))['fanDensities'].items() }
   

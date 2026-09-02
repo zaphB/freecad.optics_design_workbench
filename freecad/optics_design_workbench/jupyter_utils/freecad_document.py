@@ -1073,8 +1073,8 @@ class FreecadDocument:
   def _fastModeEnabled(self):
     if not self._permanentlyDisableFastMode:
       T = array(self._freecadInteractionTimesList)
-      # enable fast mode if more than 3000 freecad interactions
-      # within last 10 seconds, only disable if less then 1000
+      # enable fast mode if more than 300 freecad interactions
+      # within last 10 seconds, only disable if less then 100
       # interactions within 30 seconds
       #io.verb(f'{sum( time.time()-T < 5 )=}')
       if self._previousFastModeEnabled:
@@ -1115,13 +1115,6 @@ class FreecadDocument:
       io.verb('> '+cmdStr.replace('\r', '').strip('\n'))
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
-    # sending something that generates output in addition seems to be necessary in 
-    # recent AppImage versions
-    def _dummy():
-      time.sleep(1e-3)
-      self._p.stdin.write('print("")\r\n\r\n')
-      self._p.stdin.flush()
-    threading.Thread(target=_dummy, daemon=True).start()
 
   def _flushOutput(self, timeout=60, forceCareful=False, keepErrs=False):
     self._updateInteractionTime()
@@ -1157,6 +1150,10 @@ class FreecadDocument:
         #  print(f'waiting for {rn}, found {out}')
         if rn in out:
           return
+
+        # write lots of newlines all the time, this seems to be needed to make 
+        # AppImage builds respond on time
+        self.writeToFreecadShell('\r\n')
 
         # warn of takes long
         if time.time()-lastWarned > 15:
@@ -1289,6 +1286,7 @@ class FreecadDocument:
     # wait for single line response
     lastWarned = time.time()
     sentCommandT0 = time.time()
+    lastSend = time.time()
     collectedLines = []
     iteration = 0
     returnAtIteration = inf
@@ -1325,7 +1323,11 @@ class FreecadDocument:
           returnResult = line
           returnAtIteration = iteration + 10
 
-      # warn of takes long
+      # write lots of newlines all the time, this seems to be needed to make 
+      # AppImage builds respond on time
+      self.writeToFreecadShell('\r\n')
+
+      # warn if takes long
       if time.time()-lastWarned > 15:
         lastWarned = time.time()
         io.warn(f'long waiting time for response from freecad process, waiting '

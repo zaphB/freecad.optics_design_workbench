@@ -58,6 +58,10 @@ def _unpickleAndWork(pickledSweeperOptimizeWorker, freecadExecutable):
   _self.work()
 
 
+class OptimizationEnded(RuntimeError):
+  pass
+
+
 class SweeperOptimizeWorker:
   def __init__(self, sweeper, optimizeArgs):
     self._lastSentTerminate = 0
@@ -595,7 +599,7 @@ class ParameterSweeper:
     '''
     global CLOSE_FREECAD_TIMEOUT
 
-    # Cache positional argument values, too. Assume Nones mean parameter was not given
+    # cache positional argument values, too. Assume Nones mean parameter was not given
     if not hasattr(self, '_optimizeStepsPosArgCache'):
       self.optimizeStrategyBegin()
     self._optimizeStepsPosArgCache.update({k:v for k,v in locals().items() if k not in ('self', 'args') and v is not None})
@@ -606,6 +610,7 @@ class ParameterSweeper:
     saveInterval = self._optimizeStepsPosArgCache.get('saveInterval', 5*60)
     maxWorkerReviveCount = self._optimizeStepsPosArgCache.get('maxWorkerReviveCount', 3)
     workerReviveDelay = self._optimizeStepsPosArgCache.get('workerReviveDelay', 1800)
+    endIfFuncBelow = self._optimizeStepsArgCache.get('endIfFuncBelow', -inf)
 
     # add cache contents to all arg dicts
     for kwargs in args:
@@ -783,22 +788,30 @@ class ParameterSweeper:
             io.verb(f'all workers finished, exiting...')
             break
 
-          # if at least one worker finished and none of the other workers managed
-          # to improve the penalty since relWaitForParallel*runtime, exit all remaining
-          # workers
-          if ( not isfinite(tryToEndWorkersSince)
-               and time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
+          # check other exit criteria
+          if not isfinite(tryToEndWorkersSince):
+
+            # if at least one worker finished and none of the other workers managed to improve the 
+            # penalty since relWaitForParallel*runtime, exit all remaining workers
+            if (time.time()-lastWorkerFinished > relWaitForParallel*(lastWorkerFinished-t0)
                                                       + absWaitForParallel
-               and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0)
-                                                          + absWaitForParallel ):
-            io.verb(f'at least one worker finished '
-                    f'({io.secondsToStr(time.time()-lastWorkerFinished)} ago) '
-                    f'and others did not improve for more '
-                    f'than {io.secondsToStr(relWaitForParallel*(lastWorkerFinished-t0))}, '
-                    f'(last improvement {io.secondsToStr(time.time()-lastPenaltyImprovement)} ago) '
-                    f'quitting remaining workers...')
-            tryToEndWorkersSince = time.time()
-          
+                and time.time()-lastPenaltyImprovement > relWaitForParallel*(lastWorkerFinished-t0)
+                                                            + absWaitForParallel ):
+              io.verb(f'at least one worker finished '
+                      f'({io.secondsToStr(time.time()-lastWorkerFinished)} ago) '
+                      f'and others did not improve for more '
+                      f'than {io.secondsToStr(relWaitForParallel*(lastWorkerFinished-t0))}, '
+                      f'(last improvement {io.secondsToStr(time.time()-lastPenaltyImprovement)} ago) '
+                      f'quitting remaining workers...')
+              tryToEndWorkersSince = time.time()
+
+            # if one worker managed to reach penalty below target exit all workers 
+            if bestPenalty < endIfFuncBelow:
+              io.verb(f'penalty reached target threshold {endIfFuncBelow=}, {bestPenalty=} '
+                      f'(last improvement {io.secondsToStr(time.time()-lastPenaltyImprovement)} ago) '
+                      f'quitting remaining workers...')
+              tryToEndWorkersSince = time.time()
+
           # send kill/terminate signals depending on wait time
           if time.time()-tryToEndWorkersSince > 0:
             # remove workers that have not been started yet
@@ -887,12 +900,81 @@ class ParameterSweeper:
         return self.freecadDocument().runSimulation(simulationMode, **kwargs)
     return _runSimulation()
 
-  def optimize(self, minimizeFunc, parameters, simulationMode, 
+  def optimize(self, minimizeFunc, parameters, simulationMode,
                prepareSimulation=None, simulationKwargs={},
                minimizerKwargs={}, progressPlotInterval=30, 
                method='Nelder-Mead', historyDumpPath=None, 
                historyDumpInterval=inf, 
+               endIfFuncBelow=-inf,
                freecadRestartInterval=3*60*60, **kwargs):
+    '''
+    Run an optimizer.
+
+    Parameters
+    ----------
+
+    minimizeFunc : func
+      Function to minimize. Function must take exactly one argument, which is the 
+      :func:`RawFolder` reference of a simulation run result.
+
+    parameters : list
+      List of strings specifying parameter names of this sweeper. The optimizer
+      will vary all given parameters within allowed bounds to minimize 
+      *minimizeFunc*.
+
+    simulationMode : str
+      Select ray-tracing simulation mode. Must be one of 'fans', 'true', 'pseudo'.
+
+    endIfFuncBelow : float, optional
+      If the optimizer finds a set of parameters for wich minimizeFunc yields a value
+      smaller than this endIfFuncBelow, the optimization ends. Defaults to negative 
+      infinity, i.e. the optimization ends only if the optimization algorithm finishes.
+
+    method : str, optional
+      Optimization method. See method argument of *scipy.optimize.minimize* for
+      allowed values. Special cases: method='annealing' uses *scipy.optimize.dual_annealing*,
+      method='evolution' uses *scipy.optimize.differential_evolution*.
+
+    minimizerKwargs : dict, optional
+      Specify custom keyword arguments passed to the internal calls to
+      *scipy.optimize.minimize* (or *dual_annealing* or *differential_evolution*
+      if method is set accordingly)
+
+    prepareSimulation : func, optional
+      Function to call before running simulations.
+
+    simulationKwargs : dict, optional
+      Specify custom keyword arguments passed to the internal calls to
+      :meth:`FreecadDocument.runSimulation`.
+
+    progressPlotInterval : float, optional
+      Interval to wait between periodic progress plots in seconds.
+
+    freecadRestartInterval : float, optional
+      Interval to wait between periodic clean restarts of the FreeCAD subprocess. This
+      ensures the file on disk is saved and cleanly reloaded from time to time.
+
+    historyDumpPath : str, optional
+      File path at which to dump entire history of parameters tried by the optimizer.
+      Default is to not save full history.
+
+    historyDumpInterval : float, optional
+      Interval to wait between periodic history dumps in seconds.
+
+    **kwargs : any
+      Any further keyword arguments are passed to prepareSimulation, if enabled.
+      This allows to select simulation settings directly from the argument
+      dict, which is especially useful when using :meth:`.runOptimizeStrategyStep`.
+
+    Returns
+    -------
+
+      optimizationResult
+        optimization result returned by *scipy.optimize.minimize* (or *dual_annealing* 
+        or *differential_evolution* if method is set accordingly). Warning: anything
+        related to parameter values, such as the vector *.x* of this object, are using
+        units rescaled to the parameters bounds.
+    '''
     # save optimize params to variable
     optimizeParams = {k:v for k,v in locals().items() if k not in ('self',)}
 
@@ -1013,8 +1095,17 @@ class ParameterSweeper:
             lastFreecadRestart = time.time()
             self.close()
 
+          # if penalty is below threshold -> raise EndOptimize exception
+          if penalty < endIfFuncBelow:
+            io.verb(f'found {penalty=} < {endIfFuncBelow=}')
+            raise OptimizationEnded()
+
           # return the penalty value
           return penalty
+
+        # make sure SimulationEnded exception is re-raised
+        except OptimizationEnded:
+          raise 
 
         # capture any exception, log the stack trace and return ridiculously large number
         except Exception:
@@ -1043,6 +1134,11 @@ class ParameterSweeper:
         if method:
           minimizerKwargs['method'] = method
         return scipy.optimize.minimize(_simulateAndCalcMinimizeFunc, x0=x0, bounds=bounds, **minimizerKwargs)
+
+      # catch and discard simulation ended exception
+      except OptimizationEnded:
+        io.verb(f'ending optimization')
+        pass
 
       # before returning, make sure parameters for global optimum are set
       finally:

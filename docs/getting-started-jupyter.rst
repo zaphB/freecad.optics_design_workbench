@@ -192,26 +192,33 @@ Using the *ParameterSweeper*, the optimization loop from the previous section be
 
 .. __: https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.minimize.html#scipy.optimize.minimize
 
-Most importantly, the *ParameterSweeper* offers a useful wrapper around `scipy.optimize.minimize`__, which allows to find parameters that minimize a function, e.g. the *calcFwhm* of this example.
+The warnings are emitted by the call to *polyfit* in our *calcFwhm* function defined earlier and are indicating that not all calculated FWHM results are trustworthy. In a serious scenario one would have to double check under which circumstances these warnings are emitted exactly, and whether they affect our optimization results. You will likely encounter very similar challenges when building your own optimization notebooks, because the simulation results generally depend strongly on the geometry parameters and (the first version of) your analysis function will most likely yield unexpected results if the ray-hit point cloud has an unexpected shape. Constrain your parameter space as closely as possible using *.setBounds* and make sure you understand warnings and edge cases of your your point cloud analysis function. For this example, we will just ignore the emitted warnings of our analysis function *calcFwhm* and proceed, which is exactly the opposite of what you should do in a real word scenario.
+
+The most important feature of the *ParameterSweeper* is the wrapper around `scipy.optimize.minimize`__, which allows to find parameters that minimize a function, e.g. the *calcFwhm* of this example:
 
 .. notebook:: ../examples/1-getting-started/optimize-spotsize
   :cells: 19
 
-The *.optimize* method of the sweeper object requires the function to minimize, the list of parameters that it is allowed to vary, and the *simulationMode*. In this example we only allow to vary the lens radius and use *true random* Monte Carlo simulation just as we did in the optimization loop. The optimizer will use the current parameter value as the starting value and will respect the parameter bounds that we set using *.setBounds*.
+The *.optimize* method of the sweeper object requires the function to minimize, the list of parameters that it is allowed to vary, and the *simulationMode*. In this example we only allow to vary the lens radius and use *true random* Monte Carlo simulation just as we did in the optimization loop. The optimizer will use the current parameter value as the starting value and will respect the parameter bounds that we set using *.setBounds*. The *.optimize* returns the result of the internal *scipy.optimize* call. Note that anything related to parameter values in this optimization result object, such as the vector *.x*, uses units rescaled to the parameters bounds. In your example here you can see that the result for *x* is ~0.4, which is **not** the result in units of millimeters is renormalized to the parameter bounds. 
+
+To avoid confusion with renormalization do not use the parameter values from the simulation result object, but query them using *.parameters()*:
+
+.. notebook:: ../examples/1-getting-started/optimize-spotsize
+  :cells: 20
 
 .. __: `/index.html#advanced-examples`
 
-A plot showing the history of values of *minimizeFunc* found by the optimizer will be shown and updated every few minutes. Such optimization runs require many evaluations of the function to minimize and thus many simulation runs. As a result, even this simple spherical lens optimization takes many hours to finish on a simple desktop computer. The key for fast optimization is to cleverly combine fan and Monte-Carlo simulation modes, to choose the right set of parameters and bounds and to formulate a *minimizeFunc* that is smooth in all parameters. Recipes how to do this for a few (almost) real word examples are covered in the `Advanced Examples`__.
+A plot showing the history of values of *minimizeFunc* found by the optimizer will be shown and updated every few minutes. Such optimization runs require many evaluations of the function to minimize and thus many simulation runs. As a result, even this simple spherical lens optimization with very coarse optimization settings took ~10min to finish on a simple desktop computer. With more parameters and/or finer settings such optimizations can easily take hours or days to complete. The key for fast optimization is to cleverly combine fan and Monte-Carlo simulation modes, to choose the right set of parameters and bounds and to formulate a *minimizeFunc* that is smooth in all parameters. Recipes how to do this for a few (almost) real word examples are covered in the `Advanced Examples`__.
 
 Before finishing this chapter on the jupyter integration one last concept should be mentioned: *Metaparameters*. Regular parameters of the *ParameterSweeper* have a 1:1 correspondence with a property in the document tree of the FCStd file. This correspondence is established by the function that we pass to the *ParameterSweeper* constructor. For *Metaparameters*, this direct correspondence does not exists. Instead, we define them by a function that calculates a parameter dictionary given one or more *Metaparameters*:    
 
 .. notebook:: ../examples/1-getting-started/optimize-spotsize
-  :cells: 21-22
+  :cells: 22-23
 
 The *.addMetaParameters* method of the sweeper expects a function. The first argument of this function is our FreecadDocument (not needed here but may come in handy). Every further parameter to this function will be registered as a new *Metaparameter*. The returned dictionary describes how other parameters should be set depending on our new *Metaparameter*. This allow us to update multiple properties in the document tree with a single *Metaparameter* or to use mathematical functions in between. In the example shown here we define a new *Metaparameter* with the name **lensRadius**. Setting **lensRadius** will update both regular parameters **z** and **r**. The sphere's radius **r** will be set to **lensRadius** and the sphere's placement **z** will be updated to maintain a fixed lens thickness of 2mm. For the sweeper's methods *.set()*, *.optimize()*, etc. the *Metaparamters* can be used the same way as ordinary parameters.
 
 .. notebook:: ../examples/1-getting-started/optimize-spotsize
-  :cells: 23-24
+  :cells: 24-25
 
 One important difference between regular parameters and *Metaparameters* is that there is generally no way to retrieve the value of a *Metaparameter* from the FCStd file, because the mapping functions used to define *Metaparamters* are not necessarily invertible. Therefore, after registering a *Metaparameter* its value will be *nan* until we *.set()* it for the first time. After setting a *Metaparameter*, the sweeper will cache the last set value and the *.parameters()* dict will contain this cached value. However, updating **z** or **r** will render this cached value of **lensRadius** meaningless, but the *sweeper* object will not know about this. It is our responsibility to keep the hierarchy of parameters and *Metaparameters* in mind.
 
