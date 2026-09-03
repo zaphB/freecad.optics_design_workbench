@@ -106,7 +106,7 @@ def setDefaultFreecadExecutable(path):
   _GET_FREECAD_EXECUTABLE = lambda: path
 
 
-def freecadVersion():
+def _freecadVersion():
   '''
   Obtain FreeCAD version info.
 
@@ -1355,13 +1355,21 @@ class FreecadDocument:
     # send save document command
     self.writeToFreecadShell('App.activeDocument().save()')
 
+
   def close(self):
     t0 = time.time()
     io.verb(f'closing {self} instance...')
 
+    # wait for responsiveness before doing anything else
+    self._flushOutput(forceCareful=True)
+
     # save changes to disk (if self is open)
     if self.isRunning():
       self.save()
+
+    # wait again for responsiveness to make sure saving is
+    # completed
+    self._flushOutput(forceCareful=True)
 
     while self.isRunning():
       # gently ask to quit
