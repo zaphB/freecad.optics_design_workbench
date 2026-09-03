@@ -533,7 +533,7 @@ class PointSourceProxy(GenericSourceProxy):
         # calculate desired span and update l1 and l2 if needed
         if obj.FanModePowerSpan > 0 and obj.FanModePowerSpan < 1:
           var = 'theta' if isfinite(float(obj.FocalLength)) else 'r'
-          powerVsTheta = sy.lambdify( var, sy.sympify(obj.PowerDensity)
+          powerVsTheta = sy.lambdify( var, sy.sympify('('+obj.PowerDensity+')*abs(sin(theta))')
                                         .subs('theta', 'abs(theta)')
                                         .subs('phi', f'Piecewise( ( ({phiA}), ({var})>0 ), '
                                                                 f'( ({phiB}),  True     ) )') )
