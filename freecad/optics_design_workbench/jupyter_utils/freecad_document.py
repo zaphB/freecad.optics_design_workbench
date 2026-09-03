@@ -270,33 +270,37 @@ class FreecadProperty:
             raise
 
   def setDatumWrapped(self, constraintIndex, v):
+    if not '_cachedSetDatumFunc' in self.__dict__.keys():
+      self.__dict__['_cachedSetDatumFunc'] = self._sketchObjReference.setDatum
+
     # select good unit for value
-    if abs(v) < 1e-6:
+    if abs(v) < 1e-5:
       unit = 'nm'
       _v = 1e6*v
-    elif abs(v) < 1e-3:
+    elif abs(v) < 1e-2:
       unit = 'um'
       _v = 1e3*v
     else:
       unit = 'mm'
       _v = v
     # return expression
-    valueExpr = FreecadExpression(f'App.Units.Quantity("{_v:.6f} {unit}")')
+    valueExpr = FreecadExpression(f'App.Units.Quantity("{_v:.9f} {unit}")')
     
     # force careful flush before and after setDatum, because strange "invalid constraint index" may occur otherwise
     for retry in range(99):
       if '_sketchObjReference' not in self.__dict__.keys():
         raise ValueError(f'object {self} does not seem to be a constraint')
-      result = self._sketchObjReference.setDatum(constraintIndex, valueExpr)
-      self._doc._flushOutput(forceCareful=True, keepErrs=True)
-      if err:=self._doc.readFreecadShellErr():
-        if retry > 5:
-          raise RuntimeError(f'setting datum {constraintIndex} of {self} failed: {err}')
-        io.warn(f'error {err} occurred while setting a datum, retrying...')
-        self._doc._flushOutput(forceCareful=True)
-        time.sleep(0.1*2**retry)
-      else:
-        break
+      result = self._cachedSetDatumFunc(constraintIndex, valueExpr)
+      break
+      #self._doc._flushOutput(forceCareful=True, keepErrs=True)
+      #if err:=self._doc.readFreecadShellErr():
+      #  if retry > 5:
+      #    raise RuntimeError(f'setting datum {constraintIndex} of {self} failed: {err}')
+      #  io.warn(f'error {err} occurred while setting a datum, retrying...')
+      #  self._doc._flushOutput(forceCareful=True)
+      #  time.sleep(0.1*2**retry)
+      #else:
+      #  break
     return result
 
   def __setattr__(self, key, value):
@@ -377,9 +381,14 @@ class FreecadProperty:
     return self
 
   def getConstraintsByName(self):
-    indexAndConstraints = { c.Name.get().strip(): (i, c.markAsConstraint(self, i))
-                                            for i, c in enumerate(self.Constraints)
-                                                              if c.Name.get().strip() }
+    # store index and constraints in global cache
+    cacheKey = self._freecadShellRepr()
+    if cacheKey not in self._doc._indexAndConstraintsCache:
+      self._doc._indexAndConstraintsCache[cacheKey] = {
+                           c.Name.get().strip(): (i, c.markAsConstraint(self, i))
+                                              for i, c in enumerate(self.Constraints)
+                                                                if c.Name.get().strip() }
+    indexAndConstraints = self._doc._indexAndConstraintsCache[cacheKey]
     return FreecadConstraintDict(constraintDict={k:v[1] for k,v in indexAndConstraints.items()},
                                  indexDict={k:v[0] for k,v in indexAndConstraints.items()},
                                  sketch=self)
@@ -572,6 +581,7 @@ class FreecadDocument:
     self._permanentlyDisableFastMode = False
     self._freecadInteractionTimesList = [time.time()]
     self._previousFastModeEnabled = False
+    self._indexAndConstraintsCache = {}
 
   def __repr__(self):
     return self.__str__()
@@ -1088,6 +1098,16 @@ class FreecadDocument:
     if not enable and self._previousFastModeEnabled:
       self._flushOutput(forceCareful=True)
 
+    # make sure to flush buffers every few seconds to capture errors
+    if time.time()-self.__dict__.get('_fastModeLastBufferFlush', 0) > 3:
+      self._flushOutput(forceCareful=True, keepErrs=True)
+      if error:=self.readFreecadShellErr():
+        if 'PLEASE READ (and report)' not in error: # <- ignore new import warning
+          io.warn(f'error output occurred while handling one of the recent'
+                 +f'command(s) (not sure which one because fast mode is '
+                 +f'active):\n\n'+error)
+      self._fastModeLastBufferFlush = time.time()
+
     # update previousFastMode attribute and log if fastModeEnable changed
     if enable != self._previousFastModeEnabled:
       io.verb(f'{"enabled" if enable else "disabled"} freecad communication fast mode')
@@ -1111,7 +1131,7 @@ class FreecadDocument:
     cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*2 # add plenty of newlines at the and to
                                                # make sure command is complete also 
                                                # if indented a few levels
-    if _PRINT_FREECAD_COMMUNICATION:
+    if _PRINT_FREECAD_COMMUNICATION and cmdStr.strip():
       io.verb('> '+cmdStr.replace('\r', '').strip('\n'))
     self._p.stdin.write(cmdStr)
     self._p.stdin.flush()
@@ -1187,7 +1207,7 @@ class FreecadDocument:
       # or maxLines limit is reached
       while len(result) < maxLines:
         line = self._q.get_nowait()
-        if _PRINT_FREECAD_COMMUNICATION:
+        if _PRINT_FREECAD_COMMUNICATION and line.strip():
           io.verb('< '+line.replace('\r', '').strip('\n'))
         result.append(line)
     except queue.Empty:
@@ -1305,8 +1325,6 @@ class FreecadDocument:
 
       # check for result line
       if line:=self.readFreecadShellLine():
-        if _PRINT_FREECAD_COMMUNICATION:
-          io.verb(f'< {line}')
 
         # if expect is set and this line contains
         # expected test: return line (end iterator)

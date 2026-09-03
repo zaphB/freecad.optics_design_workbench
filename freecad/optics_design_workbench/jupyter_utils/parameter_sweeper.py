@@ -117,6 +117,11 @@ class SweeperOptimizeWorker:
     self._process.start()
 
   def work(self):
+    # set close timeout to ridiculously large value for any worker, because
+    # workers operate in workInTempCopy mode and re-opening the FCStd file
+    # would restore the original version, erasing any optimization progress
+    CLOSE_FREECAD_TIMEOUT = 1e6
+
     # make sure run-in-fresh-copy-mode is enabled to prevent any worker
     # from ever touching the main FCStd file
     self._sweeperInstance.setWorkInTempCopyMode(True)
@@ -257,6 +262,9 @@ class ParameterSweeper:
     while len(_ALL_OPEN_SWEEPERS):
       _ALL_OPEN_SWEEPERS[0].close()
 
+    # skip error checks after setting params if they take more than 10% of total time
+    self.maxRelErrorCheckingLoad = 0.1
+
     self._getParametersFunc = getParametersFunc
     self._metaParameterDict = {}
     self._freecadDocumentKwargs = freecadDocumentKwargs
@@ -265,6 +273,9 @@ class ParameterSweeper:
     self._freecadLock = None
     self._bounds = {}
     self._optimizeStepsArgCache = {}
+    self._setOperationTotalDurations = [1]
+    self._setOperationErrorCheckDurations = [0]
+    self._lastSetParamTimeStatisticsReport = 0
   
   def addMetaParameters(self, metaParameterFunc):
     '''
@@ -473,6 +484,8 @@ class ParameterSweeper:
 
       # update parameter values
       for setKey, setVal in kwargs.items():
+        t0setParam = time.time()
+        
         # restrict set val if bounds are exceeded
         b1, b2 = boundsDict[setKey]
         try:
@@ -493,17 +506,33 @@ class ParameterSweeper:
         # update value but dont apply meta params right away 
         paramDict[setKey].set(setVal, dontApplyMetaParamYet=True)
 
-        # ensure value was set correctly
-        success = False
-        gotVal = paramDict[setKey].get()
-        try:
-          if isclose(setVal, gotVal, rtol=1e-3):
-            success = True
-        except Exception:
-          success = (setVal == gotVal)
-        if not success:
-          raise ValueError(f'try to set parameter {setKey} to value '
-                           f'{repr(setVal)}, but got value {repr(gotVal)}.')
+        # ensure value was set correctly, but dont spend too much time on it
+        recentTimeSpentSettingParams = sum(self._setOperationTotalDurations)
+        recentTimeSpentErrorChecking = sum(self._setOperationErrorCheckDurations)
+        if time.time()-self._lastSetParamTimeStatisticsReport > 60:
+          self._lastSetParamTimeStatisticsReport = time.time()
+          io.verb(f'{recentTimeSpentSettingParams=:.1f}, {recentTimeSpentErrorChecking=:.1f}')
+        if recentTimeSpentErrorChecking < self.maxRelErrorCheckingLoad*recentTimeSpentSettingParams:
+          t0errorCheck = time.time()
+          success = False
+          gotVal = paramDict[setKey].get()
+          try:
+            if isclose(setVal, gotVal, rtol=1e-3):
+              success = True
+          except Exception:
+            success = (setVal == gotVal)
+          if not success:
+            raise ValueError(f'try to set parameter {setKey} to value '
+                            f'{repr(setVal)}, but got value {repr(gotVal)}.')
+          self._setOperationErrorCheckDurations.append( time.time()-t0errorCheck )
+        else:
+          # store zero to keep 1:1 correspondence between total duration and error check duration log entries
+          self._setOperationErrorCheckDurations.append( 0 )
+        self._setOperationErrorCheckDurations = self._setOperationErrorCheckDurations[-100:]
+        
+        # store time spent setting this parameter
+        self._setOperationTotalDurations.append( time.time()-t0setParam )
+        self._setOperationTotalDurations = self._setOperationTotalDurations[-100:]
       
       # apply all changed meta params, make sure to only apply one of each
       # sibling group to avoid many redundant calls
@@ -1080,7 +1109,8 @@ class ParameterSweeper:
           
           # dump entire history to file if enabled
           if historyDumpPath:
-            if time.time()-lastHistoryDump > historyDumpInterval:
+            if ( time.time()-lastHistoryDump > historyDumpInterval
+                  or penalty < endIfFuncBelow ): # <- immediately dump if penalty is below exit-thresh
               lastHistoryDump = time.time()
               try:
                 os.makedirs(os.path.dirname(historyDumpPath), exist_ok=True)
