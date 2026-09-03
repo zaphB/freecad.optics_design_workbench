@@ -106,7 +106,7 @@ def setDefaultFreecadExecutable(path):
   _GET_FREECAD_EXECUTABLE = lambda: path
 
 
-def _freecadVersion():
+def freecadVersion():
   '''
   Obtain FreeCAD version info.
 
@@ -1349,27 +1349,27 @@ class FreecadDocument:
     self.close()
 
   def save(self):
+    # fast mode or not, make sure shell is responsive before trying
+    # to save
+    self._flushOutput(forceCareful=True)
+
     # send clear rays command
     self.writeToFreecadShell('Gui.runCommand("Clear all rays",0)')
 
     # send save document command
     self.writeToFreecadShell('App.activeDocument().save()')
 
+    # wait again for responsiveness to make sure saving is
+    # completed
+    self._flushOutput(forceCareful=True)
 
   def close(self):
     t0 = time.time()
     io.verb(f'closing {self} instance...')
 
-    # wait for responsiveness before doing anything else
-    self._flushOutput(forceCareful=True)
-
     # save changes to disk (if self is open)
     if self.isRunning():
       self.save()
-
-    # wait again for responsiveness to make sure saving is
-    # completed
-    self._flushOutput(forceCareful=True)
 
     while self.isRunning():
       # gently ask to quit
