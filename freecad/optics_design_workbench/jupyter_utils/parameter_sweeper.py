@@ -697,10 +697,17 @@ class ParameterSweeper:
 
         fig, ax1 = subplots(1, 1, figsize=(6,4))
         sca(ax1)
-        sns.scatterplot(pd.DataFrame([p[:5] for p in allParamsHist]), x=0, y=1, 
-                        style=2, size=2, hue=4, markers=['.', '*'], 
-                        sizes=[15, 40], legend='auto',
-                                    ).set(xlabel='time', ylabel='penalty')
+        sns.scatterplot(pd.DataFrame([p[:5] for p in allParamsHist]),
+                        x=0, y=1, style=2, size=2, hue=3, 
+                        markers=['.', '*'], sizes=[25, 55]
+                        ).set(xlabel='time', ylabel='minimizeFunc value')
+        # filter legend to only display methods and increase legend symbol size
+        h, l = gca().get_legend_handles_labels()
+        methods = list(set([p[3] for p in allParamsHist]))
+        legend(*zip(*[(h, l) for h, l in zip(h, l) if l in methods]), 
+               ncol=(3 if len(methods) in (5,6) else 4), markerscale=2, fontsize=8,)
+
+        # select reasonable plot limits, add title
         _allFinitePenalties = [p[1] for p in allParamsHist if isfinite(p[1])]
         if len(_allFinitePenalties) > 50:
           l, u = min(_allFinitePenalties), quantile(_allFinitePenalties, .5)
@@ -764,8 +771,8 @@ class ParameterSweeper:
             bestPenalty = _newBest
             lastPenaltyImprovement = time.time()
             _best = allParamsHist[argmin([h[1] for h in allParamsHist])]
-            bestParamsDict = _best[4]
-            bestParamsArgs = _best[5]
+            bestParamsDict = _best[5]
+            bestParamsArgs = _best[6]
             io.verb(f'found new best solution {bestPenalty=},\n{bestParamsDict=}\n{bestParamsArgs=}')
             _b = self.bounds()
             _paramsRelToBounds = {k: (v-_b[k][0])/(_b[k][1]-_b[k][0]) 
@@ -1112,7 +1119,7 @@ class ParameterSweeper:
             fig, ax1 = subplots(1, 1, figsize=(6,4))
             sca(ax1)
             sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
-                            style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
+                            style=2, size=2, markers=['.', '*'], sizes=[25, 55], legend=False,
                                         ).set(xlabel='time', ylabel='minimizeFunc value')
             gca().xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
                                               lambda x, p: io.secondsToStr(x-t0, length=1) ))

@@ -44,6 +44,12 @@ def handler(signum, frame):
   except Exception:
     io.warn(f'exception raised in signal handler:\n\n'+traceback.format_exc())
   finally:
+    io.warn(f'if you are seeing cryptic error output containing "SystemExit: 15" that means '
+            f'FreeCAD worker processes were killed ungently. If you are using the ParameterSweeper '
+            f'class this may be harmless, an ungentle kill is used under some circumstances '
+            f'to save time. Check the results of your scripts and other error output carefully, '
+            f'if everything seems healthy feel free to ignore this warning and the '
+            f'"SystemExit: 15" error output')
     exit(signum)
 
 # register signal handlers
