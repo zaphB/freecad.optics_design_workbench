@@ -697,8 +697,9 @@ class ParameterSweeper:
 
         fig, ax1 = subplots(1, 1, figsize=(6,4))
         sca(ax1)
-        sns.scatterplot(pd.DataFrame([p[:3] for p in allParamsHist]), x=0, y=1, 
-                        style=2, size=2, markers=['.', '*'], sizes=[15, 40], legend=False,
+        sns.scatterplot(pd.DataFrame([p[:5] for p in allParamsHist]), x=0, y=1, 
+                        style=2, size=2, hue=4, markers=['.', '*'], 
+                        sizes=[15, 40], legend='auto',
                                     ).set(xlabel='time', ylabel='penalty')
         _allFinitePenalties = [p[1] for p in allParamsHist if isfinite(p[1])]
         if len(_allFinitePenalties) > 50:
@@ -882,7 +883,7 @@ class ParameterSweeper:
 
           # limit loop speed
           time.sleep(3)
-        
+
       # make sure to apply best result to current FCStd file if loop ends
       finally:
         io.info(f'optimize strategy step ended, {bestParamsDict=}')
@@ -921,7 +922,11 @@ class ParameterSweeper:
         # restore standard 90s freecad timeout
         CLOSE_FREECAD_TIMEOUT = 90
 
-        # one last update of all progress plots
+      # one last update of all progress plots
+      # make sure simulation ran for at least 5*progressPlotIntervals to make sure not to plot if 
+      # simulation crashed immediately, which would clear important error output from the jupyter cell
+      # (unindent here is important to run it only if no exception was raised, because progress plot clears outputs)
+      if time.time()-t0 > 5*progressPlotInterval:
         try:
           with warnings.catch_warnings():
             if hideWarnings:
@@ -1146,7 +1151,7 @@ class ParameterSweeper:
           # update history lists and shorten if necessary
           if penalty < bestPenaltySoFar:
             io.verb(f'found new optimum: {minimizeFunc=}, {paramDict=}')
-            allParamsHist.append([time.time(), penalty, True, 
+            allParamsHist.append([time.time(), penalty, True, optimizeParams['method'],
                                   os.path.realpath(resultFolder.path()), paramDict, 
                                   optimizeParams])
             bestParametersSoFar = dict(paramDict)
@@ -1159,7 +1164,7 @@ class ParameterSweeper:
                     f'{[k for k,v in _paramsRelToBounds.items() if isclose(v, 0, atol=1e-3) or isclose(v, 1, atol=1e-3)]} '
                     f'(all params renormalized to bounds: {_paramsRelToBounds})')
           else:
-            allParamsHist.append([time.time(), penalty, False, 
+            allParamsHist.append([time.time(), penalty, False, optimizeParams['method'],
                                   os.path.realpath(resultFolder.path()), paramDict, 
                                   optimizeParams])
           while len(allParamsHist) > 1e4:
