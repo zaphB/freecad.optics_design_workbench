@@ -96,7 +96,8 @@ def _init(forceReInit=False):
               datefmt=r'%Y-%m-%dT%H:%M:%S'))
     l = _logger()
     l.addHandler(h)
-    _logger().setLevel(logging.INFO)
+    l.propagate = False
+    l.setLevel(logging.INFO)
     _IS_INIT = True
 
 def setLogfile(name):
@@ -186,9 +187,14 @@ def err(*msg, logOnly=False):
   if _logger():
     _logger().error(msg)
   if not logOnly:
-    print(_prefix('error')+msg)
+    try:
+      import FreeCAD
+      _print = lambda m: FreeCAD.Console.PrintError(m+'\n')
+    except Exception:
+      _print = print
+    _print(_prefix('error')+msg)
     if '\n' in msg:
-      print()
+      _print()
 
 def formatErr(*msg):
   return 'error: '+_indentMsg(msg)
@@ -200,10 +206,12 @@ def warn(*msg, logOnly=False):
   if _logger():
     _logger().warning(msg)
   if not logOnly:
-    warnings.warn('warning: '+msg)
-    #print(_prefix('warning')+msg)
-    #if '\n' in msg:
-    #  print()
+    try:
+      import FreeCAD
+      _print = lambda m: FreeCAD.Console.PrintWarning(m+'\n')
+    except Exception:
+      _print = warnings.warn
+    _print('warning: '+msg)
 
 def info(*msg, logOnly=None, noNewLine=False):
   # enable logOnly by default for info() and verb() in jupyter environment
@@ -216,15 +224,19 @@ def info(*msg, logOnly=None, noNewLine=False):
   if _logger():
     _logger().info(msg)
   if not logOnly:
-    print(_prefix()+msg)
+    try:
+      import FreeCAD
+      _print = lambda m: FreeCAD.Console.PrintMessage(m+'\n')
+    except Exception:
+      _print = print
+    _print(_prefix()+msg)
     if '\n' in msg and not noNewLine:
-      print()
+      _print()
 
 def verb(*args, **kwargs):
   if not _IS_VERBOSE:
     return
   info(*args, **kwargs)
-
 
 # format times
 def secondsToYMDhms(secs):

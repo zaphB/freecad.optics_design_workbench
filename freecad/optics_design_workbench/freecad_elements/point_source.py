@@ -25,7 +25,6 @@ from .. import parse
 
 from .generic_source import *
 from .common import *
-from .numeric_expression import parseNumericExpression
 from ..simulation.raytracing_cache import *
 
 #####################################################################################################
@@ -236,7 +235,7 @@ class PointSourceProxy(GenericSourceProxy):
               else:
                 if (prevDivergence is None 
                       or prevDivergence == '-' 
-                      or not isclose(parseNumericExpression(prevDivergence), divergenceAngle) ):
+                      or not isclose(parse.constantNumber(prevDivergence), divergenceAngle) ):
                   setattr(obj, 'Divergence', f'{-sign(f)*divergenceAngle/pi:.6g}*pi')
             else:
               setattr(obj, 'Divergence', '-')
@@ -247,7 +246,7 @@ class PointSourceProxy(GenericSourceProxy):
         divergence = getattr(obj, 'Divergence', None)
         newDivergenceAngle = nan
         if divergence is not None and divergence != '-':
-          newDivergenceAngle = parseNumericExpression(divergence)
+          newDivergenceAngle = parse.constantNumber(divergence)
 
         # try to find 1/e radius of power density
         f = getattr(obj, 'FocalLength', None)
