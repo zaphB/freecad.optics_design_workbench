@@ -81,6 +81,8 @@ _FUNCTIONS = {
   "abs": sy.Abs,
   "DiracDelta": sy.DiracDelta,
   "Heaviside": sy.Heaviside,
+  "Vector": np.array,
+  "Matrix": np.array,
 }
 
 def listOfStrings(expr: str):
