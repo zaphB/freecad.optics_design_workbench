@@ -395,6 +395,11 @@ class FreecadProperty:
           return 1e-6*parse.constantNumber(_str[:-3])
         except Exception:
           pass
+    # remove leading and trailing ' or " if present:
+    for l in '"\'':
+      if _str.startswith(l) and _str.endswith(l):
+        _str = _str[1:-1]
+        break
     return _str
 
   # ----------------------------------
