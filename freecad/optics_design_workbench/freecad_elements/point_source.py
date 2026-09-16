@@ -244,6 +244,7 @@ class PointSourceProxy(GenericSourceProxy):
       # power emission is parametrized by radius only)
       if prop == 'Divergence':
         divergence = getattr(obj, 'Divergence', None)
+        newDivergenceAngle = nan
         if divergence is not None and divergence != '-':
           newDivergenceAngle = parseNumericExpression(divergence)
 
@@ -265,12 +266,13 @@ class PointSourceProxy(GenericSourceProxy):
                       f'theta>0? is the theta domain large enough?')
               setattr(obj, 'Divergence', '-')
             else:
-              if isclose(newDivergenceAngle, 0):
-                setattr(obj, 'FocalLength', 'inf')
-              else:
-                newFocalLength = -oneOverERadius/tan(newDivergenceAngle)
-                if not isclose(newFocalLength, f, rtol=1e-5):
-                  setattr(obj, 'FocalLength', f'{newFocalLength:.6g}')
+              if isfinite(newDivergenceAngle):
+                if isclose(newDivergenceAngle, 0):
+                  setattr(obj, 'FocalLength', 'inf')
+                else:
+                  newFocalLength = -oneOverERadius/tan(newDivergenceAngle)
+                  if not isclose(newFocalLength, f, rtol=1e-5):
+                    setattr(obj, 'FocalLength', f'{newFocalLength:.6g}')
           else:
             setattr(obj, 'FocalLength', getattr(obj, 'FocalLength'))
 
@@ -534,7 +536,7 @@ class PointSourceProxy(GenericSourceProxy):
         # calculate desired span and update l1 and l2 if needed
         if obj.FanModePowerSpan > 0 and obj.FanModePowerSpan < 1:
           var = 'theta' if isfinite(float(obj.FocalLength)) else 'r'
-          powerVsTheta = sy.lambdify( var, sy.sympify('('+obj.PowerDensity+')*abs(sin(theta))')
+          powerVsTheta = sy.lambdify( var, sy.sympify('('+obj.PowerDensity+')*abs('+('sin(theta)' if var=='theta' else 'r')+')')
                                         .subs('theta', 'abs(theta)')
                                         .subs('phi', f'Piecewise( ( ({phiA}), ({var})>0 ), '
                                                                 f'( ({phiB}),  True     ) )') )
