@@ -113,6 +113,30 @@ def listOfStrings(expr: str):
   return res
 
 
+def constantValue(expr):
+  '''
+  Parse `expr` into a constant number, using only Python's built-in `ast` module -
+  no eval()/exec(), no sympy.sympify().
+
+  Parameters
+  ----------
+
+  expr : str
+    String or expression representing a constant value.
+
+  Returns
+  -------
+
+  any
+    Parsed value.
+  '''
+  try:
+    tree = ast.parse(expr, mode="eval")
+  except SyntaxError as e:
+    raise UnsafeExpressionError(f"Could not parse expression: {e}") from e
+  return _convert(tree.body, allowedSymbols=[], allowLists=True, allowStrings=True, allowBool=True)
+
+
 def constantNumber(expr: str|sy.Expr):
   '''
   Parse `expr` into a constant number, using only Python's built-in `ast` module -
@@ -191,10 +215,12 @@ def sympyExpression(expr: str|sy.Expr, allowedSymbols: set[str] | None = None) -
   return _convert(tree.body, allowedSymbols)
 
 
-def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=False, allowStrings=False) -> sy.Expr:
+def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=False, allowStrings=False, allowBool=False) -> sy.Expr:
   '''
   Traverse tree and resolve into python/sympy expression
   '''
+  kwargs = dict(allowedSymbols=allowedSymbols, allowLists=allowLists, allowStrings=allowStrings, allowBool=allowBool)
+
   # numeric literals: 3, 3.14, ...
   if isinstance(node, ast.Constant):
     value = node.value
@@ -204,7 +230,10 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=Fal
       else:
         raise UnsafeExpressionError("string literals are not allowed")
     if isinstance(value, bool):
-      raise UnsafeExpressionError("boolean literals are not allowed")
+      if allowBool:
+        return bool(value)
+      else:
+        raise UnsafeExpressionError("boolean literals are not allowed")
     if isinstance(value, int):
       return sy.Integer(value)
     if isinstance(value, float):
@@ -226,8 +255,8 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=Fal
     op_type = type(node.op)
     if op_type not in _BIN_OPS:
       raise UnsafeExpressionError(f"disallowed operator: {op_type.__name__}")
-    left = _convert(node.left, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings)
-    right = _convert(node.right, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings)
+    left = _convert(node.left, **kwargs)
+    right = _convert(node.right, **kwargs)
     return _BIN_OPS[op_type](left, right)
 
   # unary operations: -a, +a
@@ -235,7 +264,7 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=Fal
     op_type = type(node.op)
     if op_type not in _UNARY_OPS:
       raise UnsafeExpressionError(f"disallowed unary operator: {op_type.__name__}")
-    operand = _convert(node.operand, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings)
+    operand = _convert(node.operand, **kwargs)
     return _UNARY_OPS[op_type](operand)
 
   # function calls: exp(...), sin(...), DiracDelta(...), ...
@@ -246,14 +275,18 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=Fal
       raise UnsafeExpressionError(f"function not allowed: {node.func.id!r}")
     if node.keywords:
       raise UnsafeExpressionError("keyword arguments are not allowed")
-    args = [_convert(a, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings) 
-                                                                      for a in node.args]
-    return _FUNCTIONS[node.func.id](*args)
+    args = [_convert(a, **kwargs) for a in node.args]
+    res = _FUNCTIONS[node.func.id](*args)
+    try: 
+      # convert any numpy array to float if possible
+      res = res.astype('float')
+    except Exception:
+      pass
+    return res
 
   # recursively handle lists if allowed
   if (isinstance(node, ast.List) or isinstance(node, ast.Tuple)) and allowLists:
-    return [_convert(e, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings) 
-                                                                      for e in node.elts]
+    return [_convert(e, **kwargs) for e in node.elts]
 
   # everything else is explicitly rejected: Attribute, Subscript, Lambda,
   # comprehensions, BoolOp, Compare, Call with non-Name func, strings,

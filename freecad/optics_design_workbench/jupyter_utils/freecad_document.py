@@ -373,7 +373,7 @@ class FreecadProperty:
   def get(self):
     _str = self.getStr()
     try:
-      return parse.constantNumber(_str)
+      return parse.constantValue(_str)
     except Exception:
       if _str.endswith(' m'):
         try:
