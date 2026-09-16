@@ -194,7 +194,7 @@ def err(*msg, logOnly=False):
       _print = print
     _print(_prefix('error')+msg)
     if '\n' in msg:
-      _print()
+      _print('')
 
 def formatErr(*msg):
   return 'error: '+_indentMsg(msg)
@@ -231,7 +231,7 @@ def info(*msg, logOnly=None, noNewLine=False):
       _print = print
     _print(_prefix()+msg)
     if '\n' in msg and not noNewLine:
-      _print()
+      _print('')
 
 def verb(*args, **kwargs):
   if not _IS_VERBOSE:
