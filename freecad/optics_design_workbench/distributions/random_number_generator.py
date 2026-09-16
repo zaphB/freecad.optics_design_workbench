@@ -18,6 +18,7 @@ import signal
 
 from . import points_by_density
 from .. import io
+from .. import parse
 
 
 def _setAlarm(deadline):
@@ -112,7 +113,7 @@ class VectorRandomVariable:
 
       # fallback to numerical treatment and analytical mode did not succeed
       except Exception:
-        if sy.sympify(self._probabilityDensity).find(sy.DiracDelta):
+        if parse.sympyExpression(self._probabilityDensity).find(sy.DiracDelta):
           raise ValueError(f'cannot use numeric mode for expression containing DiracDelta')
         self._transformLambdas = [self._generateNumericScalarLambda(i) for i in range(len(self._variables))]
         self._mode = 'numeric'
@@ -148,7 +149,7 @@ class VectorRandomVariable:
   def _setConstants(self, **kwargs):
     # prepare expression object
     if self._probabilityDensityBaseExpr is None:
-      self._probabilityDensityBaseExpr = sy.sympify(self._probabilityDensity)
+      self._probabilityDensityBaseExpr = parse.sympyExpression(self._probabilityDensity)
     expr = self._probabilityDensityBaseExpr    
 
     # substitute constants
@@ -733,7 +734,7 @@ class ScalarRandomVariable(VectorRandomVariable):
   def __init__(self, probabilityDensity, variableDomain, variable=None, numericalResolution=None, **kwargs):
     self._desiredVariable = variable
     if variable is None:
-      variable = str(list(sy.sympify(probabilityDensity).free_symbols)[0])
+      variable = str(list(parse.sympyExpression(probabilityDensity).free_symbols)[0])
     super().__init__(probabilityDensity, 
                      variableDomains={variable: variableDomain},
                      numericalResolutions={} if numericalResolution is None else {variable: numericalResolution},
@@ -743,7 +744,7 @@ class ScalarRandomVariable(VectorRandomVariable):
   def compile(self, **kwargs):
     # subfunction that raises human readable exceptions if conditions for scalar random variable are not fulfilled 
     def _checkScalarity():
-      freeSymbols = sy.sympify(self._probabilityDensityExpr).free_symbols
+      freeSymbols = parse.sympyExpression(self._probabilityDensityExpr).free_symbols
       if ( len(freeSymbols) 
             and self._desiredVariable is not None
             and self._desiredVariable not in [str(s) for s in freeSymbols] ):
@@ -773,7 +774,7 @@ class SampledVectorRandomVariable(VectorRandomVariable):
   def __init__(self, variableRanges, gridProbs, **kwargs):
     # call superconstructor with dummy distribution to initialize
     super().__init__('1', **kwargs)
-    self._probabilityDensityExpr = sy.sympify('1')
+    self._probabilityDensityExpr = parse.sympyExpression('1')
 
     # convert and store variable ranges and grids for use in self._generateNumericScalarLambda
     self._variableRangesInBetween = variableRanges

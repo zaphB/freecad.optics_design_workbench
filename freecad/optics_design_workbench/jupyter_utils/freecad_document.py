@@ -25,6 +25,7 @@ from atomicwrites import atomic_write
 
 from .. import io
 from .. import simulation
+from .. import parse
 from . import progress
 from . import hits
 from . import parameter_sweeper
@@ -273,7 +274,19 @@ class FreecadProperty:
           if m:=re.search(r'type must be (\S+)', str(e)):
             io.verb(f'found complaint that type is not matching: str(e), trying '
                     f'to adapt setter line...')
-            typeFunc = eval(m.group(1))
+            typeStr = m.group(1)
+            if 'int' in typeStr.lower():
+              typeFunc = int
+            elif 'float' in typeStr.lower():
+              typeFunc = float
+            elif 'complex' in typeStr.lower():
+              typeFunc = complex
+            elif 'str' in typeStr.lower():
+              typeFunc = str
+            else:
+              raise ValueError(f'dont know how to convert to type {typeStr!r}, please report an issue on '
+                               f'github (https://github.com/zaphB/freecad.optics_design_workbench/issues) '
+                               f'so this can be fixed')
             setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {repr(typeFunc(value))}'
             io.verb(f'updated setter line: {setterLine}')
             self._doc.execInFreecadShell(setterLine, errText=f'failed running python '
@@ -355,31 +368,31 @@ class FreecadProperty:
     return float(self.getStr())
   
   def getInt(self):
-    return float(self.getStr())
+    return int(self.getStr())
 
   def get(self):
     _str = self.getStr()
     try:
-      return eval(_str)
+      return parse.constantNumber(_str)
     except Exception:
       if _str.endswith(' m'):
         try:
-          return 1e3*eval(_str[:-2])
+          return 1e3*parse.constantNumber(_str[:-2])
         except Exception:
           pass
       if _str.endswith(' mm'):
         try:
-          return eval(_str[:-3])
+          return parse.constantNumber(_str[:-3])
         except Exception:
           pass
       if _str.endswith(' um'):
         try:
-          return 1e-3*eval(_str[:-3])
+          return 1e-3*parse.constantNumber(_str[:-3])
         except Exception:
           pass
       if _str.endswith(' nm'):
         try:
-          return 1e-6*eval(_str[:-3])
+          return 1e-6*parse.constantNumber(_str[:-3])
         except Exception:
           pass
     return _str

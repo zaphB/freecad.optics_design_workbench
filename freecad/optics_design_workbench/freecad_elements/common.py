@@ -20,6 +20,7 @@ import re
 from .. import io
 from .. import simulation
 from .. import distributions
+from .. import parse
 
 _LAST_PROCESS_EVENTS_CALL = time.time()
 
@@ -309,7 +310,7 @@ class GenericFreecadElementProxy:
 
     # try to parse
     try:
-      _domain = [float(sy.sympify(d).evalf()) for d in domain.split(',')]
+      _domain = [parse.constantNumber(d) for d in domain.split(',')]
     except Exception as e:
       if not isRecursive:
         io.err(f'invalid domain {domain}, {e.__class__.__name__}: {e}')
@@ -331,7 +332,7 @@ class GenericFreecadElementProxy:
 
     # check if limits are fulfilled
     if limits:
-      _limits = [float(sy.sympify(l).evalf()) for l in limits]
+      _limits = [parse.constantNumber(l) for l in limits]
       if l1 < _limits[0] or l2 > _limits[1]:
         if not isRecursive:
           io.err(f'domain {domain} out of bounds, expect both boundaries to be within {limits}.')
@@ -341,7 +342,7 @@ class GenericFreecadElementProxy:
 
     # check if span limits are fulfilled
     if spanLimits and not isRecursive:
-      _spanLimits = [float(sy.sympify(l).evalf()) for l in spanLimits]
+      _spanLimits = [parse.constantNumber(l) for l in spanLimits]
       if l2-l1 < _spanLimits[0] or l2-l1 > _spanLimits[1]:
         # if this is a recursive call just return default to avoid possibility of endless recursion
         if isRecursive:

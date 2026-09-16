@@ -21,6 +21,7 @@ from . import find
 from .. import simulation
 from .. import distributions
 from .. import io
+from .. import parse
 
 from .generic_source import *
 from .common import *
@@ -214,13 +215,13 @@ class PointSourceProxy(GenericSourceProxy):
           else:
             # set divergence to read only if variables other than r exist
             # in expression
-            if [str(s) for s in sy.sympify(expr).free_symbols] == ['r']:
+            if [str(s) for s in parse.sympyExpression(expr).free_symbols] == ['r']:
               obj.setEditorMode('Divergence', 0)
             else:
               obj.setEditorMode('Divergence', 1)
 
             # create theta-only expression and find divergence angle
-            expr = sy.sympify(expr).subs('r', sy.sympify(f'(tan(theta)*{f})'))
+            expr = parse.sympyExpression(expr).subs('r', parse.sympyExpression(f'(tan(theta)*{f})'))
             syms = [str(s) for s in expr.free_symbols]
             if not isclose(f, 0) and syms == ['theta'] and self.parsedThetaDomain(obj)[0] == 0:
               maxPower = sy.lambdify('theta', expr)(0)
@@ -253,7 +254,7 @@ class PointSourceProxy(GenericSourceProxy):
         expr = getattr(obj, 'PowerDensity', None)
         if f is not None and expr is not None:
           f = float(f)
-          expr = sy.sympify(expr)
+          expr = parse.sympyExpression(expr)
           syms = [str(s) for s in expr.free_symbols]
           if syms == ['r'] and self.parsedRadiusDomain(obj)[0] == 0:
             maxPower = sy.lambdify('r', expr)(0)
@@ -303,10 +304,10 @@ class PointSourceProxy(GenericSourceProxy):
 
       # substitute r,x,y by theta,phi expressions
       f = f'{abs(float(getattr(obj, "FocalLength", 1))):.8e}'
-      densityExpr = (sy.sympify(densityString)
-                            .subs('r', sy.sympify(f'(tan(theta)*{f})'))
-                            .subs('x', sy.sympify(f'(tan(theta)*cos(phi)*{f})'))
-                            .subs('y', sy.sympify(f'(tan(theta)*sin(phi)*{f})')))
+      densityExpr = (parse.sympyExpression(densityString)
+                            .subs('r', parse.sympyExpression(f'(tan(theta)*{f})'))
+                            .subs('x', parse.sympyExpression(f'(tan(theta)*cos(phi)*{f})'))
+                            .subs('y', parse.sympyExpression(f'(tan(theta)*sin(phi)*{f})')))
 
       # if scalar random variable is requested: treat phi as a constant that has to
       # be passed to compile (used in fan mode)
@@ -343,9 +344,9 @@ class PointSourceProxy(GenericSourceProxy):
                          f'is forbidden if focal length is infinite.')
 
       # substitute theta,x,y and by r,phi expressions
-      densityExpr = (sy.sympify(densityString)
-                            .subs('x', sy.sympify(f'(r*cos(phi))'))
-                            .subs('y', sy.sympify(f'(r*sin(phi))')))
+      densityExpr = (parse.sympyExpression(densityString)
+                            .subs('x', parse.sympyExpression(f'(r*cos(phi))'))
+                            .subs('y', parse.sympyExpression(f'(r*sin(phi))')))
       
       # if scalar random variable is requested: treat phi as a constant that has to
       # be passed to compile (used in fan mode)
@@ -369,7 +370,7 @@ class PointSourceProxy(GenericSourceProxy):
       )
 
   def _parsedFanPhi0(self, obj):
-    return float(sy.sympify(getattr(obj, 'FanPhi0')).evalf())
+    return parse.constantNumber(getattr(obj, 'FanPhi0'))
 
   def _getVrv(self, obj, **kwargs):
     if NON_SERIALIZABLE_STORE.get(self, None) is None:
@@ -536,7 +537,7 @@ class PointSourceProxy(GenericSourceProxy):
         # calculate desired span and update l1 and l2 if needed
         if obj.FanModePowerSpan > 0 and obj.FanModePowerSpan < 1:
           var = 'theta' if isfinite(float(obj.FocalLength)) else 'r'
-          powerVsTheta = sy.lambdify( var, sy.sympify('('+obj.PowerDensity+')*abs('+('sin(theta)' if var=='theta' else 'r')+')')
+          powerVsTheta = sy.lambdify( var, parse.sympyExpression('('+obj.PowerDensity+')*abs('+('sin(theta)' if var=='theta' else 'r')+')')
                                         .subs('theta', 'abs(theta)')
                                         .subs('phi', f'Piecewise( ( ({phiA}), ({var})>0 ), '
                                                                 f'( ({phiB}),  True     ) )') )
@@ -583,15 +584,16 @@ class PointSourceProxy(GenericSourceProxy):
                 #             within phiDomain, record power density from 0 to
                 #             var lim only)
                 ((
-                  str(sy.sympify(obj.PowerDensity)
+                  str(parse.sympyExpression(obj.PowerDensity)
                           .subs('theta', 'abs(theta)')
                           .subs('r', 'abs(r)')
-                          .subs('phi', f'Piecewise( ( ({phiA}), ({var})>0 ), '
-                                                  f'( ({phiB}),  True     ) )'))
+                          .subs('phi', parse.sympyExpression(
+                                          f'Piecewise( ( ({phiA}), ({var})>0 ), '
+                                          f'( ({phiB}),  True     ) )')))
                 )
                 if isfinite(phiB) else 
                 (
-                  str(sy.sympify(obj.PowerDensity)
+                  str(parse.sympyExpression(obj.PowerDensity)
                           .subs('theta', 'abs(theta)')
                           .subs('r', 'abs(r)'))
                 )),
