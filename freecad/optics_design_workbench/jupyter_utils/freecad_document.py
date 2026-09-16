@@ -770,9 +770,7 @@ class FreecadDocument:
     list
       List of strings containing all object names or labels.
     '''
-    if internalNames:
-      return sorted(list(set(eval(self.execInFreecadShell(f'[o.Name for o in App.activeDocument().Objects]')))))
-    return sorted(list(set(eval(self.execInFreecadShell(f'[o.Label for o in App.activeDocument().Objects]')))))
+    response = parse.listOfStrings(self.execInFreecadShell(f'[o.{'Name' if internalNames else 'Label'} for o in App.activeDocument().Objects]'))
 
   def runSimulation(self, action='true', endIf=None, endIfMaxLoad=.5):
     '''

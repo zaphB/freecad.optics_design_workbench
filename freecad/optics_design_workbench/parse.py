@@ -26,6 +26,7 @@ import ast
 import operator
 
 import sympy as sy
+import numpy as np
 
 
 class UnsafeExpressionError(ValueError):
@@ -81,6 +82,33 @@ _FUNCTIONS = {
   "DiracDelta": sy.DiracDelta,
   "Heaviside": sy.Heaviside,
 }
+
+def listOfStrings(expr: str):
+  '''
+  Parse `expr` into a list of strings, using only Python's built-in `ast` module -
+  no eval()/exec(), no sympy.sympify().
+
+  Parameters
+  ----------
+
+  expr : str
+    String or expression representing a list of strings.
+
+  Returns
+  -------
+
+  list[str]
+    Parsed list of strings.
+  '''
+  try:
+    tree = ast.parse(expr, mode="eval")
+  except SyntaxError as e:
+    raise UnsafeExpressionError(f"Could not parse expression: {e}") from e
+  res = _convert(tree.body, allowLists=True, allowStrings=True)
+  if (type(res) is not list 
+        or not all([ type(e) is str for e in res ]) ):
+    raise UnsafeExpressionError(f'parsing expression did not yield expected list of strings: {expr!r}')
+  return res
 
 
 def constantNumber(expr: str|sy.Expr):
@@ -161,13 +189,18 @@ def sympyExpression(expr: str|sy.Expr, allowedSymbols: set[str] | None = None) -
   return _convert(tree.body, allowedSymbols)
 
 
-def _convert(node: ast.AST, allowedSymbols: set[str] | None) -> sy.Expr:
+def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=False, allowStrings=False) -> sy.Expr:
   '''
-  Traverse tree and resolve into sympy expression
+  Traverse tree and resolve into python/sympy expression
   '''
   # numeric literals: 3, 3.14, ...
   if isinstance(node, ast.Constant):
     value = node.value
+    if isinstance(value, str) or isinstance(value, np.str_):
+      if allowStrings:
+        return str(value)
+      else:
+        raise UnsafeExpressionError("string literals are not allowed")
     if isinstance(value, bool):
       raise UnsafeExpressionError("boolean literals are not allowed")
     if isinstance(value, int):
@@ -191,8 +224,8 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None) -> sy.Expr:
     op_type = type(node.op)
     if op_type not in _BIN_OPS:
       raise UnsafeExpressionError(f"disallowed operator: {op_type.__name__}")
-    left = _convert(node.left, allowedSymbols)
-    right = _convert(node.right, allowedSymbols)
+    left = _convert(node.left, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings)
+    right = _convert(node.right, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings)
     return _BIN_OPS[op_type](left, right)
 
   # unary operations: -a, +a
@@ -200,7 +233,7 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None) -> sy.Expr:
     op_type = type(node.op)
     if op_type not in _UNARY_OPS:
       raise UnsafeExpressionError(f"disallowed unary operator: {op_type.__name__}")
-    operand = _convert(node.operand, allowedSymbols)
+    operand = _convert(node.operand, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings)
     return _UNARY_OPS[op_type](operand)
 
   # function calls: exp(...), sin(...), DiracDelta(...), ...
@@ -211,11 +244,16 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None) -> sy.Expr:
       raise UnsafeExpressionError(f"function not allowed: {node.func.id!r}")
     if node.keywords:
       raise UnsafeExpressionError("keyword arguments are not allowed")
-    args = [_convert(a, allowedSymbols) for a in node.args]
+    args = [_convert(a, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings) 
+                                                                      for a in node.args]
     return _FUNCTIONS[node.func.id](*args)
+
+  # recursively handle lists if allowed
+  if (isinstance(node, ast.List) or isinstance(node, ast.Tuple)) and allowLists:
+    return [_convert(e, allowedSymbols, allowLists=allowLists, allowStrings=allowStrings) 
+                                                                      for e in node.elts]
 
   # everything else is explicitly rejected: Attribute, Subscript, Lambda,
   # comprehensions, BoolOp, Compare, Call with non-Name func, strings,
   # Import, ...
   raise UnsafeExpressionError(f"disallowed syntax: {type(node).__name__}")
-
