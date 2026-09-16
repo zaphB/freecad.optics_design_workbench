@@ -749,12 +749,12 @@ class ScalarRandomVariable(VectorRandomVariable):
             and self._desiredVariable is not None
             and self._desiredVariable not in [str(s) for s in freeSymbols] ):
         raise ValueError(f'specified variable "{self._desiredVariable}" does not seem to appear '
-                         f'in expression "{self._probabilityDensityExpr}"')
+                         f'in expression "{self._probabilityDensityExpr}" ({freeSymbols=!r})')
 
       if len(self._variables) > 1:
         raise ValueError(f'expression "{self._probabilityDensityExpr}" seems to have more than '
                         f'one free variable after substituting constants; did you pass all constants '
-                        f'to .compile() or .draw()?')
+                        f'to .compile() or .draw()? ({freeSymbols=!r})')
 
     # run vector random variable's compile and reraise exceptions caused by non-scalarity as 
     # useful human readable exceptions

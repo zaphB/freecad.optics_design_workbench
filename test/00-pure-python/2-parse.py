@@ -16,6 +16,8 @@ from optics_design_workbench import parse
 @pytest.mark.parametrize(('expression', 'expected'), [
   ('0', 0),
   ('0.07*pi', 0.07*math.pi),
+  ('0.07**pi', 0.07**math.pi),
+  ('0.07^pi', 0.07**math.pi),
   ('-pi/2 + 1e-3', -math.pi/2 + 1e-3),
   ('inf', math.inf),
   ('inf', np.inf),
@@ -34,12 +36,10 @@ def test_parses_sympy_expressions(expression):
   expectVals = sy.lambdify('x', sy.sympify(expression))(X)
   assert all([np.isclose(x, _x) for x, _x in zip(vals, expectVals)])
 
-
 def test_obeys_allowed_symbols_list():
   parse.sympyExpression('2*x + y**2', allowedSymbols=['x', 'y'])
   with pytest.raises(ValueError):
     parse.sympyExpression('2*x + y**2 + z', allowedSymbols=['x', 'y'])
-
 
 def test_rejects_code_execution(tmp_path):
   target = tmp_path / 'executed'
@@ -49,3 +49,18 @@ def test_rejects_code_execution(tmp_path):
       f'__import__("pathlib").Path("{target}").write_text("executed")')
 
   assert not target.exists()
+
+@pytest.mark.parametrize(('expect'), [
+  ['1', 'asd', '123'],
+  [],
+])
+def test_listOfStrings(expect):
+  assert parse.listOfStrings(str(expect)) == expect
+
+@pytest.mark.parametrize(('expr'), [
+  "['1', 'asd', 123]",
+  "123+8",
+])
+def test_listOfStringsRejectsWrongTypes(expr):
+  with pytest.raises(ValueError):
+    parse.listOfStrings(expr)

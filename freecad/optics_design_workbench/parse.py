@@ -46,43 +46,61 @@ _BIN_OPS = {
   ast.Mod: operator.mod,
 }
 
+_BOOL_OPS = {
+  ast.And: operator.and_,
+  ast.Or: operator.or_,
+}  
+
+_COMP_OPS = {
+  ast.Eq: operator.eq,
+  ast.NotEq: operator.ne,
+  ast.Lt: operator.lt,
+  ast.LtE: operator.le,
+  ast.Gt: operator.gt,
+  ast.GtE: operator.ge,
+  ast.Is: operator.is_,
+  ast.IsNot: operator.is_not,
+}
+
 _UNARY_OPS = {
   ast.UAdd: operator.pos,
   ast.USub: operator.neg,
+  ast.Not: operator.not_,
 }
 
 _CONSTANTS = {
-  "pi": sy.pi,
-  "e": sy.E,
-  "inf": sy.oo,
-  "oo": sy.oo,
-  "i": 1j,
-  "j": 1j,
+  'pi': sy.pi,
+  'e': sy.E,
+  'inf': sy.oo,
+  'oo': sy.oo,
+  'i': 1j,
+  'j': 1j,
 }
 
 _FUNCTIONS = {
-  "exp": sy.exp,
-  "log": sy.log,
-  "ln": sy.log,
-  "sqrt": sy.sqrt,
-  "sin": sy.sin,
-  "cos": sy.cos,
-  "tan": sy.tan,
-  "asin": sy.asin,
-  "arcsin": sy.asin,
-  "acos": sy.acos,
-  "arccos": sy.acos,
-  "atan": sy.atan,
-  "arctan": sy.atan,
-  "sinh": sy.sinh,
-  "cosh": sy.cosh,
-  "tanh": sy.tanh,
-  "Abs": sy.Abs,
-  "abs": sy.Abs,
-  "DiracDelta": sy.DiracDelta,
-  "Heaviside": sy.Heaviside,
-  "Vector": np.array,
-  "Matrix": np.array,
+  'exp': sy.exp,
+  'log': sy.log,
+  'ln': sy.log,
+  'sqrt': sy.sqrt,
+  'sin': sy.sin,
+  'cos': sy.cos,
+  'tan': sy.tan,
+  'asin': sy.asin,
+  'arcsin': sy.asin,
+  'acos': sy.acos,
+  'arccos': sy.acos,
+  'atan': sy.atan,
+  'arctan': sy.atan,
+  'sinh': sy.sinh,
+  'cosh': sy.cosh,
+  'tanh': sy.tanh,
+  'Abs': sy.Abs,
+  'abs': sy.Abs,
+  'DiracDelta': sy.DiracDelta,
+  'Heaviside': sy.Heaviside,
+  'Piecewise': sy.Piecewise,
+  'Vector': np.array,
+  'Matrix': np.array,
 }
 
 def listOfStrings(expr: str):
@@ -106,7 +124,7 @@ def listOfStrings(expr: str):
     tree = ast.parse(expr, mode="eval")
   except SyntaxError as e:
     raise UnsafeExpressionError(f"Could not parse expression: {e}") from e
-  res = _convert(tree.body, allowLists=True, allowStrings=True)
+  res = _convert(tree.body, allowStrings=True)
   if (type(res) is not list 
         or not all([ type(e) is str for e in res ]) ):
     raise UnsafeExpressionError(f'parsing expression did not yield expected list of strings: {expr!r}')
@@ -134,7 +152,7 @@ def constantValue(expr):
     tree = ast.parse(expr, mode="eval")
   except SyntaxError as e:
     raise UnsafeExpressionError(f"Could not parse expression: {e}") from e
-  return _convert(tree.body, allowedSymbols=[], allowLists=True, allowStrings=True, allowBool=True)
+  return _convert(tree.body, allowedSymbols=[], allowStrings=True)
 
 
 def constantNumber(expr: str|sy.Expr):
@@ -205,21 +223,27 @@ def sympyExpression(expr: str|sy.Expr, allowedSymbols: set[str] | None = None) -
   # strip whitespaces to avoid 'unexpected indent' errors
   expr = expr.strip()
 
-  # else: use AST parser to create tree and traverse tree to resolve according
-  #       to global whitelists
+  # string replace ^ to ** to support ^ as power operator with same operator
+  # priority as **. Only drawback: we have to forbid strings in our expression, 
+  # because the simple replacement below would not only replace the operators
+  # but also string values
+  expr = expr.replace('^', '**')
+
+  # use AST parser to create tree and traverse tree to resolve according
+  # to global whitelists
   try:
     tree = ast.parse(expr, mode="eval")
   except SyntaxError as e:
     raise UnsafeExpressionError(f"Could not parse expression: {e}") from e
 
-  return _convert(tree.body, allowedSymbols)
+  return _convert(tree.body, allowedSymbols, allowStrings=False)
 
 
-def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=False, allowStrings=False, allowBool=False) -> sy.Expr:
+def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowStrings=False) -> sy.Expr:
   '''
   Traverse tree and resolve into python/sympy expression
   '''
-  kwargs = dict(allowedSymbols=allowedSymbols, allowLists=allowLists, allowStrings=allowStrings, allowBool=allowBool)
+  kwargs = dict(allowedSymbols=allowedSymbols, allowStrings=allowStrings)
 
   # numeric literals: 3, 3.14, ...
   if isinstance(node, ast.Constant):
@@ -230,10 +254,7 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=Fal
       else:
         raise UnsafeExpressionError("string literals are not allowed")
     if isinstance(value, bool):
-      if allowBool:
-        return bool(value)
-      else:
-        raise UnsafeExpressionError("boolean literals are not allowed")
+      return bool(value)
     if isinstance(value, int):
       return sy.Integer(value)
     if isinstance(value, float):
@@ -258,6 +279,32 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=Fal
     left = _convert(node.left, **kwargs)
     right = _convert(node.right, **kwargs)
     return _BIN_OPS[op_type](left, right)
+
+  # boolean operations: a and b, a or b
+  if isinstance(node, ast.BoolOp):
+    opType = type(node.op)
+    if opType not in _BOOL_OPS:
+      raise UnsafeExpressionError(f"disallowed operator: {opType.__name__}")
+    res = None
+    values = [_convert(v, **kwargs) for v in node.values]
+    for v1, v2 in zip(values[:-1], values[1:]):
+      if res is None:
+        res = _BOOL_OPS[opType](v1, v2)
+      else:
+        res = _BOOL_OPS[opType](res, v2)
+    return res
+
+  # comparisons: a < b, a != b, a >= b, ...
+  if isinstance(node, ast.Compare):
+    left = _convert(node.left, **kwargs)
+    result = True
+    for op, right in zip(node.ops, node.comparators):
+      if type(op) not in _COMP_OPS:
+        raise UnsafeExpressionError(f"disallowed operator: {opType.__name__}")
+      right = _convert(right, **kwargs)
+      result = result and _COMP_OPS[type(op)](left, right)
+      left = right
+    return result
 
   # unary operations: -a, +a
   if isinstance(node, ast.UnaryOp):
@@ -285,7 +332,7 @@ def _convert(node: ast.AST, allowedSymbols: set[str] | None=None, allowLists=Fal
     return res
 
   # recursively handle lists if allowed
-  if (isinstance(node, ast.List) or isinstance(node, ast.Tuple)) and allowLists:
+  if (isinstance(node, ast.List) or isinstance(node, ast.Tuple)):
     return [_convert(e, **kwargs) for e in node.elts]
 
   # everything else is explicitly rejected: Attribute, Subscript, Lambda,
