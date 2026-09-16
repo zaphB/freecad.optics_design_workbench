@@ -191,12 +191,19 @@ def _getFolderBase():
   if not fname:
     raise RuntimeError('cannot start simulation because no active document '
                        'or active document is not yet saved')
-
+  if not os.path.exists(fname):
+    raise RuntimeError(f'tried to locate simulation result folder for an '
+                       f'FCStd file that does not exist: {fname}')
+  
   # generate paths
-  base, fname = os.path.split(os.path.realpath(fname))
+  base, fname = os.path.split(os.path.abspath(os.path.realpath(fname)))
   if fname.lower().endswith('.fcstd'):
     fname = fname[:-6]
   folderName = f'{fname}.OpticsDesign'
+
+  # ensure path exists
+  os.makedirs(base+'/'+folderName, exist_ok=True)
+
   return base, fname, folderName
 
 

@@ -75,6 +75,11 @@ def _init(forceReInit=False):
   if _LOG_DIR is None:
     return
 
+  # do not create log dir on our own, instead instantly return
+  if not os.path.exists(_LOG_DIR):
+    return
+
+  # create all dirs if not existing yet
   os.makedirs(_LOG_DIR, exist_ok=True)
   for oldlog in [f for f in os.listdir(_LOG_DIR)
                     if f != _LOGFILE_NAME and f.startswith(_LOGFILE_NAME)]:
@@ -129,32 +134,33 @@ def gatherSlaveFiles():
   if not _IS_INIT or not processes.isMasterProcess():
     return
 
-  for f in os.listdir(_LOG_DIR):
-    # check if file looks like a slave's log
-    if f.startswith('optics_design_workbench.pid') and f.endswith('.log'):
-      pid = None
-      try:
-        pid = int(f[27:-4])
-      except ValueError:
-        pass
-      if pid:
+  if os.path.exists(_LOG_DIR):
+    for f in os.listdir(_LOG_DIR):
+      # check if file looks like a slave's log
+      if f.startswith('optics_design_workbench.pid') and f.endswith('.log'):
+        pid = None
+        try:
+          pid = int(f[27:-4])
+        except ValueError:
+          pass
+        if pid:
 
-        # rename file to prevent new lines being written while we parse it
-        # the slave process will recreate its own logfile if new messages appear
-        while True:
-          tmpName = os.path.join(_LOG_DIR, f'{int(random.random()*1e12)}.log')
-          if not os.path.exists(tmpName):
-            break
-        os.rename(os.path.join(_LOG_DIR, f), tmpName)
+          # rename file to prevent new lines being written while we parse it
+          # the slave process will recreate its own logfile if new messages appear
+          while True:
+            tmpName = os.path.join(_LOG_DIR, f'{int(random.random()*1e12)}.log')
+            if not os.path.exists(tmpName):
+              break
+          os.rename(os.path.join(_LOG_DIR, f), tmpName)
 
-        # append file to main log
-        with open(tmpName, 'r') as inFile:
-          with open(os.path.join(_LOG_DIR, _LOGFILE_NAME), 'a') as outFile:
-            for line in inFile:
-              outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}\n')
-        
-        # remove tempfile
-        os.remove(tmpName) 
+          # append file to main log
+          with open(tmpName, 'r') as inFile:
+            with open(os.path.join(_LOG_DIR, _LOGFILE_NAME), 'a') as outFile:
+              for line in inFile:
+                outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}\n')
+          
+          # remove tempfile
+          os.remove(tmpName) 
 
 def _indentMsg(msg):
   ls = [l for l in '\n'.join([str(l) for l in msg]).split('\n') if l.strip()]

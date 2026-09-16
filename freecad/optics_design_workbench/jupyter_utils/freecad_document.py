@@ -581,6 +581,7 @@ class FreecadDocument:
 
     # generate results folder path
     self._resultsPath = path[:-6]+'.OpticsDesign'
+    os.makedirs(self._resultsPath, exist_ok=True)
 
     # store whether progress should be shown interactively
     self.showProgress = showProgress
