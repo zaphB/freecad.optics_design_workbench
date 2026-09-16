@@ -129,12 +129,12 @@ class Histogram:
     if type(cbar) is dict:
       colorbar(**cbar).set_label('hit density per bin')
 
-    nx, ny, nz = self._planeNormal
-    px, py, pz = self._xInPlaneVec
+    xpx, xpy, xpz = self._xInPlaneVec
+    ypx, ypy, ypz = cross(self._planeNormal, self._xInPlaneVec)
     ox, oy = self._origin
     if title is None:
-      title = (f'plane normal = [{nx:.2f}, {ny:.2f}, {nz:.2f}],\n'
-               f'projected $x$ = [{px:.2f}, {py:.2f}, {pz:.2f}]'
+      title = (f'plot $x$ axis in 3D: [{xpx:.2f}, {xpy:.2f}, {xpz:.2f}],\n'
+               f'plor $y$ axis in 3D: [{ypx:.2f}, {ypy:.2f}, {ypz:.2f}]'
                +(f',\norigin = [{ox:.2e}, {oy:.2e}]' if not isclose(ox,0) or not isclose(oy,0) else ''))
     gca().set_title(title, fontsize=10)
     if self._binCoords == 'cartesian':

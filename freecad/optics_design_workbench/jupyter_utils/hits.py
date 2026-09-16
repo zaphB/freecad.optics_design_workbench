@@ -163,10 +163,24 @@ class Hits:
     candidates = [nx, ny, nz]
     if xInPlaneVec is not None:
       candidates = [xInPlaneVec]
-    projY = sorted([cross(planeNormal, n) for n in candidates], 
-                   key=lambda x: -linalg.norm(x))[0]
-    xInPlaneVec = cross(planeNormal, projY)
-    # prefer positive coefficients in xInPlaneVec
+
+    # only prefer other candidates from list if they are significantly better suited
+    # this stabilizes auto-detected coordinate system orientation against numeric noise 
+    bestWeight = None
+    bestVec = None
+    for c in candidates:
+      vec = cross(planeNormal, c)
+      weight = linalg.norm(vec)
+      if bestWeight is None or weight > 2*bestWeight:
+        bestWeight = weight
+        bestVec = vec
+
+    # second cross product to make in plane vector orthogonal to planeNormal and 
+    # as parallel as possible to selected candidate
+    xInPlaneVec = cross(planeNormal, bestVec)
+    
+    # sign choice is arbitrary, therefore prefer positive coefficients in xInPlaneVec
+    # by convention
     if sum(xInPlaneVec) < 0:
       xInPlaneVec = -xInPlaneVec
 
@@ -213,10 +227,10 @@ class Hits:
                     x='projected $x$', y='projected $y$', 
                     **(dict(hue=hueLabel, palette='hls') if hueLabel else {}),
                     **kwargs)
-    nx, ny, nz = planeNormal
-    px, py, pz = xInPlaneVec
-    title(f'plane normal = [{nx:.2f}, {ny:.2f}, {nz:.2f}],\n'
-          f'projected $x$ = [{px:.2f}, {py:.2f}, {pz:.2f}]', fontsize=10) 
+    xpx, xpy, xpz = xInPlaneVec
+    ypx, ypy, ypz = cross(planeNormal, xInPlaneVec)
+    title(f'plot $x$ axis in 3D: [{xpx:.2f}, {xpy:.2f}, {xpz:.2f}],\n'
+          f'plot $y$ axis in 3D: [{ypx:.2f}, {ypy:.2f}, {ypz:.2f}]', fontsize=10)
     gca().axis('equal')
     gca().set_aspect('equal')
     tight_layout()
