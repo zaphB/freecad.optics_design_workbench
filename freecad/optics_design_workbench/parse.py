@@ -99,8 +99,8 @@ _FUNCTIONS = {
   'DiracDelta': sy.DiracDelta,
   'Heaviside': sy.Heaviside,
   'Piecewise': sy.Piecewise,
-  'Vector': np.array,
-  'Matrix': np.array,
+  'Vector': lambda *args: np.array(args),
+  'Matrix': lambda *args: np.array(args),
 }
 
 def listOfStrings(expr: str):
