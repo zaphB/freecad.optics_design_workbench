@@ -75,6 +75,11 @@ def _init(forceReInit=False):
   if _LOG_DIR is None:
     return
 
+  # do not create log dir on our own, instead instantly return
+  if not os.path.exists(_LOG_DIR):
+    return
+
+  # create all dirs if not existing yet
   os.makedirs(_LOG_DIR, exist_ok=True)
   for oldlog in [f for f in os.listdir(_LOG_DIR)
                     if f != _LOGFILE_NAME and f.startswith(_LOGFILE_NAME)]:
@@ -91,7 +96,8 @@ def _init(forceReInit=False):
               datefmt=r'%Y-%m-%dT%H:%M:%S'))
     l = _logger()
     l.addHandler(h)
-    _logger().setLevel(logging.INFO)
+    l.propagate = False
+    l.setLevel(logging.INFO)
     _IS_INIT = True
 
 def setLogfile(name):
@@ -129,32 +135,33 @@ def gatherSlaveFiles():
   if not _IS_INIT or not processes.isMasterProcess():
     return
 
-  for f in os.listdir(_LOG_DIR):
-    # check if file looks like a slave's log
-    if f.startswith('optics_design_workbench.pid') and f.endswith('.log'):
-      pid = None
-      try:
-        pid = int(f[27:-4])
-      except ValueError:
-        pass
-      if pid:
+  if os.path.exists(_LOG_DIR):
+    for f in os.listdir(_LOG_DIR):
+      # check if file looks like a slave's log
+      if f.startswith('optics_design_workbench.pid') and f.endswith('.log'):
+        pid = None
+        try:
+          pid = int(f[27:-4])
+        except ValueError:
+          pass
+        if pid:
 
-        # rename file to prevent new lines being written while we parse it
-        # the slave process will recreate its own logfile if new messages appear
-        while True:
-          tmpName = os.path.join(_LOG_DIR, f'{int(random.random()*1e12)}.log')
-          if not os.path.exists(tmpName):
-            break
-        os.rename(os.path.join(_LOG_DIR, f), tmpName)
+          # rename file to prevent new lines being written while we parse it
+          # the slave process will recreate its own logfile if new messages appear
+          while True:
+            tmpName = os.path.join(_LOG_DIR, f'{int(random.random()*1e12)}.log')
+            if not os.path.exists(tmpName):
+              break
+          os.rename(os.path.join(_LOG_DIR, f), tmpName)
 
-        # append file to main log
-        with open(tmpName, 'r') as inFile:
-          with open(os.path.join(_LOG_DIR, _LOGFILE_NAME), 'a') as outFile:
-            for line in inFile:
-              outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}\n')
-        
-        # remove tempfile
-        os.remove(tmpName) 
+          # append file to main log
+          with open(tmpName, 'r') as inFile:
+            with open(os.path.join(_LOG_DIR, _LOGFILE_NAME), 'a') as outFile:
+              for line in inFile:
+                outFile.write(f'{" ".join(line.split()[:2])} (slave {pid}) {" ".join(line.split()[2:])}\n')
+          
+          # remove tempfile
+          os.remove(tmpName) 
 
 def _indentMsg(msg):
   ls = [l for l in '\n'.join([str(l) for l in msg]).split('\n') if l.strip()]
@@ -180,9 +187,14 @@ def err(*msg, logOnly=False):
   if _logger():
     _logger().error(msg)
   if not logOnly:
-    print(_prefix('error')+msg)
+    try:
+      import FreeCAD
+      _print = lambda m: FreeCAD.Console.PrintError(m+'\n')
+    except Exception:
+      _print = print
+    _print(_prefix('error')+msg)
     if '\n' in msg:
-      print()
+      _print('')
 
 def formatErr(*msg):
   return 'error: '+_indentMsg(msg)
@@ -194,10 +206,12 @@ def warn(*msg, logOnly=False):
   if _logger():
     _logger().warning(msg)
   if not logOnly:
-    warnings.warn('warning: '+msg)
-    #print(_prefix('warning')+msg)
-    #if '\n' in msg:
-    #  print()
+    try:
+      import FreeCAD
+      _print = lambda m: FreeCAD.Console.PrintWarning(m+'\n')
+    except Exception:
+      _print = warnings.warn
+    _print('warning: '+msg)
 
 def info(*msg, logOnly=None, noNewLine=False):
   # enable logOnly by default for info() and verb() in jupyter environment
@@ -210,15 +224,19 @@ def info(*msg, logOnly=None, noNewLine=False):
   if _logger():
     _logger().info(msg)
   if not logOnly:
-    print(_prefix()+msg)
+    try:
+      import FreeCAD
+      _print = lambda m: FreeCAD.Console.PrintMessage(m+'\n')
+    except Exception:
+      _print = print
+    _print(_prefix()+msg)
     if '\n' in msg and not noNewLine:
-      print()
+      _print('')
 
 def verb(*args, **kwargs):
   if not _IS_VERBOSE:
     return
   info(*args, **kwargs)
-
 
 # format times
 def secondsToYMDhms(secs):

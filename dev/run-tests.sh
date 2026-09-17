@@ -40,6 +40,7 @@ while [[ "$1" != "" ]]; do
   shift
 done
 if [[ "${#TESTS[@]}" == 0 ]]; then
+  shopt -s globstar nullglob # ensure ** is recursive and empty matches return empty list
   TESTS=(test/**/*.py test/*.py)
   ISDEFAULTTESTS=1
 fi

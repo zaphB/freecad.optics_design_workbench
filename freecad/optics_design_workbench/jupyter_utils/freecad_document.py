@@ -25,6 +25,7 @@ from atomicwrites import atomic_write
 
 from .. import io
 from .. import simulation
+from .. import parse
 from . import progress
 from . import hits
 from . import parameter_sweeper
@@ -61,7 +62,12 @@ _ALL_DOCUMENTS = []
 
 # default path to freecad executable
 _GET_FREECAD_EXECUTABLE = lambda: (os.environ.get('TEST_FREECAD_BINARY', '') or 'FreeCAD')
-
+def _GET_FREECAD_PROC_ENVS():
+  envs = os.environ.get('TEST_FREECAD_ENVS', '')
+  s = envs.split()
+  if len(s):
+    return dict([e.split('=') for e in s])
+  return {}
 
 def setDefaultFreecadExecutable(path):
   '''
@@ -123,6 +129,7 @@ def freecadVersion():
     FreeCAD Version description
   '''
   p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), '-c'],
+                        env=dict(os.environ, **_GET_FREECAD_PROC_ENVS()),
                         stdout=subprocess.PIPE,
                         stderr=subprocess.DEVNULL,
                         stdin=subprocess.PIPE, 
@@ -267,7 +274,19 @@ class FreecadProperty:
           if m:=re.search(r'type must be (\S+)', str(e)):
             io.verb(f'found complaint that type is not matching: str(e), trying '
                     f'to adapt setter line...')
-            typeFunc = eval(m.group(1))
+            typeStr = m.group(1)
+            if 'int' in typeStr.lower():
+              typeFunc = int
+            elif 'float' in typeStr.lower():
+              typeFunc = float
+            elif 'complex' in typeStr.lower():
+              typeFunc = complex
+            elif 'str' in typeStr.lower():
+              typeFunc = str
+            else:
+              raise ValueError(f'dont know how to convert to type {typeStr!r}, please report an issue on '
+                               f'github (https://github.com/zaphB/freecad.optics_design_workbench/issues) '
+                               f'so this can be fixed')
             setterLine = f'{self._freecadShellRepr()}{lvalSuffix} = {repr(typeFunc(value))}'
             io.verb(f'updated setter line: {setterLine}')
             self._doc.execInFreecadShell(setterLine, errText=f'failed running python '
@@ -349,33 +368,38 @@ class FreecadProperty:
     return float(self.getStr())
   
   def getInt(self):
-    return float(self.getStr())
+    return int(self.getStr())
 
   def get(self):
     _str = self.getStr()
     try:
-      return eval(_str)
+      return parse.constantValue(_str)
     except Exception:
       if _str.endswith(' m'):
         try:
-          return 1e3*eval(_str[:-2])
+          return 1e3*parse.constantNumber(_str[:-2])
         except Exception:
           pass
       if _str.endswith(' mm'):
         try:
-          return eval(_str[:-3])
+          return parse.constantNumber(_str[:-3])
         except Exception:
           pass
       if _str.endswith(' um'):
         try:
-          return 1e-3*eval(_str[:-3])
+          return 1e-3*parse.constantNumber(_str[:-3])
         except Exception:
           pass
       if _str.endswith(' nm'):
         try:
-          return 1e-6*eval(_str[:-3])
+          return 1e-6*parse.constantNumber(_str[:-3])
         except Exception:
           pass
+    # remove leading and trailing ' or " if present:
+    for l in '"\'':
+      if _str.startswith(l) and _str.endswith(l):
+        _str = _str[1:-1]
+        break
     return _str
 
   # ----------------------------------
@@ -575,6 +599,7 @@ class FreecadDocument:
 
     # generate results folder path
     self._resultsPath = path[:-6]+'.OpticsDesign'
+    os.makedirs(self._resultsPath, exist_ok=True)
 
     # store whether progress should be shown interactively
     self.showProgress = showProgress
@@ -750,9 +775,7 @@ class FreecadDocument:
     list
       List of strings containing all object names or labels.
     '''
-    if internalNames:
-      return sorted(list(set(eval(self.execInFreecadShell(f'[o.Name for o in App.activeDocument().Objects]')))))
-    return sorted(list(set(eval(self.execInFreecadShell(f'[o.Label for o in App.activeDocument().Objects]')))))
+    response = parse.listOfStrings(self.execInFreecadShell(f'[o.{'Name' if internalNames else 'Label'} for o in App.activeDocument().Objects]'))
 
   def runSimulation(self, action='true', endIf=None, endIfMaxLoad=.5):
     '''
@@ -836,6 +859,8 @@ class FreecadDocument:
       possibleStacktrace = []
       try:
         lastSentRandom = 0
+        lastSentNewline = 0
+        lastResultFolderChange = time.time()
         lastEndIfCheck = time.time()
         endIfDuration = 0
         rn, l = None, None
@@ -846,9 +871,21 @@ class FreecadDocument:
             self.writeToFreecadShell(f'print("{rn}")')
             lastSentRandom = time.time()
 
+          # ask to print newline every 5 seconds 
+          if time.time()-lastSentNewline > 5:
+            self.writeToFreecadShell('')
+            lastSentNewline = time.time()
+
           # check for new folders and update simulation tracker folder if so
           _newFolder = newFolder()
           progressTracker.resultsFolder = _newFolder
+
+          # give up if not result folder appears or it does not change for a too long time
+          if time.time()-lastResultFolderChange > 20*60:
+            if _newFolder is not None:
+              lastResultFolderChange = _newFolder.latestChange()
+            if time.time()-lastResultFolderChange > 20*60:
+              raise RuntimeError(f'no trace of progress in the last 20min, giving up ({_newFolder=})')
 
           # check custom simulation-end criterion with ~50% dutycycle
           if ( endIf is not None 
@@ -931,7 +968,9 @@ class FreecadDocument:
 
     # launch child process - DONT load file here or it will be loaded without 
     #                        ViewProvider objects because GUI is not yet up
+    #print(dict(os.environ, **_GET_FREECAD_PROC_ENVS()))
     self._p = subprocess.Popen([_GET_FREECAD_EXECUTABLE(), '-c'],
+                                env=dict(os.environ, **_GET_FREECAD_PROC_ENVS()),
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE,
                                 stdin=subprocess.PIPE, 
@@ -966,7 +1005,8 @@ class FreecadDocument:
         if any([p.lower() in line.lower() for p in (
               'Updating geometry: Error build geometry',
               'Invalid solution from', )]):
-          io.warn(f'ignoring FreeCAD error output {repr(line.strip())}')
+          if line.strip():
+            io.warn(f'ignoring FreeCAD error output {repr(line.strip())}')
           line = ''
 
         # very-important-list: raise certain errors immediately, as they indicate a broken document state:
@@ -974,25 +1014,33 @@ class FreecadDocument:
              'BRep_API: command not done', 'Revolution: Revolve axis intersects the sketch',)]):
           raise RuntimeError(f'FreeCAD reported error: {line}')
 
+        # ignore non-error log output of workbench (which FreeCAD v1.1.3 seems to write to stderr)
+        if any([f'{m}:optics_design_workbench' in line.lower() for m in 'verb info warn']):
+          line = ''
+
+        # ignore if line is 'Requested non-existent style parameter token'-type of message type of 
+        # line which some FreeCAD versions before 1.1 spammed on startup and the bug may not be fully
+        # fixed yet as some reports of regression exist
+        if ('requested non-existent style parameter token' in line.lower()
+            or 'fontconfig warning:' in line.lower() ):
+          line = ''
+
+        # ignore errors for next second if delayedWarn was detected
+        if 'delayedWarn' in line or 'PLEASE READ (and report)' in line:
+          _ignoreErrorsUntil = time.time()+5
+        if _ignoreErrorsUntil > time.time():
+          if line.strip():
+            io.verb(f'ignoring FreeCAD error output: {repr(line)}')
+          line = ''
+
+        # if line has finite content -> pass to foreground process
         if line.strip():
-          # ignore if line is 'Requested non-existent style parameter token'-type of message type of 
-          # line which some FreeCAD versions before 1.1 spammed on startup and the bug may not be fully
-          # fixed yet as some reports of regression exist
-          if ('requested non-existent style parameter token' not in line.lower()
-              and 'Fontconfig warning:' not in line ):
+          # remove line ending characters and add to queue
+          while line.endswith('\r') or line.endswith('\n'):
+            line = line[:-1]
+          io.warn(f'received error line {repr(line)}', logOnly=True)
+          self._qe.put(line)
 
-            # ignore errors for next second if delayedWarn was detected
-            if 'delayedWarn' in line:
-              _ignoreErrorsUntil = time.time()+5
-
-            if _ignoreErrorsUntil > time.time():
-              io.info(line)
-            else:
-              # remove line ending characters and add to queue
-              while line.endswith('\r') or line.endswith('\n'):
-                line = line[:-1]
-              io.warn(f'received error line {repr(line)}', logOnly=True)
-              self._qe.put(line)
         time.sleep(1e-3)
       self._p.stdout.close()
     self._te = threading.Thread(target=readError)
@@ -1134,7 +1182,7 @@ class FreecadDocument:
       passing all lines as individual arguments.
     '''
     self._updateInteractionTime()
-    cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*2 # add plenty of newlines at the and to
+    cmdStr = '\r\n'+'\r\n'.join(data)+'\r\n'*3 # add plenty of newlines at the and to
                                                # make sure command is complete also 
                                                # if indented a few levels
     if _PRINT_FREECAD_COMMUNICATION and cmdStr.strip():
@@ -1179,7 +1227,7 @@ class FreecadDocument:
 
         # write lots of newlines all the time, this seems to be needed to make 
         # AppImage builds respond on time
-        self.writeToFreecadShell('\r\n')
+        self.writeToFreecadShell('')
 
         # warn of takes long
         if time.time()-lastWarned > 15:
@@ -1349,7 +1397,7 @@ class FreecadDocument:
 
       # write lots of newlines all the time, this seems to be needed to make 
       # AppImage builds respond on time
-      self.writeToFreecadShell('\r\n')
+      self.writeToFreecadShell('')
 
       # warn if takes long
       if time.time()-lastWarned > 15:
@@ -1640,6 +1688,21 @@ class RawFolder:
       result[f'<{folderContents.count(found)} {found} files>'] = None
     return result
 
+  def latestChange(self, _path=None):
+    '''
+    Return the latest mtime of any file within this RawFolder
+    '''
+    if _path is None:
+      _path = self._path
+    result = 0
+    folderContents = []
+    for d in os.scandir(_path):
+      if d.is_dir():
+        result = max([result, self.latestChange(_path=d.path)])
+      else:
+        result = max([result, os.stat(d.path()).st_mtime])
+    return result
+  
   def printTree(self, _node=None, _prefix='  '):
     '''
     Pretty print the directory structure of this RawFolder
